@@ -30,19 +30,19 @@ export const DEFAULT_OPTIMAL_WATER_DISTANCE_MAX = 150;
 
 export const DEFAULT_TOWN_SIZES: Record<TownSize, TownSizeConfig> = {
   hamlet: {
-    buildingCount: { min: 3, max: 5 },
-    radius: 25,
-    safeZoneRadius: 40,
+    buildingCount: { min: 4, max: 6 },
+    radius: 35,
+    safeZoneRadius: 50,
   },
   village: {
-    buildingCount: { min: 6, max: 10 },
-    radius: 40,
-    safeZoneRadius: 60,
+    buildingCount: { min: 7, max: 12 },
+    radius: 55,
+    safeZoneRadius: 80,
   },
   town: {
-    buildingCount: { min: 11, max: 16 },
-    radius: 60,
-    safeZoneRadius: 80,
+    buildingCount: { min: 12, max: 20 },
+    radius: 80,
+    safeZoneRadius: 120,
   },
 };
 

@@ -1,4 +1,22 @@
 import {
+  generateTree,
+  getPresetNames as getTreePresetNames,
+  disposeTreeMesh,
+  type TreeMeshResult,
+} from "@hyperscape/procgen";
+import {
+  generateFromPreset as generatePlant,
+  getPresetNames as getPlantPresetNames,
+  RenderQualityEnum,
+  type PlantPresetName,
+  type PlantGenerationResult,
+} from "@hyperscape/procgen/plant";
+import {
+  RockGenerator,
+  SHAPE_PRESETS as ROCK_SHAPE_PRESETS,
+  type GeneratedRock,
+} from "@hyperscape/procgen/rock";
+import {
   AlertTriangle,
   Building2,
   RefreshCw,
@@ -12,48 +30,18 @@ import {
   Route,
   Save,
   Upload,
-  Video,
-  User,
-  Compass,
   TreePine,
   Flower2,
   Gem,
   Globe,
 } from "lucide-react";
 import React, { useEffect, useRef, useState, useCallback } from "react";
-
-// Procgen imports for tree, rock, plant, and terrain editors
-import {
-  generateTree,
-  getPresetNames as getTreePresetNames,
-  disposeTreeMesh,
-  type TreeMeshResult,
-  TerrainGen,
-  BuildingGen,
-} from "@hyperscape/procgen";
-import {
-  RockGenerator,
-  SHAPE_PRESETS as ROCK_SHAPE_PRESETS,
-  ROCK_TYPE_PRESETS,
-  type GeneratedRock,
-} from "@hyperscape/procgen/rock";
-import {
-  generateFromPreset as generatePlant,
-  getPresetNames as getPlantPresetNames,
-  RenderQualityEnum,
-  type PlantPresetName,
-  type PlantGenerationResult,
-} from "@hyperscape/procgen/plant";
-import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
 
-// Type aliases for WebGPU-compatible NodeMaterials
-const TerrainNodeMat = MeshStandardNodeMaterial;
-const BasicNodeMat = MeshBasicNodeMaterial;
-
+import { WorldTab } from "@/components/WorldBuilder";
 import {
   Button,
   Card,
@@ -62,7 +50,15 @@ import {
   CardTitle,
 } from "@/components/common";
 import { notify } from "@/utils/notify";
-import { WorldTab } from "@/components/WorldBuilder";
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
+
+// Type aliases for WebGPU-compatible NodeMaterials
+const TerrainNodeMat = MeshStandardNodeMaterial;
+const BasicNodeMat = MeshBasicNodeMaterial;
 
 // API base URL for manifest loading
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
@@ -3631,7 +3627,7 @@ const AssetsLODPanel: React.FC = () => {
 
 export const WorldBuilderPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -3670,7 +3666,7 @@ export const WorldBuilderPage: React.FC = () => {
 
   // Camera mode state
   const [cameraMode, setCameraMode] = useState<CameraMode>("orbit");
-  const [cameraHeight, setCameraHeight] = useState<number>(1.7); // Player eye height
+  const cameraHeight = 1.7; // Player eye height (constant)
   const [moveSpeed, setMoveSpeed] = useState<number>(10); // m/s
 
   // Tree editor state
@@ -3717,7 +3713,7 @@ export const WorldBuilderPage: React.FC = () => {
   const terrainMeshRef = useRef<THREE.Mesh | null>(null);
   const waterMeshRef = useRef<THREE.Mesh | null>(null);
   const townMarkersRef = useRef<THREE.Group | null>(null);
-  const [terrainStats, setTerrainStats] = useState<{
+  const [, setTerrainStats] = useState<{
     tiles: number;
     vertices: number;
     time: number;
@@ -3812,22 +3808,14 @@ export const WorldBuilderPage: React.FC = () => {
     loadWorldConfig();
   }, []);
 
-  // Initialize Three.js scene
+  // Initialize Three.js scene with WebGPU
   useEffect(() => {
     if (!containerRef.current) return;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    let mounted = true;
+    const container = containerRef.current;
 
-    // Scene
+    // Scene (create before async renderer init)
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0d1117);
     sceneRef.current = scene;
@@ -3835,22 +3823,14 @@ export const WorldBuilderPage: React.FC = () => {
     // Camera
     const camera = new THREE.PerspectiveCamera(
       55,
-      containerRef.current.clientWidth / containerRef.current.clientHeight,
+      container.clientWidth / container.clientHeight,
       0.1,
       200,
     );
     camera.position.set(14, 12, 14);
     cameraRef.current = camera;
 
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.08;
-    controls.target.set(0, 2, 0);
-    controls.update();
-    controlsRef.current = controls;
-
-    // Lights
+    // Lights (can add before renderer)
     const ambient = new THREE.AmbientLight(0xffffff, 0.65);
     scene.add(ambient);
     const sun = new THREE.DirectionalLight(0xffffff, 0.95);
@@ -3881,52 +3861,82 @@ export const WorldBuilderPage: React.FC = () => {
     uberMat.roughness = 0.9;
     uberMaterialRef.current = uberMat;
 
-    // Animation loop with flythrough support
-    const animate = () => {
-      animationIdRef.current = requestAnimationFrame(animate);
+    // Async WebGPU renderer initialization
+    const initRenderer = async () => {
+      const renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
+      });
 
-      const now = performance.now();
-      const delta = (now - lastTimeRef.current) / 1000;
-      lastTimeRef.current = now;
-
-      // Handle flythrough movement
-      if (pointerLockRef.current) {
-        const state = flythroughStateRef.current;
-        const speed = state.sprint ? moveSpeed * 2.5 : moveSpeed;
-        const direction = new THREE.Vector3();
-
-        // Calculate movement direction
-        const forward = new THREE.Vector3(0, 0, -1);
-        const right = new THREE.Vector3(1, 0, 0);
-
-        forward.applyQuaternion(camera.quaternion);
-        right.applyQuaternion(camera.quaternion);
-
-        // Keep movement horizontal for player mode
-        forward.y = 0;
-        forward.normalize();
-        right.y = 0;
-        right.normalize();
-
-        if (state.moveForward) direction.add(forward);
-        if (state.moveBackward) direction.sub(forward);
-        if (state.moveRight) direction.add(right);
-        if (state.moveLeft) direction.sub(right);
-        if (state.moveUp) direction.y += 1;
-        if (state.moveDown) direction.y -= 1;
-
-        direction.normalize();
-
-        // Apply velocity with smooth damping
-        state.velocity.lerp(direction.multiplyScalar(speed), 0.1);
-        camera.position.add(state.velocity.clone().multiplyScalar(delta));
-      } else {
-        controls.update();
+      if (!mounted) {
+        renderer.dispose();
+        return;
       }
 
-      renderer.render(scene, camera);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Controls (need renderer.domElement)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.08;
+      controls.target.set(0, 2, 0);
+      controls.update();
+      controlsRef.current = controls;
+
+      // Animation loop with flythrough support
+      const animate = () => {
+        if (!mounted) return;
+        animationIdRef.current = requestAnimationFrame(animate);
+
+        const now = performance.now();
+        const delta = (now - lastTimeRef.current) / 1000;
+        lastTimeRef.current = now;
+
+        // Handle flythrough movement
+        if (pointerLockRef.current) {
+          const state = flythroughStateRef.current;
+          const speed = state.sprint ? moveSpeed * 2.5 : moveSpeed;
+          const direction = new THREE.Vector3();
+
+          // Calculate movement direction
+          const forward = new THREE.Vector3(0, 0, -1);
+          const right = new THREE.Vector3(1, 0, 0);
+
+          forward.applyQuaternion(camera.quaternion);
+          right.applyQuaternion(camera.quaternion);
+
+          // Keep movement horizontal for player mode
+          forward.y = 0;
+          forward.normalize();
+          right.y = 0;
+          right.normalize();
+
+          if (state.moveForward) direction.add(forward);
+          if (state.moveBackward) direction.sub(forward);
+          if (state.moveRight) direction.add(right);
+          if (state.moveLeft) direction.sub(right);
+          if (state.moveUp) direction.y += 1;
+          if (state.moveDown) direction.y -= 1;
+
+          direction.normalize();
+
+          // Apply velocity with smooth damping
+          state.velocity.lerp(direction.multiplyScalar(speed), 0.1);
+          camera.position.add(state.velocity.clone().multiplyScalar(delta));
+        } else {
+          controls.update();
+        }
+
+        renderer.render(scene, camera);
+      };
+      animate();
     };
-    animate();
+
+    initRenderer();
 
     // Keyboard controls for flythrough
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -4021,7 +4031,7 @@ export const WorldBuilderPage: React.FC = () => {
 
     const handlePointerLockChange = () => {
       pointerLockRef.current =
-        document.pointerLockElement === renderer.domElement;
+        document.pointerLockElement === rendererRef.current?.domElement;
       if (!pointerLockRef.current) {
         // Reset movement state when exiting pointer lock
         const state = flythroughStateRef.current;
@@ -4043,16 +4053,17 @@ export const WorldBuilderPage: React.FC = () => {
 
     // Handle resize
     const handleResize = () => {
-      if (!containerRef.current) return;
-      const width = containerRef.current.clientWidth;
-      const height = containerRef.current.clientHeight;
+      if (!container || !rendererRef.current) return;
+      const width = container.clientWidth;
+      const height = container.clientHeight;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      rendererRef.current.setSize(width, height);
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
@@ -4076,13 +4087,20 @@ export const WorldBuilderPage: React.FC = () => {
         uberMaterialRef.current = null;
       }
 
-      renderer.dispose();
-      if (
-        containerRef.current &&
-        renderer.domElement.parentNode === containerRef.current
-      ) {
-        containerRef.current.removeChild(renderer.domElement);
+      // Dispose WebGPU renderer
+      if (rendererRef.current) {
+        if (
+          container &&
+          rendererRef.current.domElement.parentNode === container
+        ) {
+          container.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+        rendererRef.current = null;
       }
+
+      // Dispose controls
+      controlsRef.current?.dispose();
     };
   }, [moveSpeed]);
 
@@ -4456,7 +4474,6 @@ export const WorldBuilderPage: React.FC = () => {
         const colors: number[] = [];
 
         const segments = previewSize * resolution;
-        const segmentSize = totalSize / segments;
 
         // Biome colors for visualization
         const biomeColors: Record<string, THREE.Color> = {
@@ -4670,26 +4687,6 @@ export const WorldBuilderPage: React.FC = () => {
     // Request pointer lock
     rendererRef.current.domElement.requestPointerLock();
   }, []);
-
-  // Exit flythrough mode
-  const exitFlythroughMode = useCallback(() => {
-    if (!controlsRef.current) return;
-
-    setCameraMode("orbit");
-    controlsRef.current.enabled = true;
-
-    // Exit pointer lock
-    document.exitPointerLock();
-  }, []);
-
-  // Toggle camera mode
-  const toggleCameraMode = useCallback(() => {
-    if (cameraMode === "orbit") {
-      enterFlythroughMode();
-    } else {
-      exitFlythroughMode();
-    }
-  }, [cameraMode, enterFlythroughMode, exitFlythroughMode]);
 
   // Set camera to player perspective height
   const setPlayerPerspective = useCallback(() => {

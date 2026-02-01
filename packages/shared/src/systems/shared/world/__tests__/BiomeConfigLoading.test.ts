@@ -64,7 +64,7 @@ describe("Biome Configuration Loading", () => {
     });
 
     it("tree distribution weights sum to valid total", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.trees?.enabled) continue;
 
         const treesConfig = biome.trees as BiomeTreeConfig;
@@ -90,7 +90,7 @@ describe("Biome Configuration Loading", () => {
         "tree_magic",
       ];
 
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.trees?.enabled) continue;
 
         const treesConfig = biome.trees as BiomeTreeConfig;
@@ -151,7 +151,7 @@ describe("Biome Configuration Loading", () => {
     });
 
     it("ore distribution weights sum to valid total", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.ores?.enabled) continue;
 
         const oresConfig = biome.ores as BiomeOreConfig;
@@ -175,7 +175,7 @@ describe("Biome Configuration Loading", () => {
         "ore_runite",
       ];
 
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.ores?.enabled) continue;
 
         const oresConfig = biome.ores as BiomeOreConfig;
@@ -222,19 +222,19 @@ describe("Biome Configuration Loading", () => {
 
   describe("Config completeness", () => {
     it("all biomes have trees config (even if disabled)", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         expect(biome.trees).toBeDefined();
       }
     });
 
     it("all biomes have ores config (even if disabled)", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         expect(biome.ores).toBeDefined();
       }
     });
 
     it("enabled tree configs have required fields", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.trees?.enabled) continue;
 
         const cfg = biome.trees as BiomeTreeConfig;
@@ -246,7 +246,7 @@ describe("Biome Configuration Loading", () => {
     });
 
     it("enabled ore configs have required fields", () => {
-      for (const [biomeId, biome] of Object.entries(BIOMES)) {
+      for (const [, biome] of Object.entries(BIOMES)) {
         if (!biome.ores?.enabled) continue;
 
         const cfg = biome.ores as BiomeOreConfig;

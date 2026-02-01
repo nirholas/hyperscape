@@ -16,7 +16,6 @@ import {
   MAX_BONES_PER_VERTEX,
 } from "./types.js";
 import {
-  HalfEdgeBundle,
   getHalfEdgeBundle,
   circulation,
   edgeCollapseIsValid,
@@ -356,7 +355,6 @@ export function tryCollapseEdge(
   }
 
   // Perform the collapse
-  const faceCount = mesh.faceCount;
 
   // CRITICAL: Validate placement positions before applying collapse
   // This catches any NaN/Infinity that might have slipped through cost computation
@@ -510,7 +508,7 @@ export function tryCollapseEdge(
         flaps.setEdgeForFaceCorner(f1, v1, e2);
 
         // Update e2's face reference
-        const [e2f0, e2f1] = flaps.getEdgeFaces(e2);
+        const [e2f0] = flaps.getEdgeFaces(e2);
         const opp2 = e2f0 === fi ? 0 : 1;
         flaps.setEdgeFace(e2, opp2 as 0 | 1, f1, v1);
 

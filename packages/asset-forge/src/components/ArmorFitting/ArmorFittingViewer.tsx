@@ -9,9 +9,8 @@ import React, {
   useState,
 } from "react";
 import * as THREE from "three";
-import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
-// import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter'
 import { GLTF, GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshBasicNodeMaterial, LineBasicNodeMaterial } from "three/webgpu";
 
 import {
   ArmorFittingService,
@@ -19,7 +18,6 @@ import {
   CollisionPoint,
 } from "../../services/fitting/ArmorFittingService";
 import { MeshFittingService } from "../../services/fitting/MeshFittingService";
-// import { WeightTransferService } from '../../services/fitting/WeightTransferService'
 import { notify } from "../../utils/notify";
 
 import { useArmorExport } from "@/hooks";

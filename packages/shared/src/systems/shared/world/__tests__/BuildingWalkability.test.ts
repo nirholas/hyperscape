@@ -10,7 +10,7 @@
  * Buildings must do the same for consistent walkability.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import type { FlatZone } from "../../../../types/world/terrain";
 
 // Building constants from procgen
@@ -750,7 +750,6 @@ describe("Flat Zone Circular Blend Calculation", () => {
     // But at (17.07, 17.07), circular distance is already 10 (blend=1)
     // So (15, 15) which is inside the rectangular corner should have lower blend
 
-    const cornerBlendRect = 1.0; // Rectangular max(5/10, 5/10) = 0.5 WRONG
     const cornerBlendCirc = calculateBlendFactor(15, 15, testZone);
     expect(cornerBlendCirc).toBeCloseTo(0.707, 2); // sqrt(50)/10
 

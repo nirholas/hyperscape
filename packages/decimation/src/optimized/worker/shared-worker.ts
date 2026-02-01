@@ -370,15 +370,15 @@ export async function decimateSharedMemory(
   const vertexCount = positions.length / 3;
   const strictness = options.strictness ?? 2;
 
-  let targetVertices: number;
+  let _targetVertices: number;
   if (options.targetVertices !== undefined) {
-    targetVertices = options.targetVertices;
+    _targetVertices = options.targetVertices;
   } else if (options.targetPercent !== undefined) {
-    targetVertices = Math.floor(vertexCount * (options.targetPercent / 100));
+    _targetVertices = Math.floor(vertexCount * (options.targetPercent / 100));
   } else {
-    targetVertices = Math.floor(vertexCount * 0.5);
+    _targetVertices = Math.floor(vertexCount * 0.5);
   }
-  targetVertices = Math.max(4, targetVertices);
+  _targetVertices = Math.max(4, _targetVertices);
 
   // Build edges (simplified - just unique vertex pairs)
   const edgeSet = new Map<string, [number, number]>();
@@ -421,8 +421,8 @@ export async function decimateSharedMemory(
   // Compute initial costs in parallel
   await pool.computeCostsParallel(edgeCount, strictness);
 
-  // Get results
-  const costs = pool.getCosts()!;
+  // Get results (costs are written to shared buffer)
+  pool.getCosts();
 
   // For now, just return original (full implementation would do the collapse loop)
   // The key optimization is the parallel cost computation

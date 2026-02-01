@@ -118,8 +118,6 @@ function calculateRangedMaxHit(
   style: RangedCombatStyle,
   prayerBonuses?: PrayerBonuses,
 ): number {
-  const styleBonus = RANGED_STYLE_BONUSES[style];
-
   // Prayer multiplier for ranged strength
   const prayerMultiplier = prayerBonuses?.rangedStrengthMultiplier ?? 1;
 

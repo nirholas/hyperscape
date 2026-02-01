@@ -32,10 +32,6 @@ import {
   createGPUVegetationMaterial,
   createImposterMaterial,
   type LODDistances,
-  type LODDistancesWithSq,
-  type DissolveMaterial,
-  type GPUVegetationMaterial,
-  type ImposterMaterial,
 } from "../GPUVegetation";
 
 /**
@@ -225,7 +221,6 @@ describe("GPUVegetation", () => {
       // When step returns 1, threshold = 2, which causes discard (1.0 < 2)
       // When step returns 0, threshold = 0, which keeps fragment (1.0 < 0 is false)
       const materialAlpha = 1.0;
-      const alphaTest = 0.5;
 
       // Test discard case
       const discardThreshold = 2.0;
@@ -249,7 +244,7 @@ describe("GPUVegetation", () => {
     });
 
     it("should have valid 4-tier distance ordering for each category", () => {
-      for (const [category, config] of Object.entries(LOD_DISTANCES)) {
+      for (const [, config] of Object.entries(LOD_DISTANCES)) {
         // LOD1 <= LOD2 <= Imposter < Fade (ascending distance order)
         // Note: LOD2 can equal imposter for small objects that skip LOD2
         expect(config.lod1Distance).toBeLessThanOrEqual(config.lod2Distance);
@@ -261,16 +256,16 @@ describe("GPUVegetation", () => {
     });
 
     it("should have lod2Distance defined for all categories", () => {
-      for (const [category, config] of Object.entries(LOD_DISTANCES)) {
+      for (const [, config] of Object.entries(LOD_DISTANCES)) {
         expect(config.lod2Distance).toBeDefined();
         expect(typeof config.lod2Distance).toBe("number");
         expect(config.lod2Distance).toBeGreaterThan(0);
       }
     });
 
-    it("should have meaningful LOD2 gap for large objects", () => {
-      // Large objects (tree, rock, building) should have a real LOD2 tier
-      const largeObjects = ["tree", "rock", "building", "fallen_tree"];
+    it("should have meaningful LOD2 gap for large objects (except buildings)", () => {
+      // Large objects should have a real LOD2 tier, except buildings which skip to impostor
+      const largeObjects = ["tree", "rock", "fallen_tree"]; // building excluded - skips LOD1/LOD2
       for (const category of largeObjects) {
         const config = LOD_DISTANCES[category];
         // LOD2 distance should be meaningfully different from LOD1
@@ -764,8 +759,6 @@ describe("GPUVegetation", () => {
     });
 
     it("should map 'fallen' to 'fallen_tree' category", () => {
-      const originalFallenTreeFade = LOD_DISTANCES.fallen_tree?.fadeDistance;
-
       applyLODSettings({
         distanceThresholds: {
           fallen: { lod1: 75, imposter: 160, fadeOut: 250 },
@@ -1114,13 +1107,14 @@ describe("GPUVegetation", () => {
       expect(imposterToFadeGap).toBeGreaterThan(20);
     });
 
-    it("should have 4 LOD zones for buildings", () => {
+    it("should have 2 effective LOD zones for buildings (full detail + impostor)", () => {
       const config = getLODDistances("building");
 
-      // Buildings should have all 4 LOD tiers defined
+      // Buildings skip intermediate LODs - go directly from full detail to impostor
+      // lod1 == lod2 == impostor (all at same distance)
       expect(config.lod1Distance).toBeGreaterThan(0);
-      expect(config.lod2Distance).toBeGreaterThan(config.lod1Distance);
-      expect(config.imposterDistance).toBeGreaterThan(config.lod2Distance);
+      expect(config.lod1Distance).toBe(config.imposterDistance);
+      expect(config.lod2Distance).toBe(config.imposterDistance);
       expect(config.fadeDistance).toBeGreaterThan(config.imposterDistance);
     });
 
@@ -1276,13 +1270,13 @@ describe("GPUVegetation", () => {
       expect(LOD_DISTANCES.building).toBeDefined();
     });
 
-    it("should have proper 4-tier distances for buildings", () => {
+    it("should have proper 2-tier distances for buildings (skip intermediate LODs)", () => {
       const config = getLODDistances("building");
 
-      // Buildings should have meaningful distances
+      // Buildings intentionally skip LOD1/LOD2 to go directly from full detail to impostor
       expect(config.lod1Distance).toBeGreaterThan(0);
-      expect(config.lod2Distance).toBeGreaterThan(config.lod1Distance);
-      expect(config.imposterDistance).toBeGreaterThan(config.lod2Distance);
+      expect(config.lod1Distance).toBe(config.imposterDistance);
+      expect(config.lod2Distance).toBe(config.imposterDistance);
       expect(config.fadeDistance).toBeGreaterThan(config.imposterDistance);
     });
 
@@ -1343,12 +1337,16 @@ describe("GPUVegetation", () => {
       expect(getBuildingLODLevel(distanceSq, config)).toBe(0);
     });
 
-    it("should use LOD1 for medium distance buildings", () => {
+    it("should skip LOD1 for buildings (direct to impostor)", () => {
+      // Buildings intentionally have lod1Distance == imposterDistance to skip intermediate LOD
       const config = getLODDistances("building");
-      const distance = (config.lod1Distance + config.imposterDistance) / 2;
-      const distanceSq = distance ** 2;
 
-      expect(getBuildingLODLevel(distanceSq, config)).toBe(1);
+      // Verify this is the expected "no LOD1 zone" configuration
+      expect(config.lod1Distance).toBe(config.imposterDistance);
+
+      // Distance just beyond lod1/imposter boundary goes directly to impostor (LOD2)
+      const distanceSq = (config.imposterDistance + 1) ** 2;
+      expect(getBuildingLODLevel(distanceSq, config)).toBe(2);
     });
 
     it("should use impostor for far buildings", () => {
@@ -1369,19 +1367,21 @@ describe("GPUVegetation", () => {
     it("should handle LOD transitions at exact boundaries", () => {
       const config = getLODDistances("building");
 
-      // At exactly lod1Distance: still LOD0 (using < not <=)
+      // Buildings skip LOD1, so lod1Distance == imposterDistance
+      // At exactly the threshold: still LOD0 (using > not >=)
       expect(getBuildingLODLevel(config.lod1DistanceSq, config)).toBe(0);
+      expect(getBuildingLODLevel(config.imposterDistanceSq, config)).toBe(0);
 
-      // Just beyond lod1Distance: LOD1
-      expect(getBuildingLODLevel(config.lod1DistanceSq + 1, config)).toBe(1);
-
-      // At exactly imposterDistance: still LOD1
-      expect(getBuildingLODLevel(config.imposterDistanceSq, config)).toBe(1);
-
-      // Just beyond imposterDistance: Impostor
+      // Just beyond the threshold: directly to Impostor (LOD2), skipping LOD1
       expect(getBuildingLODLevel(config.imposterDistanceSq + 1, config)).toBe(
         2,
       );
+
+      // At exactly fadeDistance: still Impostor
+      expect(getBuildingLODLevel(config.fadeDistanceSq, config)).toBe(2);
+
+      // Just beyond fadeDistance: Culled
+      expect(getBuildingLODLevel(config.fadeDistanceSq + 1, config)).toBe(3);
     });
 
     it("should have sufficient LOD0 zone for building interactivity", () => {

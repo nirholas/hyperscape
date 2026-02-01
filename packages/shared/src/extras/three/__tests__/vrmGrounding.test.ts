@@ -16,7 +16,7 @@
  * - For death animations, body must be near ground (lying down)
  */
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import * as THREE from "three";
 
 // Mock bone structure for testing

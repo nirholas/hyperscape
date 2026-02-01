@@ -1,0 +1,1 @@
+This app is made with three.js and WebGPU, using three shader language (TSL). DO NOT USE WEBGL. DO NOT BE LAZY AND FALL BACK. Always focus on making working WebGL solutions with TSL. Thoroughly research instead of guessing.

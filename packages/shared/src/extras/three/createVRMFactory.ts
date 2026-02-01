@@ -317,6 +317,7 @@ export function createVRMFactory(
     // Normalized bones are cloned with the scene, so each instance has its own
     // CRITICAL: Use the CLONED humanoid (_tvrm?.humanoid) for bone lookups, not the original
     const clonedHumanoid = _tvrm?.humanoid;
+
     const getBoneName = (vrmBoneName: string): string | undefined => {
       // Guard against undefined/null bone names
       if (!vrmBoneName || !clonedHumanoid) return undefined;
@@ -608,18 +609,9 @@ export function createVRMFactory(
               version,
               getBoneName,
             });
-            // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
-            // This happens when animations have tracks for bones the VRM model doesn't have (e.g., finger bones)
-            const validTracks = clip.tracks.filter((track) => {
-              const nodeName = track.name.split(".")[0];
-              return vrm.scene.getObjectByName(nodeName) !== null;
-            });
-            const validClip = new THREE.AnimationClip(
-              clip.name,
-              clip.duration,
-              validTracks,
-            );
-            const action = mixer.clipAction(validClip);
+            // NOTE: Main branch does NOT filter tracks - the mixer handles missing bones gracefully
+            // Track filtering was causing ALL tracks to be removed for some VRMs
+            const action = mixer.clipAction(clip);
             action.timeScale = speed;
             newEmote.action = action;
             newEmote.loading = false;
@@ -684,17 +676,8 @@ export function createVRMFactory(
             version,
             getBoneName,
           });
-          // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
-          const validTracks = clip.tracks.filter((track) => {
-            const nodeName = track.name.split(".")[0];
-            return vrm.scene.getObjectByName(nodeName) !== null;
-          });
-          const validClip = new THREE.AnimationClip(
-            clip.name,
-            clip.duration,
-            validTracks,
-          );
-          const action = mixer.clipAction(validClip);
+          // NOTE: Main branch does NOT filter tracks - the mixer handles missing bones gracefully
+          const action = mixer.clipAction(clip);
           action.timeScale = speed;
           newEmote.action = action;
           newEmote.loading = false;
@@ -793,17 +776,8 @@ export function createVRMFactory(
               version,
               getBoneName,
             });
-            // Filter out tracks targeting non-existent nodes to prevent THREE.js warnings
-            const validTracks = clip.tracks.filter((track) => {
-              const nodeName = track.name.split(".")[0];
-              return vrm.scene.getObjectByName(nodeName) !== null;
-            });
-            const validClip = new THREE.AnimationClip(
-              clip.name,
-              clip.duration,
-              validTracks,
-            );
-            const action = mixer.clipAction(validClip);
+            // NOTE: Main branch does NOT filter tracks - the mixer handles missing bones gracefully
+            const action = mixer.clipAction(clip);
             action.timeScale = speed;
             newEmote.action = action;
             newEmote.loading = false;

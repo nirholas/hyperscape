@@ -1,4 +1,14 @@
 import { describe, it, expect } from "vitest";
+
+import type {
+  WorldData,
+  WorldFoundation,
+  GeneratedTown,
+  GeneratedBiome,
+  GeneratedBuilding,
+  GeneratedRoad,
+  WorldPosition,
+} from "../../src/components/WorldBuilder/types";
 import {
   serializeWorld,
   deserializeWorld,
@@ -20,15 +30,6 @@ import {
   exportToGameManifest,
   validateGameExport,
 } from "../../src/components/WorldBuilder/utils/worldPersistence";
-import type {
-  WorldData,
-  WorldFoundation,
-  GeneratedTown,
-  GeneratedBiome,
-  GeneratedBuilding,
-  GeneratedRoad,
-  WorldPosition,
-} from "../../src/components/WorldBuilder/types";
 
 // Test data factories
 function createMockPosition(x = 0, y = 0, z = 0): WorldPosition {
@@ -567,7 +568,6 @@ describe("Wilderness Zone", () => {
       const tileSize = 10;
       const worldSizeMeters = worldSize * tileSize; // 1000
       const center = worldSizeMeters / 2; // 500
-      const threshold = worldSizeMeters * 0.3; // 300
 
       // North - wilderness at high Z values (z > threshold)
       const northWild = generateWilderness(worldSize, tileSize, "north", 0.3);

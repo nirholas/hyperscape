@@ -6,8 +6,7 @@
  * https://codesandbox.io/p/sandbox/prototypes-pygsc7
  */
 
-import * as THREE from "three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
+import * as THREE from "three/webgpu";
 import type {
   OctahedronTypeValue,
   OctahedronMeshData,
@@ -304,7 +303,7 @@ export function buildOctahedronMesh(
   });
 
   // Create meshes
-  const wireframeMat = new MeshBasicNodeMaterial();
+  const wireframeMat = new THREE.MeshBasicMaterial();
   wireframeMat.color = new THREE.Color(0xffffff);
   wireframeMat.wireframe = true;
   const wireframeMesh = new THREE.Mesh(geometry, wireframeMat);
@@ -386,4 +385,104 @@ export function getViewDirection(
   }
 
   return direction;
+}
+
+/**
+ * Convert a direction vector to (u, v) coordinates - INVERSE of getViewDirection.
+ * This is an O(1) operation - NO RAYCASTING NEEDED!
+ *
+ * @param direction - Normalized direction vector
+ * @param octType - The octahedron mapping type
+ * @returns Object with u, v coordinates (0-1)
+ */
+export function directionToUV(
+  direction: THREE.Vector3,
+  octType: OctahedronTypeValue,
+): { u: number; v: number } {
+  // Normalize just in case
+  const len = Math.sqrt(
+    direction.x * direction.x +
+      direction.y * direction.y +
+      direction.z * direction.z,
+  );
+  const nx = direction.x / len;
+  const ny = direction.y / len;
+  const nz = direction.z / len;
+
+  if (octType === OctahedronType.HEMI) {
+    // HEMI mapping: upper hemisphere only
+    // Forward: x = u - v, z = -1 + u + v
+    // Inverse: u = (1 + z + x) / 2, v = (1 + z - x) / 2
+    const u = Math.max(0, Math.min(1, (1 + nz + nx) / 2));
+    const v = Math.max(0, Math.min(1, (1 + nz - nx) / 2));
+    return { u, v };
+  } else {
+    // Full sphere octahedral mapping
+    let px = nx;
+    let pz = nz;
+
+    // If below horizon (y < 0), apply octahedral wrapping
+    if (ny < 0) {
+      px = Math.sign(nx) * (1.0 - Math.abs(nz));
+      pz = Math.sign(nz) * (1.0 - Math.abs(nx));
+    }
+
+    // Map from [-1, 1] to [0, 1]
+    const u = Math.max(0, Math.min(1, px * 0.5 + 0.5));
+    const v = Math.max(0, Math.min(1, pz * 0.5 + 0.5));
+    return { u, v };
+  }
+}
+
+/**
+ * Get the grid cell and interpolation weights for a direction.
+ * This is the O(1) replacement for raycasting in the update loop!
+ *
+ * @param direction - Normalized view direction
+ * @param gridSizeX - Number of grid cells in X
+ * @param gridSizeY - Number of grid cells in Y
+ * @param octType - The octahedron mapping type
+ * @returns Object with face indices and barycentric weights for blending
+ */
+export function directionToGridCell(
+  direction: THREE.Vector3,
+  gridSizeX: number,
+  gridSizeY: number,
+  octType: OctahedronTypeValue,
+): { faceIndices: THREE.Vector3; faceWeights: THREE.Vector3 } {
+  const { u, v } = directionToUV(direction, octType);
+
+  // Convert UV to grid coordinates
+  // Grid cells are centered, so cell centers are at (i + 0.5) / gridSize
+  const fx = u * gridSizeX - 0.5;
+  const fy = v * gridSizeY - 0.5;
+
+  // Get the four surrounding cell indices
+  const x0 = Math.max(0, Math.floor(fx));
+  const y0 = Math.max(0, Math.floor(fy));
+  const x1 = Math.min(gridSizeX - 1, x0 + 1);
+  const y1 = Math.min(gridSizeY - 1, y0 + 1);
+
+  // Bilinear interpolation weights
+  const wx = fx - x0;
+  const wy = fy - y0;
+
+  // Convert to flat indices (matching octPoints layout: row-major)
+  // For the three closest cells (triangular blend)
+  const idx00 = y0 * gridSizeX + x0;
+  const idx10 = y0 * gridSizeX + x1;
+  const idx01 = y1 * gridSizeX + x0;
+
+  // Use barycentric-style weights for 3-cell blend
+  // This approximates the raycast triangle hit
+  const w0 = (1 - wx) * (1 - wy); // Bottom-left
+  const w1 = wx * (1 - wy); // Bottom-right
+  const w2 = (1 - wx) * wy; // Top-left
+
+  // Normalize weights
+  const sum = w0 + w1 + w2;
+  const faceWeights = new THREE.Vector3(w0 / sum, w1 / sum, w2 / sum);
+  const faceIndices = new THREE.Vector3(idx00, idx10, idx01);
+
+  return { faceIndices, faceWeights };
 }

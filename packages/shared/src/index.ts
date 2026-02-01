@@ -386,6 +386,21 @@ export { Entities } from "./systems/shared";
 export { Physics } from "./systems/shared";
 export { Particles } from "./systems/shared";
 export { LODs } from "./systems/shared";
+
+// Atlased Impostor System - optimized impostor rendering for diverse forests
+export {
+  AtlasedImpostorManager,
+  ATLASED_IMPOSTOR_CONFIG,
+  AtlasedImpostorDebug,
+  runAtlasedImpostorTests,
+  visualTest as atlasedImpostorVisualTest,
+  downloadAllSlots as atlasedImpostorDownloadSlots,
+} from "./systems/shared/rendering";
+export {
+  AtlasedTreeImpostors,
+  ATLASED_TREE_CONFIG,
+} from "./systems/shared/world";
+
 export { ClientInterface } from "./systems/client/ClientInterface"; // UI state, preferences, stats display
 export { ClientLoader } from "./systems/client/ClientLoader";
 // ServerNetwork removed from main exports - import directly from ./systems/server when needed on server side

@@ -12,7 +12,24 @@
  * - GLB export
  */
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import {
+  generateTree,
+  getPresetNames,
+  getPreset,
+  disposeTreeMesh,
+  createTreeParams,
+  TreeImpostor,
+  TreeShape,
+  LeafShape,
+  createInstancedLeafMaterialTSL,
+  TREE_LOD_PRESETS,
+  type TreeMeshResult,
+  type TreeParams,
+  type TreeShapeType,
+  type LeafShapeType,
+  type GeometryOptions,
+  type CompatibleRenderer,
+} from "@hyperscape/procgen";
 import {
   TreePine,
   RefreshCw,
@@ -30,37 +47,22 @@ import {
   Image,
   Sliders,
 } from "lucide-react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
+
+import {
+  DEFAULT_CATEGORY_LOD_SETTINGS,
+  type CategoryLODDefaults,
+} from "@/types/LODBundle";
+import type { TreePreset } from "@/types/ProcgenPresets";
+import { notify } from "@/utils/notify";
 import {
   THREE,
   createWebGPURenderer,
   type AssetForgeRenderer,
 } from "@/utils/webgpu-renderer";
-import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
-import {
-  generateTree,
-  getPresetNames,
-  getPreset,
-  disposeTreeMesh,
-  createTreeParams,
-  TreeImpostor,
-  TreeShape,
-  LeafShape,
-  createInstancedLeafMaterialWebGPU,
-  TREE_LOD_PRESETS,
-  type TreeMeshResult,
-  type TreeParams,
-  type TreeShapeType,
-  type LeafShapeType,
-  type GeometryOptions,
-} from "@hyperscape/procgen";
-import { notify } from "@/utils/notify";
-import type { TreePreset } from "@/types/ProcgenPresets";
-import {
-  DEFAULT_CATEGORY_LOD_SETTINGS,
-  type CategoryLODDefaults,
-} from "@/types/LODBundle";
 
 // API base
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
@@ -107,6 +109,7 @@ type LODData = {
 type ImpostorData = {
   impostor: TreeImpostor | null;
   atlasTexture: THREE.Texture | null;
+  normalAtlasTexture: THREE.Texture | null;
   mesh: THREE.Mesh | null;
 };
 
@@ -144,9 +147,17 @@ export const TreeGenPage: React.FC = () => {
     time: number;
   } | null>(null);
 
-  // Advanced tree parameters (override preset)
-  const [useAdvancedParams, setUseAdvancedParams] = useState(false);
+  // Tree parameter overrides (applied to preset)
   const [advancedParams, setAdvancedParams] = useState<Partial<TreeParams>>({});
+
+  // Geometry options (for optimization) - defaults are min visually acceptable for LOD0
+  const [geometryOptions, setGeometryOptions] = useState<GeometryOptions>({
+    radialSegments: 5,
+    branchCaps: false,
+    maxLeaves: 25000,
+    maxStems: 1000,
+    maxBranchDepth: undefined,
+  });
 
   // Panel collapse state
   const [expandedPanels, setExpandedPanels] = useState<{
@@ -154,6 +165,7 @@ export const TreeGenPage: React.FC = () => {
     trunk: boolean;
     branches: boolean;
     leaves: boolean;
+    geometry: boolean;
     lod: boolean;
     impostor: boolean;
   }>({
@@ -161,6 +173,7 @@ export const TreeGenPage: React.FC = () => {
     trunk: false,
     branches: false,
     leaves: false,
+    geometry: false,
     lod: false,
     impostor: false,
   });
@@ -199,6 +212,7 @@ export const TreeGenPage: React.FC = () => {
   const [impostorData, setImpostorData] = useState<ImpostorData>({
     impostor: null,
     atlasTexture: null,
+    normalAtlasTexture: null,
     mesh: null,
   });
   const [impostorSettings, setImpostorSettings] = useState({
@@ -559,6 +573,10 @@ export const TreeGenPage: React.FC = () => {
     };
     window.addEventListener("resize", handleResize);
 
+    // Capture ref values at effect creation time for cleanup
+    const lodMeshes = lodMeshRefs.current;
+    const container = containerRef.current;
+
     return () => {
       mounted = false;
       window.removeEventListener("resize", handleResize);
@@ -576,21 +594,21 @@ export const TreeGenPage: React.FC = () => {
       batchTreesRef.current = [];
 
       // Clean up LOD meshes
-      if (lodMeshRefs.current.lod0) {
-        scene.remove(lodMeshRefs.current.lod0);
-        lodMeshRefs.current.lod0 = null;
+      if (lodMeshes.lod0) {
+        scene.remove(lodMeshes.lod0);
+        lodMeshes.lod0 = null;
       }
-      if (lodMeshRefs.current.lod1) {
-        scene.remove(lodMeshRefs.current.lod1);
-        lodMeshRefs.current.lod1 = null;
+      if (lodMeshes.lod1) {
+        scene.remove(lodMeshes.lod1);
+        lodMeshes.lod1 = null;
       }
-      if (lodMeshRefs.current.lod2) {
-        scene.remove(lodMeshRefs.current.lod2);
-        lodMeshRefs.current.lod2 = null;
+      if (lodMeshes.lod2) {
+        scene.remove(lodMeshes.lod2);
+        lodMeshes.lod2 = null;
       }
-      if (lodMeshRefs.current.impostor) {
-        scene.remove(lodMeshRefs.current.impostor);
-        lodMeshRefs.current.impostor = null;
+      if (lodMeshes.impostor) {
+        scene.remove(lodMeshes.impostor);
+        lodMeshes.impostor = null;
       }
       if (impostorInstanceRef.current) {
         impostorInstanceRef.current.dispose();
@@ -610,11 +628,8 @@ export const TreeGenPage: React.FC = () => {
         rendererRef.current = null;
       }
 
-      if (
-        containerRef.current &&
-        renderer.domElement.parentNode === containerRef.current
-      ) {
-        containerRef.current.removeChild(renderer.domElement);
+      if (container && renderer.domElement.parentNode === container) {
+        container.removeChild(renderer.domElement);
       }
     };
   }, []);
@@ -661,74 +676,13 @@ export const TreeGenPage: React.FC = () => {
       lod1: { mesh: null, vertices: 0, triangles: 0 },
       lod2: { mesh: null, vertices: 0, triangles: 0 },
     });
-    setImpostorData({ impostor: null, atlasTexture: null, mesh: null });
+    setImpostorData({
+      impostor: null,
+      atlasTexture: null,
+      normalAtlasTexture: null,
+      mesh: null,
+    });
   }, []);
-
-  // Count actual vertices and triangles in a group
-  const countGeometryStats = useCallback(
-    (group: THREE.Group): { vertices: number; triangles: number } => {
-      let totalVertices = 0;
-      let totalTriangles = 0;
-
-      group.traverse((obj) => {
-        if (obj instanceof THREE.Mesh && obj.geometry) {
-          const geo = obj.geometry as THREE.BufferGeometry;
-
-          const posAttr = geo.getAttribute("position");
-          if (posAttr) {
-            totalVertices += posAttr.count;
-          }
-
-          const indexAttr = geo.getIndex();
-          if (indexAttr) {
-            totalTriangles += Math.floor(indexAttr.count / 3);
-          } else if (posAttr) {
-            totalTriangles += Math.floor(posAttr.count / 3);
-          }
-        }
-      });
-
-      return { vertices: totalVertices, triangles: totalTriangles };
-    },
-    [],
-  );
-
-  // Decimate geometry (simple vertex reduction - currently just clones with target stats)
-  // TODO: Implement actual decimation algorithm (meshopt, simplify-js, etc.)
-  const decimateGeometry = useCallback(
-    (
-      sourceGroup: THREE.Group,
-      targetPercent: number,
-    ): {
-      group: THREE.Group;
-      vertices: number;
-      triangles: number;
-      targetVertices: number;
-      targetTriangles: number;
-    } => {
-      const clonedGroup = sourceGroup.clone(true);
-
-      // Count actual vertices in the cloned geometry
-      const actualStats = countGeometryStats(clonedGroup);
-
-      // Calculate target (what we want after decimation)
-      const targetVertices = Math.floor(
-        actualStats.vertices * (targetPercent / 100),
-      );
-      const targetTriangles = Math.floor(
-        actualStats.triangles * (targetPercent / 100),
-      );
-
-      return {
-        group: clonedGroup,
-        vertices: actualStats.vertices,
-        triangles: actualStats.triangles,
-        targetVertices,
-        targetTriangles,
-      };
-    },
-    [countGeometryStats],
-  );
 
   // Generate LOD variants by REGENERATING with different geometry options
   // This is the correct approach - not decimation - for procedural trees
@@ -750,12 +704,14 @@ export const TreeGenPage: React.FC = () => {
 
       // Get current tree params for regeneration
       const basePresetParams = getPreset(preset);
-      const treeParams = useAdvancedParams
-        ? createTreeParams({ ...basePresetParams, ...advancedParams })
-        : basePresetParams;
+      // Merge preset with any parameter overrides
+      const treeParams = createTreeParams({
+        ...basePresetParams,
+        ...advancedParams,
+      });
 
       // Create shared leaf material for all LODs
-      const lodLeafMaterial = createInstancedLeafMaterialWebGPU({
+      const lodLeafMaterial = createInstancedLeafMaterialTSL({
         color: new THREE.Color(0x3d7a3d),
         colorVariation: 0.15,
         alphaTest: 0.5,
@@ -821,8 +777,10 @@ export const TreeGenPage: React.FC = () => {
       console.log("[TreeGenPage] Baking impostor...");
       // Cast renderer for impostor baking (WebGPU renderer is compatible)
       // IMPORTANT: bake() is async for WebGPU - must await before createInstance()
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await treeImpostor.bake(lod0Result, rendererRef.current as any);
+      await treeImpostor.bake(
+        lod0Result,
+        rendererRef.current as CompatibleRenderer,
+      );
       impostorRef.current = treeImpostor;
       console.log(
         "[TreeGenPage] Bake complete, bakeResult:",
@@ -833,29 +791,76 @@ export const TreeGenPage: React.FC = () => {
       console.log("[TreeGenPage] Creating impostor instance...");
       const impostorInstance = treeImpostor.createInstance(1, { useTSL: true });
       console.log("[TreeGenPage] Instance created:", impostorInstance.mesh);
+
+      // Get tree dimensions for proper positioning
+      const treeDimensions = treeImpostor.getTreeDimensions();
+      const treeSize = Math.max(treeDimensions.width, treeDimensions.height);
+      console.log(
+        "[TreeGenPage] Tree dimensions:",
+        treeDimensions,
+        "treeSize:",
+        treeSize,
+      );
+
+      // Position impostor at ground level (y=0 for bottom of billboard)
+      // The billboard is treeSize × treeSize, so center should be at y = treeSize/2
       impostorInstance.mesh.position.set(
         spacing * 1.5,
-        impostorInstance.mesh.position.y,
+        treeSize / 2, // Center of billboard - bottom at y=0
         0,
       );
       sceneRef.current.add(impostorInstance.mesh);
       lodMeshRefs.current.impostor = impostorInstance.mesh;
       impostorInstanceRef.current = impostorInstance; // Store for update loop
-      console.log("[TreeGenPage] Impostor added to scene");
+      console.log(
+        "[TreeGenPage] Impostor added at position:",
+        impostorInstance.mesh.position,
+      );
 
-      // Add debug atlas plane to visualize the baked texture (positioned above the impostor)
+      // Configure impostor lighting
+      if (impostorInstance.updateLighting) {
+        impostorInstance.updateLighting({
+          lightDirection: new THREE.Vector3(0.5, 0.8, 0.3).normalize(),
+          lightColor: new THREE.Vector3(1.0, 0.98, 0.95),
+          lightIntensity: 1.2,
+          ambientColor: new THREE.Vector3(0.5, 0.55, 0.6),
+          ambientIntensity: 0.5,
+        });
+        console.log("[TreeGenPage] Configured impostor lighting");
+      }
+
+      // Add debug atlas planes to visualize both color and normal atlases
       const atlasTexture = treeImpostor.getAtlasTexture();
+      const bakeResultLocal = treeImpostor.getBakeResult();
+      const normalAtlasTexture = bakeResultLocal?.normalAtlasTexture;
+
+      // Color atlas debug plane (left)
       if (atlasTexture) {
         const debugPlaneMat = new MeshBasicNodeMaterial();
         debugPlaneMat.map = atlasTexture;
         debugPlaneMat.side = THREE.DoubleSide;
         debugPlaneMat.transparent = true;
-        const debugPlaneGeo = new THREE.PlaneGeometry(15, 15);
+        const debugPlaneGeo = new THREE.PlaneGeometry(12, 12);
         const debugPlane = new THREE.Mesh(debugPlaneGeo, debugPlaneMat);
-        debugPlane.position.set(spacing * 1.5, 25, 0); // Above the impostor
+        debugPlane.position.set(spacing * 1.5 - 8, 20, 0); // Left of center
         debugPlane.name = "atlasDebugPlane";
         sceneRef.current.add(debugPlane);
-        console.log("[TreeGenPage] Added atlas debug plane at y=25");
+        console.log("[TreeGenPage] Added color atlas debug plane");
+      }
+
+      // Normal atlas debug plane (right)
+      if (normalAtlasTexture) {
+        const normalPlaneMat = new MeshBasicNodeMaterial();
+        normalPlaneMat.map = normalAtlasTexture;
+        normalPlaneMat.side = THREE.DoubleSide;
+        const normalPlaneGeo = new THREE.PlaneGeometry(12, 12);
+        const normalPlane = new THREE.Mesh(normalPlaneGeo, normalPlaneMat);
+        normalPlane.position.set(spacing * 1.5 + 8, 20, 0); // Right of center
+        normalPlane.name = "normalAtlasDebugPlane";
+        sceneRef.current.add(normalPlane);
+        console.log("[TreeGenPage] Added normal atlas debug plane");
+      } else {
+        console.warn("[TreeGenPage] No normal atlas texture - check bake mode");
       }
 
       // Update LOD data state with ACTUAL vertex counts from regenerated LODs
@@ -885,6 +890,7 @@ export const TreeGenPage: React.FC = () => {
       setImpostorData({
         impostor: treeImpostor,
         atlasTexture: treeImpostor.getAtlasTexture(),
+        normalAtlasTexture: bakeResultLocal?.normalAtlasTexture ?? null,
         mesh: impostorInstance.mesh,
       });
 
@@ -903,14 +909,7 @@ export const TreeGenPage: React.FC = () => {
     }
 
     setIsGenerating(false);
-  }, [
-    clearLODPreviews,
-    preset,
-    seed,
-    useAdvancedParams,
-    advancedParams,
-    impostorSettings,
-  ]);
+  }, [clearLODPreviews, preset, seed, advancedParams, impostorSettings]);
 
   // Generate single tree
   const generateTreeMesh = useCallback(() => {
@@ -950,13 +949,15 @@ export const TreeGenPage: React.FC = () => {
       }
 
       // Merge with advanced params if enabled
-      const treeParams = useAdvancedParams
-        ? createTreeParams({ ...basePresetParams, ...advancedParams })
-        : basePresetParams;
+      // Merge preset with any parameter overrides
+      const treeParams = createTreeParams({
+        ...basePresetParams,
+        ...advancedParams,
+      });
 
       // Generate tree with params
       // Use TSL (WebGPU-compatible) instanced leaf material for full performance
-      const webGPULeafMaterial = createInstancedLeafMaterialWebGPU({
+      const webGPULeafMaterial = createInstancedLeafMaterialTSL({
         color: new THREE.Color(0x3d7a3d),
         colorVariation: 0.15,
         alphaTest: 0.5,
@@ -965,7 +966,7 @@ export const TreeGenPage: React.FC = () => {
       });
       const result = generateTree(treeParams, {
         generation: { seed },
-        geometry: { radialSegments: 8 },
+        geometry: geometryOptions,
         mesh: {
           useInstancedLeaves: true,
           leafMaterial: webGPULeafMaterial,
@@ -1020,8 +1021,8 @@ export const TreeGenPage: React.FC = () => {
     showLeaves,
     batchMode,
     clearBatchResults,
-    useAdvancedParams,
     advancedParams,
+    geometryOptions,
     showLODPreview,
     clearLODPreviews,
   ]);
@@ -1054,7 +1055,7 @@ export const TreeGenPage: React.FC = () => {
       const spacing = 15; // Space between trees
 
       // Create shared TSL material for batch (WebGPU-compatible instanced rendering)
-      const batchLeafMaterial = createInstancedLeafMaterialWebGPU({
+      const batchLeafMaterial = createInstancedLeafMaterialTSL({
         color: new THREE.Color(0x3d7a3d),
         colorVariation: 0.15,
         alphaTest: 0.5,
@@ -1068,7 +1069,7 @@ export const TreeGenPage: React.FC = () => {
         // Use TSL instanced leaf material for WebGPU
         const result = generateTree(preset, {
           generation: { seed: batchSeed },
-          geometry: { radialSegments: 8 },
+          geometry: geometryOptions,
           mesh: {
             useInstancedLeaves: true,
             leafMaterial: batchLeafMaterial,
@@ -1139,7 +1140,14 @@ export const TreeGenPage: React.FC = () => {
     }
 
     setIsGenerating(false);
-  }, [preset, seed, showLeaves, batchCount, clearBatchResults]);
+  }, [
+    preset,
+    seed,
+    showLeaves,
+    batchCount,
+    clearBatchResults,
+    geometryOptions,
+  ]);
 
   // Select a tree from batch
   const selectBatchTree = useCallback(
@@ -1331,15 +1339,6 @@ export const TreeGenPage: React.FC = () => {
                   />
                   Show Leaves
                 </label>
-                <label className="flex items-center gap-2 text-sm text-text-primary cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={useAdvancedParams}
-                    onChange={(e) => setUseAdvancedParams(e.target.checked)}
-                    className="rounded"
-                  />
-                  Advanced
-                </label>
               </div>
 
               {/* Batch Count */}
@@ -1374,210 +1373,405 @@ export const TreeGenPage: React.FC = () => {
           </div>
 
           {/* Tree Shape Settings */}
-          {useAdvancedParams && (
-            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
-              <button
-                onClick={() => togglePanel("shape")}
-                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
-              >
-                <span className="font-semibold flex items-center gap-2">
-                  <TreePine size={16} />
-                  Tree Shape
-                </span>
-                {expandedPanels.shape ? (
-                  <ChevronDown size={18} />
-                ) : (
-                  <ChevronRight size={18} />
-                )}
-              </button>
-              {expandedPanels.shape && (
-                <div className="px-4 pb-4 space-y-3">
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("shape")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <TreePine size={16} />
+                Tree Shape
+              </span>
+              {expandedPanels.shape ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.shape && (
+              <div className="px-4 pb-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Shape Type
+                  </label>
+                  <select
+                    value={
+                      advancedParams.shape ?? currentPresetParams?.shape ?? 0
+                    }
+                    onChange={(e) =>
+                      updateAdvancedParam(
+                        "shape",
+                        parseInt(e.target.value) as TreeShapeType,
+                      )
+                    }
+                    className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
+                  >
+                    {TREE_SHAPE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
                   <div>
                     <label className="block text-xs text-text-secondary mb-1">
-                      Shape Type
+                      Scale (
+                      {(
+                        advancedParams.gScale ??
+                        currentPresetParams?.gScale ??
+                        10
+                      ).toFixed(1)}
+                      )
                     </label>
-                    <select
+                    <input
+                      type="range"
+                      min={1}
+                      max={50}
+                      step={0.5}
                       value={
-                        advancedParams.shape ?? currentPresetParams?.shape ?? 0
+                        advancedParams.gScale ??
+                        currentPresetParams?.gScale ??
+                        10
                       }
                       onChange={(e) =>
                         updateAdvancedParam(
-                          "shape",
-                          parseInt(e.target.value) as TreeShapeType,
+                          "gScale",
+                          parseFloat(e.target.value),
                         )
                       }
-                      className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
-                    >
-                      {TREE_SHAPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                      className="w-full"
+                    />
                   </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Scale (
-                        {(
-                          advancedParams.gScale ??
-                          currentPresetParams?.gScale ??
-                          10
-                        ).toFixed(1)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={1}
-                        max={50}
-                        step={0.5}
-                        value={
-                          advancedParams.gScale ??
-                          currentPresetParams?.gScale ??
-                          10
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "gScale",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Levels (
-                        {advancedParams.levels ??
-                          currentPresetParams?.levels ??
-                          3}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={1}
-                        max={4}
-                        step={1}
-                        value={
-                          advancedParams.levels ??
-                          currentPresetParams?.levels ??
-                          3
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "levels",
-                            parseInt(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Ratio (
-                        {(
-                          advancedParams.ratio ??
-                          currentPresetParams?.ratio ??
-                          0.015
-                        ).toFixed(3)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={0.001}
-                        max={0.1}
-                        step={0.001}
-                        value={
-                          advancedParams.ratio ??
-                          currentPresetParams?.ratio ??
-                          0.015
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "ratio",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Flare (
-                        {(
-                          advancedParams.flare ??
-                          currentPresetParams?.flare ??
-                          0
-                        ).toFixed(2)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={0}
-                        max={2}
-                        step={0.05}
-                        value={
-                          advancedParams.flare ??
-                          currentPresetParams?.flare ??
-                          0
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "flare",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Trunk Settings */}
-          {useAdvancedParams && (
-            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
-              <button
-                onClick={() => togglePanel("trunk")}
-                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
-              >
-                <span className="font-semibold flex items-center gap-2">
-                  <Layers size={16} />
-                  Trunk
-                </span>
-                {expandedPanels.trunk ? (
-                  <ChevronDown size={18} />
-                ) : (
-                  <ChevronRight size={18} />
-                )}
-              </button>
-              {expandedPanels.trunk && (
-                <div className="px-4 pb-4 space-y-3">
                   <div>
                     <label className="block text-xs text-text-secondary mb-1">
-                      Base Splits (
-                      {advancedParams.baseSplits ??
-                        currentPresetParams?.baseSplits ??
-                        0}
+                      Levels (
+                      {advancedParams.levels ??
+                        currentPresetParams?.levels ??
+                        3}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={4}
+                      step={1}
+                      value={
+                        advancedParams.levels ??
+                        currentPresetParams?.levels ??
+                        3
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam("levels", parseInt(e.target.value))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Ratio (
+                      {(
+                        advancedParams.ratio ??
+                        currentPresetParams?.ratio ??
+                        0.015
+                      ).toFixed(3)}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={0.001}
+                      max={0.1}
+                      step={0.001}
+                      value={
+                        advancedParams.ratio ??
+                        currentPresetParams?.ratio ??
+                        0.015
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam("ratio", parseFloat(e.target.value))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Flare (
+                      {(
+                        advancedParams.flare ??
+                        currentPresetParams?.flare ??
+                        0
+                      ).toFixed(2)}
                       )
                     </label>
                     <input
                       type="range"
                       min={0}
-                      max={5}
-                      step={1}
+                      max={2}
+                      step={0.05}
                       value={
-                        advancedParams.baseSplits ??
-                        currentPresetParams?.baseSplits ??
-                        0
+                        advancedParams.flare ?? currentPresetParams?.flare ?? 0
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam("flare", parseFloat(e.target.value))
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Trunk Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("trunk")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <Layers size={16} />
+                Trunk
+              </span>
+              {expandedPanels.trunk ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.trunk && (
+              <div className="px-4 pb-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Base Splits (
+                    {advancedParams.baseSplits ??
+                      currentPresetParams?.baseSplits ??
+                      0}
+                    )
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={5}
+                    step={1}
+                    value={
+                      advancedParams.baseSplits ??
+                      currentPresetParams?.baseSplits ??
+                      0
+                    }
+                    onChange={(e) =>
+                      updateAdvancedParam(
+                        "baseSplits",
+                        parseInt(e.target.value),
+                      )
+                    }
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Ratio Power (
+                    {(
+                      advancedParams.ratioPower ??
+                      currentPresetParams?.ratioPower ??
+                      1.2
+                    ).toFixed(2)}
+                    )
+                  </label>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={3}
+                    step={0.1}
+                    value={
+                      advancedParams.ratioPower ??
+                      currentPresetParams?.ratioPower ??
+                      1.2
+                    }
+                    onChange={(e) =>
+                      updateAdvancedParam(
+                        "ratioPower",
+                        parseFloat(e.target.value),
+                      )
+                    }
+                    className="w-full"
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Branch Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("branches")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <TreePine size={16} />
+                Branches
+              </span>
+              {expandedPanels.branches ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.branches && (
+              <div className="px-4 pb-4 space-y-2">
+                <p className="text-xs text-text-secondary italic">
+                  Branch parameters are per-level arrays [trunk, level1, level2,
+                  level3]. Adjusting these requires editing the preset JSON
+                  directly.
+                </p>
+                <div className="text-xs text-text-secondary">
+                  <p>
+                    Current preset branch count: [
+                    {currentPresetParams?.branches?.join(", ")}]
+                  </p>
+                  <p>
+                    Down angles: [{currentPresetParams?.downAngle?.join(", ")}
+                    ]°
+                  </p>
+                  <p>Rotation: [{currentPresetParams?.rotate?.join(", ")}]°</p>
+                  <p>
+                    Length: [
+                    {currentPresetParams?.length
+                      ?.map((l) => l.toFixed(2))
+                      .join(", ")}
+                    ]
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Leaf Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("leaves")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <TreePine size={16} />
+                Leaves
+              </span>
+              {expandedPanels.leaves ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.leaves && (
+              <div className="px-4 pb-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Leaf Shape
+                  </label>
+                  <select
+                    value={
+                      advancedParams.leafShape ??
+                      currentPresetParams?.leafShape ??
+                      8
+                    }
+                    onChange={(e) =>
+                      updateAdvancedParam(
+                        "leafShape",
+                        parseInt(e.target.value) as LeafShapeType,
+                      )
+                    }
+                    className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
+                  >
+                    {LEAF_SHAPE_OPTIONS.map((opt) => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Leaf Scale (
+                      {(
+                        advancedParams.leafScale ??
+                        currentPresetParams?.leafScale ??
+                        0.2
+                      ).toFixed(2)}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={0.01}
+                      max={1}
+                      step={0.01}
+                      value={
+                        advancedParams.leafScale ??
+                        currentPresetParams?.leafScale ??
+                        0.2
                       }
                       onChange={(e) =>
                         updateAdvancedParam(
-                          "baseSplits",
+                          "leafScale",
+                          parseFloat(e.target.value),
+                        )
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Width Scale (
+                      {(
+                        advancedParams.leafScaleX ??
+                        currentPresetParams?.leafScaleX ??
+                        1
+                      ).toFixed(2)}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={0.1}
+                      max={2}
+                      step={0.05}
+                      value={
+                        advancedParams.leafScaleX ??
+                        currentPresetParams?.leafScaleX ??
+                        1
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "leafScaleX",
+                          parseFloat(e.target.value),
+                        )
+                      }
+                      className="w-full"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-xs text-text-secondary mb-1">
+                      Leaf Count (
+                      {advancedParams.leafBlosNum ??
+                        currentPresetParams?.leafBlosNum ??
+                        40}
+                      )
+                    </label>
+                    <input
+                      type="range"
+                      min={1}
+                      max={100}
+                      step={1}
+                      value={
+                        advancedParams.leafBlosNum ??
+                        currentPresetParams?.leafBlosNum ??
+                        40
+                      }
+                      onChange={(e) =>
+                        updateAdvancedParam(
+                          "leafBlosNum",
                           parseInt(e.target.value),
                         )
                       }
@@ -1586,27 +1780,27 @@ export const TreeGenPage: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-xs text-text-secondary mb-1">
-                      Ratio Power (
+                      Leaf Bend (
                       {(
-                        advancedParams.ratioPower ??
-                        currentPresetParams?.ratioPower ??
-                        1.2
+                        advancedParams.leafBend ??
+                        currentPresetParams?.leafBend ??
+                        0.3
                       ).toFixed(2)}
                       )
                     </label>
                     <input
                       type="range"
-                      min={0.5}
-                      max={3}
-                      step={0.1}
+                      min={0}
+                      max={1}
+                      step={0.05}
                       value={
-                        advancedParams.ratioPower ??
-                        currentPresetParams?.ratioPower ??
-                        1.2
+                        advancedParams.leafBend ??
+                        currentPresetParams?.leafBend ??
+                        0.3
                       }
                       onChange={(e) =>
                         updateAdvancedParam(
-                          "ratioPower",
+                          "leafBend",
                           parseFloat(e.target.value),
                         )
                       }
@@ -1614,225 +1808,134 @@ export const TreeGenPage: React.FC = () => {
                     />
                   </div>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
-          {/* Branch Settings */}
-          {useAdvancedParams && (
-            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
-              <button
-                onClick={() => togglePanel("branches")}
-                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
-              >
-                <span className="font-semibold flex items-center gap-2">
-                  <TreePine size={16} />
-                  Branches
-                </span>
-                {expandedPanels.branches ? (
-                  <ChevronDown size={18} />
-                ) : (
-                  <ChevronRight size={18} />
-                )}
-              </button>
-              {expandedPanels.branches && (
-                <div className="px-4 pb-4 space-y-2">
-                  <p className="text-xs text-text-secondary italic">
-                    Branch parameters are per-level arrays [trunk, level1,
-                    level2, level3]. Adjusting these requires editing the preset
-                    JSON directly.
+          {/* Geometry Settings */}
+          <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
+            <button
+              onClick={() => togglePanel("geometry")}
+              className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
+            >
+              <span className="font-semibold flex items-center gap-2">
+                <Settings2 size={16} />
+                Geometry
+              </span>
+              {expandedPanels.geometry ? (
+                <ChevronDown size={18} />
+              ) : (
+                <ChevronRight size={18} />
+              )}
+            </button>
+            {expandedPanels.geometry && (
+              <div className="px-4 pb-4 space-y-3">
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Radial Segments ({geometryOptions.radialSegments})
+                  </label>
+                  <input
+                    type="range"
+                    min={3}
+                    max={16}
+                    step={1}
+                    value={geometryOptions.radialSegments ?? 5}
+                    onChange={(e) =>
+                      setGeometryOptions((prev) => ({
+                        ...prev,
+                        radialSegments: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                  <p className="text-xs text-text-tertiary mt-1">
+                    Lower = less vertices, blockier branches
                   </p>
-                  <div className="text-xs text-text-secondary">
-                    <p>
-                      Current preset branch count: [
-                      {currentPresetParams?.branches?.join(", ")}]
-                    </p>
-                    <p>
-                      Down angles: [{currentPresetParams?.downAngle?.join(", ")}
-                      ]°
-                    </p>
-                    <p>
-                      Rotation: [{currentPresetParams?.rotate?.join(", ")}]°
-                    </p>
-                    <p>
-                      Length: [
-                      {currentPresetParams?.length
-                        ?.map((l) => l.toFixed(2))
-                        .join(", ")}
-                      ]
-                    </p>
-                  </div>
                 </div>
-              )}
-            </div>
-          )}
-
-          {/* Leaf Settings */}
-          {useAdvancedParams && (
-            <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">
-              <button
-                onClick={() => togglePanel("leaves")}
-                className="w-full px-4 py-3 flex items-center justify-between text-text-primary hover:bg-bg-tertiary transition-colors"
-              >
-                <span className="font-semibold flex items-center gap-2">
-                  <TreePine size={16} />
-                  Leaves
-                </span>
-                {expandedPanels.leaves ? (
-                  <ChevronDown size={18} />
-                ) : (
-                  <ChevronRight size={18} />
-                )}
-              </button>
-              {expandedPanels.leaves && (
-                <div className="px-4 pb-4 space-y-3">
-                  <div>
-                    <label className="block text-xs text-text-secondary mb-1">
-                      Leaf Shape
-                    </label>
-                    <select
-                      value={
-                        advancedParams.leafShape ??
-                        currentPresetParams?.leafShape ??
-                        8
-                      }
-                      onChange={(e) =>
-                        updateAdvancedParam(
-                          "leafShape",
-                          parseInt(e.target.value) as LeafShapeType,
-                        )
-                      }
-                      className="w-full px-2 py-1.5 bg-bg-tertiary border border-border-primary rounded text-text-primary text-sm"
-                    >
-                      {LEAF_SHAPE_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Leaf Scale (
-                        {(
-                          advancedParams.leafScale ??
-                          currentPresetParams?.leafScale ??
-                          0.2
-                        ).toFixed(2)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={0.01}
-                        max={1}
-                        step={0.01}
-                        value={
-                          advancedParams.leafScale ??
-                          currentPresetParams?.leafScale ??
-                          0.2
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "leafScale",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Width Scale (
-                        {(
-                          advancedParams.leafScaleX ??
-                          currentPresetParams?.leafScaleX ??
-                          1
-                        ).toFixed(2)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={0.1}
-                        max={2}
-                        step={0.05}
-                        value={
-                          advancedParams.leafScaleX ??
-                          currentPresetParams?.leafScaleX ??
-                          1
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "leafScaleX",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Leaf Count (
-                        {advancedParams.leafBlosNum ??
-                          currentPresetParams?.leafBlosNum ??
-                          40}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={1}
-                        max={100}
-                        step={1}
-                        value={
-                          advancedParams.leafBlosNum ??
-                          currentPresetParams?.leafBlosNum ??
-                          40
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "leafBlosNum",
-                            parseInt(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-text-secondary mb-1">
-                        Leaf Bend (
-                        {(
-                          advancedParams.leafBend ??
-                          currentPresetParams?.leafBend ??
-                          0.3
-                        ).toFixed(2)}
-                        )
-                      </label>
-                      <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.05}
-                        value={
-                          advancedParams.leafBend ??
-                          currentPresetParams?.leafBend ??
-                          0.3
-                        }
-                        onChange={(e) =>
-                          updateAdvancedParam(
-                            "leafBend",
-                            parseFloat(e.target.value),
-                          )
-                        }
-                        className="w-full"
-                      />
-                    </div>
-                  </div>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Max Leaves ({geometryOptions.maxLeaves?.toLocaleString()})
+                  </label>
+                  <input
+                    type="range"
+                    min={1000}
+                    max={100000}
+                    step={1000}
+                    value={geometryOptions.maxLeaves ?? 25000}
+                    onChange={(e) =>
+                      setGeometryOptions((prev) => ({
+                        ...prev,
+                        maxLeaves: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
                 </div>
-              )}
-            </div>
-          )}
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Max Stems ({geometryOptions.maxStems?.toLocaleString()})
+                  </label>
+                  <input
+                    type="range"
+                    min={100}
+                    max={5000}
+                    step={100}
+                    value={geometryOptions.maxStems ?? 1000}
+                    onChange={(e) =>
+                      setGeometryOptions((prev) => ({
+                        ...prev,
+                        maxStems: parseInt(e.target.value),
+                      }))
+                    }
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-text-secondary mb-1">
+                    Max Branch Depth ({geometryOptions.maxBranchDepth ?? "All"})
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={4}
+                    step={1}
+                    value={geometryOptions.maxBranchDepth ?? 4}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      setGeometryOptions((prev) => ({
+                        ...prev,
+                        maxBranchDepth: val >= 4 ? undefined : val,
+                      }));
+                    }}
+                    className="w-full"
+                  />
+                  <p className="text-xs text-text-tertiary mt-1">
+                    0=trunk only, 1=main branches, 4=all
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="branchCaps"
+                    checked={geometryOptions.branchCaps ?? false}
+                    onChange={(e) =>
+                      setGeometryOptions((prev) => ({
+                        ...prev,
+                        branchCaps: e.target.checked,
+                      }))
+                    }
+                    className="rounded"
+                  />
+                  <label
+                    htmlFor="branchCaps"
+                    className="text-xs text-text-secondary cursor-pointer"
+                  >
+                    Branch End Caps
+                  </label>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* LOD Settings */}
           <div className="bg-bg-secondary rounded-lg border border-border-primary overflow-hidden">

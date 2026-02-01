@@ -24,7 +24,7 @@ import {
 import React, { useState, useEffect, useCallback } from "react";
 
 import { getTierColor } from "../../constants";
-import { Asset, LODBundle, LODLevel, LODVariant } from "../../types";
+import { Asset, LODBundle, LODLevel } from "../../types";
 
 interface AssetDetailsPanelProps {
   asset: Asset;

@@ -9,7 +9,7 @@
  * while physics remains stable with controlled timesteps.
  */
 
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { World } from "../World";
 
 // Create testable World instance

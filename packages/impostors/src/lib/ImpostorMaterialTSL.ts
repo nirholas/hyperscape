@@ -16,8 +16,7 @@
 
 import * as THREE_NAMESPACE from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import type { ImpostorMaterialConfig } from "./types";
-import type { DissolveConfig } from "./ImpostorMaterial";
+import type { ImpostorMaterialConfig, DissolveConfig } from "./types";
 
 // Maximum lights for TSL
 const MAX_DIRECTIONAL_LIGHTS_TSL = 4;
@@ -196,7 +195,19 @@ export function createTSLImpostorMaterial(
   // ========== UNIFORMS ==========
   const uAtlasTexture = texture(atlasTexture);
   const uGridSize = uniform(vec2(gridSizeX, gridSizeY));
-  const uFaceIndices = uniform(vec3(0, 0, 0));
+
+  // Compute valid initial face indices for the center of the atlas
+  // For HEMI octahedrons, cell (0,0) is often empty/edge, so use center cells
+  // This ensures the impostor shows content before the first update() call
+  const centerCol = Math.floor(gridSizeX / 2);
+  const centerRow = Math.floor(gridSizeY / 2);
+  const centerIndex = centerRow * gridSizeX + centerCol;
+  // Use 3 adjacent vertices that form a valid sampling region
+  const indexA = centerIndex;
+  const indexB = Math.min(centerIndex + 1, gridSizeX * gridSizeY - 1);
+  const indexC = Math.min(centerIndex + gridSizeX, gridSizeX * gridSizeY - 1);
+
+  const uFaceIndices = uniform(vec3(indexA, indexB, indexC));
   const uFaceWeights = uniform(vec3(0.33, 0.33, 0.34));
   const uAlphaThreshold = uniform(float(0.5));
 

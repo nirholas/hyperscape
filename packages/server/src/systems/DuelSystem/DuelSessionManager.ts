@@ -15,7 +15,7 @@
 import type { World } from "@hyperscape/shared";
 import type { DuelRules, StakedItem, DuelState } from "@hyperscape/shared";
 import { DEFAULT_DUEL_RULES } from "@hyperscape/shared";
-import { DEFAULT_EQUIPMENT_RESTRICTIONS, type EquipmentSlot } from "./config";
+import { DEFAULT_EQUIPMENT_RESTRICTIONS } from "./config";
 
 // ============================================================================
 // Types

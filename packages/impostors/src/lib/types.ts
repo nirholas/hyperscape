@@ -324,3 +324,165 @@ export interface ImpostorSpecularConfig {
   /** Specular intensity multiplier */
   intensity: number;
 }
+
+// ============================================================================
+// ANIMATED IMPOSTOR TYPES
+// ============================================================================
+
+/**
+ * Configuration for animated impostor baking (walk cycles, etc.)
+ *
+ * Animated impostors capture multiple frames of an animation cycle,
+ * storing each frame as a layer in a texture array. This enables
+ * low-overhead animation at distance by simply advancing a frame index.
+ */
+export interface AnimatedBakeConfig {
+  /** Atlas texture size per frame (default: 512) */
+  atlasSize: number;
+  /** Number of sprites per side in octahedral grid (default: 12 for hemisphere) */
+  spritesPerSide: number;
+  /** Target animation FPS (default: 6) - determines frame count */
+  animationFPS: number;
+  /** Animation clip duration in seconds */
+  animationDuration: number;
+  /** Use hemisphere octahedron (true) or full sphere (false) */
+  hemisphere: boolean;
+  /** Background color for atlas cells (default: 0x000000) */
+  backgroundColor?: number;
+  /** Background alpha (default: 0 for transparent) */
+  backgroundAlpha?: number;
+}
+
+/**
+ * Default configuration for animated impostor baking
+ */
+export const DEFAULT_ANIMATED_BAKE_CONFIG: AnimatedBakeConfig = {
+  atlasSize: 512,
+  spritesPerSide: 12,
+  animationFPS: 6,
+  animationDuration: 1.0,
+  hemisphere: true,
+  backgroundColor: 0x000000,
+  backgroundAlpha: 0,
+};
+
+/**
+ * Result of animated impostor baking
+ *
+ * Contains a DataArrayTexture where each layer is one animation frame,
+ * with the full octahedral sprite grid baked into each layer.
+ */
+export interface AnimatedBakeResult {
+  /** Texture array with one layer per animation frame */
+  atlasArray: THREE.DataArrayTexture;
+  /** Number of animation frames baked */
+  frameCount: number;
+  /** Sprites per side in octahedral grid */
+  spritesPerSide: number;
+  /** Animation duration in seconds */
+  animationDuration: number;
+  /** Target FPS for playback */
+  animationFPS: number;
+  /** Bounding sphere of the source mesh */
+  boundingSphere: THREE.Sphere;
+  /** Model identifier for caching */
+  modelId: string;
+  /** Whether hemisphere octahedron was used */
+  hemisphere: boolean;
+}
+
+/**
+ * Configuration for a single mob variant in the global atlas
+ */
+export interface MobVariantConfig {
+  /** Unique identifier for this mob type */
+  modelId: string;
+  /** Number of animation frames for this variant */
+  frameCount: number;
+  /** Base frame index in the merged atlas */
+  baseFrameIndex: number;
+  /** Scale factor relative to base size */
+  scale: number;
+  /** Bounding sphere radius */
+  boundingRadius: number;
+}
+
+/**
+ * Global mob atlas containing all mob variants merged into a single texture array
+ *
+ * This enables single-draw-call rendering of all mob impostors by:
+ * 1. Storing all mob animation frames in one texture array
+ * 2. Using per-instance uniforms to select variant (base index, frame count)
+ * 3. Using GPU instancing for efficient crowd rendering
+ */
+export interface GlobalMobAtlas {
+  /** Merged texture array containing all mob animation frames */
+  atlasArray: THREE.DataArrayTexture;
+  /** Total number of frames across all variants */
+  totalFrames: number;
+  /** Configuration for each mob variant */
+  variants: Map<string, MobVariantConfig>;
+  /** Sprites per side (same for all variants) */
+  spritesPerSide: number;
+  /** Whether hemisphere octahedron was used */
+  hemisphere: boolean;
+  /** Animation FPS (same for all variants) */
+  animationFPS: number;
+}
+
+/**
+ * Per-instance data for animated impostor rendering
+ */
+export interface AnimatedImpostorInstanceData {
+  /** World position (xyz) */
+  position: THREE.Vector3;
+  /** Yaw rotation in radians */
+  yaw: number;
+  /** Animation phase offset (0-1, for desynchronization) */
+  animationOffset: number;
+  /** Variant index (which mob type) */
+  variantIndex: number;
+  /** Scale multiplier */
+  scale: number;
+}
+
+/**
+ * Configuration for animated impostor material
+ */
+export interface AnimatedImpostorMaterialConfig {
+  /** Texture array containing animation frames */
+  atlasArray: THREE.DataArrayTexture;
+  /** Sprites per side in octahedral grid */
+  spritesPerSide: number;
+  /** Use hemisphere octahedron (alias: useHemiOctahedron) */
+  hemisphere: boolean;
+  /** Number of frames in animation */
+  frameCount: number;
+  /** Enable transparency (default: true) */
+  transparent?: boolean;
+  /** Alpha clamp threshold (default: 0.05) */
+  alphaClamp?: number;
+  /** Billboard scale (default: 1.0) */
+  scale?: number;
+  /** Flip Y axis for atlas sampling */
+  flipY?: boolean;
+}
+
+// ============================================================================
+// DISSOLVE CONFIGURATION
+// ============================================================================
+
+/**
+ * Configuration for distance-based dissolve effect.
+ * When enabled, impostors smoothly fade out at distance using dithered dissolve.
+ */
+export interface DissolveConfig {
+  /** Enable dissolve effect (default: false) */
+  enabled?: boolean;
+  /** Distance where fade begins (fully opaque inside) */
+  fadeStart?: number;
+  /** Distance where fully invisible */
+  fadeEnd?: number;
+  /** Initial player position (default: origin) */
+  playerPos?: THREE.Vector3;
+}

@@ -102,8 +102,9 @@ describe.skipIf(!isBrowser)("VRMImposterBaker Class", () => {
 // ============================================================================
 
 describe.skipIf(!isBrowser)("Animation Matching (via poseVRMAtFrame)", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let baker: any = null;
+  let baker: ReturnType<
+    typeof import("../VRMImposterBaker").VRMImposterBaker.prototype.constructor
+  > | null = null;
 
   beforeEach(async () => {
     const { VRMImposterBaker } = await import("../VRMImposterBaker");
@@ -378,7 +379,7 @@ describe.skipIf(!isBrowser)("Singleton Pattern", () => {
       "../VRMImposterBaker"
     );
 
-    const baker1 = getVRMImposterBaker();
+    getVRMImposterBaker();
     disposeVRMImposterBaker();
     const baker2 = getVRMImposterBaker();
 
@@ -393,8 +394,9 @@ describe.skipIf(!isBrowser)("Singleton Pattern", () => {
 // ============================================================================
 
 describe.skipIf(!isBrowser)("Integration: Bake Real Mesh", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let baker: any = null;
+  let baker: ReturnType<
+    typeof import("../VRMImposterBaker").VRMImposterBaker.prototype.constructor
+  > | null = null;
 
   beforeEach(async () => {
     const { VRMImposterBaker } = await import("../VRMImposterBaker");

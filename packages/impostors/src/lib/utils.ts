@@ -2,8 +2,7 @@
  * Octahedral Impostor Library - Utility Functions
  */
 
-import * as THREE from "three";
-import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
+import * as THREE from "three/webgpu";
 
 /**
  * Create a colored cube with different colors on each face (useful for debugging)
@@ -21,7 +20,7 @@ export function createColoredCube(size: number = 1): THREE.Mesh {
   ];
 
   const materials = colors.map((color) => {
-    const mat = new MeshBasicNodeMaterial();
+    const mat = new THREE.MeshBasicMaterial();
     mat.color = new THREE.Color(color);
     return mat;
   });
@@ -102,7 +101,7 @@ export function computeCombinedBoundingSphere(
  */
 export function createTestTorusKnot(): THREE.Mesh {
   const geometry = new THREE.TorusKnotGeometry(0.5, 0.15, 100, 16);
-  const material = new MeshStandardNodeMaterial();
+  const material = new THREE.MeshStandardMaterial();
   material.color = new THREE.Color(0xff69b4);
   return new THREE.Mesh(geometry, material);
 }

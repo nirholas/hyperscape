@@ -2,7 +2,7 @@
  * GPU Compute Integration
  *
  * Provides integration between the WebGPU compute infrastructure and
- * existing game systems (GrassSystem, Particles, TerrainSystem, etc.)
+ * existing game systems (ProceduralGrassSystem, Particles, TerrainSystem, etc.)
  *
  * This module creates managers that can be used alongside existing systems
  * to provide GPU acceleration when WebGPU is available.

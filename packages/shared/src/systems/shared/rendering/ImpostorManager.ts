@@ -77,7 +77,8 @@ export const IMPOSTOR_CONFIG = {
   STORE_NAME: "atlases",
   /** Cache version (increment to invalidate old caches) */
   // v2: Fixed T-pose issue - now properly captures idle animation pose
-  CACHE_VERSION: 2,
+  // v3: Added bakeMode support (normal/depth atlas baking)
+  CACHE_VERSION: 3,
 } as const;
 
 /**
@@ -108,6 +109,18 @@ export enum LODLevel {
 }
 
 /**
+ * Bake mode for impostor generation
+ */
+export enum ImpostorBakeMode {
+  /** Basic: albedo only (fastest, smallest) */
+  BASIC = "basic",
+  /** Standard: albedo + normals (enables dynamic lighting) */
+  STANDARD = "standard",
+  /** Full: albedo + normals + depth (enables parallax, depth blending, shadows) */
+  FULL = "full",
+}
+
+/**
  * Options for impostor generation (used by ImpostorManager)
  */
 export interface ImpostorOptions {
@@ -125,6 +138,15 @@ export interface ImpostorOptions {
   category?: string;
   /** Force re-bake even if cached */
   forceBake?: boolean;
+  /**
+   * Bake mode controls which atlas channels are generated:
+   * - "basic": albedo only (fastest, smallest)
+   * - "standard": albedo + normals (enables dynamic lighting) - DEFAULT
+   * - "full": albedo + normals + depth (enables parallax, depth blending)
+   *
+   * Default: "standard" for best quality/performance balance
+   */
+  bakeMode?: ImpostorBakeMode;
   /**
    * AAA LOD: Callback to prepare mesh IMMEDIATELY before baking.
    * Called synchronously right before the impostor is captured.
@@ -217,6 +239,8 @@ interface SerializedImpostor {
   atlasData: string;
   /** Normal atlas image as base64 (optional) */
   normalData?: string;
+  /** Depth atlas image as base64 (optional) */
+  depthData?: string;
   /** Grid sizes */
   gridSizeX: number;
   gridSizeY: number;
@@ -232,6 +256,8 @@ interface SerializedImpostor {
     min: { x: number; y: number; z: number };
     max: { x: number; y: number; z: number };
   };
+  /** Bake mode used */
+  bakeMode?: ImpostorBakeMode;
   /** Cache version */
   version: number;
   /** Timestamp */
@@ -498,12 +524,10 @@ export class ImpostorManager {
 
     // AAA LOD: Prepare mesh IMMEDIATELY before baking (e.g., set idle pose)
     // This is critical - if called earlier, the animation may have moved by bake time
-    let prepareSuccess = true;
     if (options.prepareForBake) {
       try {
         await options.prepareForBake();
       } catch (err) {
-        prepareSuccess = false;
         // Log with ERROR level since this affects visual quality
         console.error(
           `[ImpostorManager] prepareForBake FAILED for ${modelId} - impostor may show wrong pose:`,
@@ -528,6 +552,9 @@ export class ImpostorManager {
         ? IMPOSTOR_CONFIG.GRID_SIZE_HEMI_Y
         : IMPOSTOR_CONFIG.GRID_SIZE_FULL);
 
+    // Determine bake mode (default to STANDARD for normal maps)
+    const bakeMode = options.bakeMode ?? ImpostorBakeMode.STANDARD;
+
     const config: Partial<ImpostorBakeConfig> = {
       atlasWidth: atlasSize,
       atlasHeight: atlasSize,
@@ -538,18 +565,37 @@ export class ImpostorManager {
       backgroundAlpha: 0,
     };
 
-    // Bake the impostor - bake() is async and must be awaited
-    const result = await this.octahedralImpostor.bake(source, config);
+    // Bake the impostor using the appropriate method based on bake mode
+    let result: ImpostorBakeResult;
+    switch (bakeMode) {
+      case ImpostorBakeMode.FULL:
+        // Full bake: albedo + normals + depth
+        result = await this.octahedralImpostor.bakeFull(source, config);
+        break;
+      case ImpostorBakeMode.STANDARD:
+        // Standard bake: albedo + normals (enables dynamic lighting)
+        result = await this.octahedralImpostor.bakeWithNormals(source, config);
+        break;
+      case ImpostorBakeMode.BASIC:
+      default:
+        // Basic bake: albedo only (fastest, smallest)
+        result = await this.octahedralImpostor.bake(source, config);
+        break;
+    }
 
     // Debug: Log atlas info
-    console.log(`[ImpostorManager] Bake result for ${modelId}:`, {
-      atlasWidth: result.atlasTexture?.image?.width ?? "no image",
-      atlasHeight: result.atlasTexture?.image?.height ?? "no image",
-      gridSizeX: result.gridSizeX,
-      gridSizeY: result.gridSizeY,
-      hasNormalAtlas: !!result.normalAtlasTexture,
-      boundingSphere: result.boundingSphere?.radius ?? "none",
-    });
+    console.log(
+      `[ImpostorManager] Bake result for ${modelId} (mode=${bakeMode}):`,
+      {
+        atlasWidth: result.atlasTexture?.image?.width ?? "no image",
+        atlasHeight: result.atlasTexture?.image?.height ?? "no image",
+        gridSizeX: result.gridSizeX,
+        gridSizeY: result.gridSizeY,
+        hasNormalAtlas: !!result.normalAtlasTexture,
+        hasDepthAtlas: !!result.depthAtlasTexture,
+        boundingSphere: result.boundingSphere?.radius ?? "none",
+      },
+    );
 
     // Cache in memory
     this.cacheInMemory(cacheKey, result, options);
@@ -561,7 +607,7 @@ export class ImpostorManager {
 
     this.stats.totalBaked++;
     console.log(
-      `[ImpostorManager] Baked impostor: ${modelId} (${atlasSize}x${atlasSize}, ${gridSizeX}x${gridSizeY})`,
+      `[ImpostorManager] Baked impostor: ${modelId} (${atlasSize}x${atlasSize}, ${gridSizeX}x${gridSizeY}, mode=${bakeMode})`,
     );
 
     return result;
@@ -579,7 +625,9 @@ export class ImpostorManager {
     // Include grid size in cache key to prevent collisions
     const gridX = options.gridSizeX ?? (hemi ? 16 : 8);
     const gridY = options.gridSizeY ?? (hemi ? 8 : 8);
-    return `${modelId}_${size}_${gridX}x${gridY}_${hemi ? "hemi" : "full"}_v${IMPOSTOR_CONFIG.CACHE_VERSION}`;
+    // Include bake mode in cache key (default is "standard" for normals)
+    const bakeMode = options.bakeMode ?? ImpostorBakeMode.STANDARD;
+    return `${modelId}_${size}_${gridX}x${gridY}_${hemi ? "hemi" : "full"}_${bakeMode}_v${IMPOSTOR_CONFIG.CACHE_VERSION}`;
   }
 
   /**
@@ -618,7 +666,7 @@ export class ImpostorManager {
       return;
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const request = indexedDB.open(
         IMPOSTOR_CONFIG.DB_NAME,
         IMPOSTOR_CONFIG.CACHE_VERSION,
@@ -696,7 +744,7 @@ export class ImpostorManager {
   private async saveToIndexedDB(
     key: string,
     result: ImpostorBakeResult,
-    _options: ImpostorOptions,
+    options: ImpostorOptions,
   ): Promise<void> {
     await this.dbReady;
     if (!this.db) return;
@@ -720,10 +768,18 @@ export class ImpostorManager {
         )
       : undefined;
 
+    const depthData = result.depthAtlasTexture
+      ? await this.textureToBase64(
+          result.depthAtlasTexture,
+          result.depthRenderTarget,
+        )
+      : undefined;
+
     const serialized: SerializedImpostor = {
       modelId: key,
       atlasData,
       normalData: normalData ?? undefined,
+      depthData: depthData ?? undefined,
       gridSizeX: result.gridSizeX,
       gridSizeY: result.gridSizeY,
       octType: result.octType,
@@ -749,6 +805,7 @@ export class ImpostorManager {
             },
           }
         : undefined,
+      bakeMode: options.bakeMode ?? ImpostorBakeMode.STANDARD,
       version: IMPOSTOR_CONFIG.CACHE_VERSION,
       timestamp: Date.now(),
     };
@@ -763,8 +820,14 @@ export class ImpostorManager {
         const request = store.put(serialized);
 
         request.onsuccess = () => {
+          const totalSize = Math.round(
+            (atlasData.length +
+              (normalData?.length ?? 0) +
+              (depthData?.length ?? 0)) /
+              1024,
+          );
           console.log(
-            `[ImpostorManager] 💾 Saved to IndexedDB: ${key} (${Math.round(atlasData.length / 1024)}KB)`,
+            `[ImpostorManager] 💾 Saved to IndexedDB: ${key} (${totalSize}KB, normals=${!!normalData}, depth=${!!depthData})`,
           );
           resolve();
         };
@@ -925,6 +988,10 @@ export class ImpostorManager {
         ? await this.base64ToTexture(data.normalData)
         : undefined;
 
+      const depthAtlasTexture = data.depthData
+        ? await this.base64ToTexture(data.depthData)
+        : undefined;
+
       // Reconstruct bounding sphere and box
       const boundingSphere = new THREE.Sphere(
         new THREE.Vector3(
@@ -972,6 +1039,8 @@ export class ImpostorManager {
         renderTarget: null as unknown as THREE.WebGLRenderTarget, // Not needed from cache
         normalAtlasTexture: normalAtlasTexture ?? undefined,
         normalRenderTarget: undefined,
+        depthAtlasTexture: depthAtlasTexture ?? undefined,
+        depthRenderTarget: undefined,
         gridSizeX: data.gridSizeX,
         gridSizeY: data.gridSizeY,
         octType: data.octType as 0 | 1, // OctahedronTypeValue
@@ -1033,8 +1102,10 @@ export class ImpostorManager {
     for (const cached of this.memoryCache.values()) {
       cached.result.atlasTexture.dispose();
       cached.result.normalAtlasTexture?.dispose();
+      cached.result.depthAtlasTexture?.dispose();
       cached.result.renderTarget?.dispose();
       cached.result.normalRenderTarget?.dispose();
+      cached.result.depthRenderTarget?.dispose();
     }
     this.memoryCache.clear();
     console.log("[ImpostorManager] Memory cache cleared");

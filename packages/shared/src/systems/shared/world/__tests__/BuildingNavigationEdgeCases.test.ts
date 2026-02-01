@@ -23,7 +23,7 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
-import { World, BFSPathfinder, tilesEqual } from "@hyperscape/shared";
+import { World, BFSPathfinder } from "@hyperscape/shared";
 import { BuildingCollisionService } from "@hyperscape/shared";
 import type { TileCoord } from "@hyperscape/shared";
 
@@ -579,7 +579,6 @@ describe("Two-Story Building Navigation", () => {
   });
 
   it("should find path on floor 1 (second floor navigation)", () => {
-    const building = collisionService.getBuilding(BUILDING_ID)!;
     const floor1Tiles = getAllWalkableTiles(collisionService, BUILDING_ID, 1);
 
     if (floor1Tiles.length < 2) {
@@ -950,7 +949,6 @@ describe("Exit Navigation (Inside → Outside)", () => {
 describe("Window vs Door Behavior", () => {
   let world: World;
   let collisionService: BuildingCollisionService;
-  let pathfinder: BFSPathfinder;
 
   const BUILDING_POS = { x: 600, y: 10, z: 600 };
   const BUILDING_ID = "window_test";
@@ -977,7 +975,6 @@ describe("Window vs Door Behavior", () => {
 
   it("should allow passage through door but NOT through window", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
-    const bbox = building.boundingBox;
     const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
 
     // Find door and window wall segments
@@ -1077,7 +1074,6 @@ describe("Window vs Door Behavior", () => {
 describe("Internal Wall Diagonal Clipping", () => {
   let world: World;
   let collisionService: BuildingCollisionService;
-  let pathfinder: BFSPathfinder;
 
   const BUILDING_POS = { x: 700, y: 10, z: 700 };
   const BUILDING_ID = "internal_wall_test";
@@ -1433,7 +1429,7 @@ describe("Critical System Validation", () => {
       // Create walkability function that simulates GROUND layer (player outside)
       const groundLayerWalkable = (
         tile: TileCoord,
-        fromTile?: TileCoord,
+        _fromTile?: TileCoord,
       ): boolean => {
         // Check if tile is a WALKABLE building tile
         const buildingId = collisionService.isTileInBuildingFootprint(
@@ -1516,7 +1512,6 @@ describe("Critical System Validation", () => {
     it("should block tiles under building (in bbox but not footprint)", () => {
       const building = collisionService.getBuilding(BUILDING_ID)!;
       const bbox = building.boundingBox;
-      const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
 
       let blockedCount = 0;
       let checkedCount = 0;

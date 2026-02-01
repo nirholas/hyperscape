@@ -34,21 +34,14 @@ import THREE, {
   Fn,
   MeshStandardNodeMaterial,
   float,
-  fract,
-  sin,
-  cos,
   dot,
-  vec2,
   vec3,
   smoothstep,
   positionWorld,
   step,
   max,
-  min,
   clamp,
-  instanceIndex,
   sqrt,
-  length,
   mod,
   floor,
   abs,
@@ -243,12 +236,16 @@ export const LOD_DISTANCES: Record<string, LODDistances> = {
     fadeDistance: 250,
   },
 
-  // Buildings and stations
+  // Buildings - simple geometry, skip intermediate LODs and go directly to impostor
+  // Buildings use batched static meshes, so LOD stages are unnecessary
+  // LOD0 (0-80m): Full detail batched mesh with shadows
+  // Impostor (80-200m): Octahedral billboard
+  // Culled (>200m): Hidden
   building: {
-    lod1Distance: 80,
-    lod2Distance: 180,
-    imposterDistance: 250,
-    fadeDistance: 400,
+    lod1Distance: 80, // Same as impostor - skip intermediate LOD
+    lod2Distance: 80, // Same as impostor - skip intermediate LOD
+    imposterDistance: 80, // Switch to impostor at 80m
+    fadeDistance: 200, // Cull at 200m
   },
   station: {
     lod1Distance: 60,

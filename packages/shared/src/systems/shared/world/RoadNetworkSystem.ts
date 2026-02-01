@@ -22,8 +22,6 @@ import type {
   RoadNetwork,
   PointOfInterest,
   RoadEndpointType,
-  TownInternalRoad,
-  TownPath,
   RoadBoundaryExit,
   TileEdge,
 } from "../../../types/world/world-types";
@@ -159,7 +157,11 @@ export class RoadNetworkSystem extends System {
   private noise!: NoiseGenerator;
   private seed: number = 0;
   private randomState: number = 0;
-  private config!: RoadConfig;
+  private _config!: RoadConfig;
+  /** Road configuration - read-only access for external systems */
+  get config(): RoadConfig {
+    return this._config;
+  }
   private directions!: Array<{ dx: number; dz: number }>;
   private terrainSystem?: {
     getHeightAt(x: number, z: number): number;
@@ -187,7 +189,7 @@ export class RoadNetworkSystem extends System {
     this.seed = worldConfig?.terrainSeed ?? 0;
     this.randomState = this.seed;
     this.noise = new NoiseGenerator(this.seed + 54321);
-    this.config = loadRoadConfig();
+    this._config = loadRoadConfig();
     this.directions = getDirections(this.config.pathStepSize);
 
     // Set world half size from terrain config (default: 5000m = 10km world)
@@ -1024,16 +1026,6 @@ export class RoadNetworkSystem extends System {
       }
     } else {
       smoothedPath = this.smoothPath(rawPath, roadIndex);
-    }
-
-    let totalLength = 0;
-    for (let i = 1; i < smoothedPath.length; i++) {
-      totalLength += dist2D(
-        smoothedPath[i - 1].x,
-        smoothedPath[i - 1].z,
-        smoothedPath[i].x,
-        smoothedPath[i].z,
-      );
     }
 
     // Extend the road past the destination with weighted random walk
@@ -1979,7 +1971,7 @@ export class RoadNetworkSystem extends System {
 
     const towns = this.townSystem.getTowns();
     const TOWN_ROAD_WIDTH = 8; // Main street width (wider than inter-town roads)
-    const TOWN_PATH_WIDTH = 2; // Walkway paths to buildings
+    const TOWN_PATH_WIDTH = 3; // Walkway paths to buildings - visible but narrower than roads
 
     for (const town of towns) {
       // Cache internal roads (main streets through town)

@@ -4,14 +4,13 @@
  * High-level API for creating and managing octahedral impostors.
  */
 
-import * as THREE from "three";
-import { MeshBasicNodeMaterial } from "three/webgpu";
+import * as THREE from "three/webgpu";
 import type {
   ImpostorBakeConfig,
   ImpostorBakeResult,
-  ImpostorViewData,
   ImpostorInstance,
   OctahedronTypeValue,
+  DissolveConfig,
 } from "./types";
 import { OctahedronType } from "./types";
 import {
@@ -20,16 +19,6 @@ import {
   type CompatibleRenderer,
 } from "./ImpostorBaker";
 import {
-  createImpostorMaterial,
-  updateImpostorMaterial,
-  updateImpostorLighting,
-  updateImpostorAAALighting,
-  syncImpostorLightingFromScene,
-  unregisterMaterial,
-  type DissolveConfig,
-  type AAALightingConfig,
-} from "./ImpostorMaterial";
-import {
   createTSLImpostorMaterial,
   type TSLImpostorMaterial,
 } from "./ImpostorMaterialTSL";
@@ -37,25 +26,58 @@ import {
   buildOctahedronMesh,
   lerpOctahedronGeometry,
   getViewDirection,
+  directionToGridCell,
 } from "./OctahedronGeometry";
 
-// Reusable objects to avoid allocations
-const _raycaster = new THREE.Raycaster();
+// Reusable objects to avoid allocations (no more raycaster - using O(1) math!)
 const _viewDirection = new THREE.Vector3();
+
+/**
+ * Lighting configuration for TSL impostor materials
+ */
+export interface ImpostorLightingConfig {
+  ambientColor?: THREE.Vector3;
+  ambientIntensity?: number;
+  directionalLights?: Array<{
+    direction: THREE.Vector3;
+    color: THREE.Vector3;
+    intensity: number;
+  }>;
+  pointLights?: Array<{
+    position: THREE.Vector3;
+    color: THREE.Vector3;
+    intensity: number;
+    distance: number;
+    decay: number;
+  }>;
+  specular?: {
+    f0?: number;
+    shininess?: number;
+    intensity?: number;
+  };
+}
+
+/**
+ * Simple lighting config (for backwards compatibility)
+ */
+export interface SimpleLightingConfig {
+  lightDirection?: THREE.Vector3;
+  lightColor?: THREE.Vector3;
+  lightIntensity?: number;
+  ambientColor?: THREE.Vector3;
+  ambientIntensity?: number;
+}
 
 /**
  * Options for creating an impostor instance
  */
 export interface CreateInstanceOptions {
+  /** Whether to use TSL (WebGPU) material instead of GLSL (WebGL) */
+  useTSL?: boolean;
   /** Dissolve configuration for distance-based fade */
   dissolve?: DissolveConfig;
   /**
-   * Use TSL (WebGPU) material instead of GLSL (WebGL).
-   * Set to true when using WebGPURenderer.
-   */
-  useTSL?: boolean;
-  /**
-   * Debug mode for TSL material (only used when useTSL=true):
+   * Debug mode for TSL material:
    * - 0: Normal rendering (default)
    * - 1: Raw texture sample (no blending)
    * - 2: Show UV coordinates as color
@@ -206,12 +228,8 @@ export class OctahedralImpostor {
   ): ImpostorInstance & {
     /** Update lighting uniforms (only works if baked with normals) */
     updateLighting?: (
-      lighting: Parameters<typeof updateImpostorLighting>[1],
+      lighting: SimpleLightingConfig | ImpostorLightingConfig,
     ) => void;
-    /** Update AAA lighting uniforms (only works if baked with full/depth) */
-    updateAAALighting?: (config: AAALightingConfig) => void;
-    /** Sync lighting from Three.js scene (only works if baked with full/depth) */
-    syncLightingFromScene?: (scene: THREE.Scene) => void;
     /** Update dissolve uniforms (only works if dissolve enabled) */
     updateDissolve?: (playerPos: THREE.Vector3) => void;
   } {
@@ -230,53 +248,28 @@ export class OctahedralImpostor {
       depthFar,
     } = bakeResult;
 
-    // Determine if this is an AAA bake (has depth atlas)
-    const isAAA = !!depthAtlasTexture;
+    // Determine AAA features based on available atlases
     const hasNormalAtlas = !!normalAtlasTexture;
     const hasDepthAtlas = !!depthAtlasTexture;
     const hasPbrAtlas = !!pbrAtlasTexture;
     const enableTSLAAA = hasNormalAtlas || hasDepthAtlas || hasPbrAtlas;
-    const useTSL = options?.useTSL ?? false;
 
-    // Create material based on renderer type
-    // TSL (WebGPU) or GLSL (WebGL)
-    let material: THREE.ShaderMaterial | TSLImpostorMaterial;
-
-    if (useTSL) {
-      // WebGPU: Use TSL NodeMaterial
-      material = createTSLImpostorMaterial({
-        atlasTexture,
-        normalAtlasTexture,
-        depthAtlasTexture,
-        pbrAtlasTexture,
-        gridSizeX,
-        gridSizeY,
-        enableAAA: enableTSLAAA,
-        enableDepthBlending: hasDepthAtlas,
-        enableSpecular: hasNormalAtlas,
-        depthNear: depthNear ?? 0.001,
-        depthFar: depthFar ?? 10,
-        dissolve: options?.dissolve,
-        debugMode: options?.debugMode ?? 0,
-      });
-    } else {
-      // WebGL: Use GLSL ShaderMaterial
-      material = createImpostorMaterial({
-        atlasTexture,
-        normalAtlasTexture,
-        depthAtlasTexture,
-        pbrAtlasTexture,
-        gridSizeX,
-        gridSizeY,
-        enableLighting: !!normalAtlasTexture,
-        enableDepthBlending: !!depthAtlasTexture,
-        enableSpecular: !!normalAtlasTexture,
-        depthNear: depthNear ?? 0.001,
-        depthFar: depthFar ?? 10,
-        objectScale: scale,
-        dissolve: options?.dissolve,
-      });
-    }
+    // Create TSL material (WebGPU only - no GLSL fallback)
+    const material = createTSLImpostorMaterial({
+      atlasTexture,
+      normalAtlasTexture,
+      depthAtlasTexture,
+      pbrAtlasTexture,
+      gridSizeX,
+      gridSizeY,
+      enableAAA: enableTSLAAA,
+      enableDepthBlending: hasDepthAtlas,
+      enableSpecular: hasNormalAtlas,
+      depthNear: depthNear ?? 0.001,
+      depthFar: depthFar ?? 10,
+      dissolve: options?.dissolve,
+      debugMode: options?.debugMode ?? 0,
+    });
 
     // Calculate dimensions to match atlas cell proportions
     // The atlas bakes using maxDimension as the reference, so we must match that
@@ -332,32 +325,17 @@ export class OctahedralImpostor {
       }
     }
 
-    // Create a raycast helper mesh at origin for view direction lookup
-    // This mesh is used to determine which atlas cell(s) to sample based on view angle
-    // IMPORTANT: Must use filledMesh.geometry which has proper triangle indices,
-    // NOT wireframeMesh.geometry which is LineSegments with no triangle data
-    const raycastGeometry = octMesh.filledMesh.geometry;
-    const raycastMaterial = new MeshBasicNodeMaterial();
-    raycastMaterial.visible = false;
-    raycastMaterial.side = THREE.DoubleSide;
-    const raycastMesh = new THREE.Mesh(raycastGeometry, raycastMaterial);
-    raycastMesh.position.set(0, 0, 0);
-    raycastMesh.updateMatrixWorld(true);
-
-    // Reusable objects for update loop
-    const rayOrigin = new THREE.Vector3();
-    const rayDirection = new THREE.Vector3();
+    // Store grid info for O(1) direction-to-cell lookup (no raycasting!)
+    const gridInfo = { gridSizeX, gridSizeY, octType };
 
     const instance: ImpostorInstance & {
       updateLighting?: (
-        lighting: Parameters<typeof updateImpostorLighting>[1],
+        lighting: SimpleLightingConfig | ImpostorLightingConfig,
       ) => void;
-      updateAAALighting?: (config: AAALightingConfig) => void;
-      syncLightingFromScene?: (scene: THREE.Scene) => void;
       updateDissolve?: (playerPos: THREE.Vector3) => void;
     } = {
       mesh,
-      material: material as THREE.ShaderMaterial, // Cast for interface compatibility
+      material: material as unknown as THREE.ShaderMaterial, // Cast for interface compatibility
 
       update: (camera: THREE.Camera) => {
         // Billboard towards camera
@@ -367,120 +345,62 @@ export class OctahedralImpostor {
         // This determines which part of the octahedron (and thus atlas) to sample
         _viewDirection.subVectors(camera.position, mesh.position).normalize();
 
-        // Raycast approach matching ImpostorViewer:
-        // Cast ray from a point along the view direction toward the octahedron center
-        // This finds the face whose normal best matches the view direction
-        rayOrigin.copy(_viewDirection).multiplyScalar(2);
-        rayDirection.copy(_viewDirection).negate();
+        // O(1) direction-to-cell lookup - NO RAYCASTING!
+        // This uses analytical octahedral math instead of expensive raycast
+        const { faceIndices, faceWeights } = directionToGridCell(
+          _viewDirection,
+          gridInfo.gridSizeX,
+          gridInfo.gridSizeY,
+          gridInfo.octType,
+        );
 
-        _raycaster.ray.origin.copy(rayOrigin);
-        _raycaster.ray.direction.copy(rayDirection);
-
-        const intersects = _raycaster.intersectObject(raycastMesh, false);
-        if (intersects.length > 0) {
-          const hit = intersects[0];
-          if (hit.face && hit.barycoord) {
-            const faceIndices = new THREE.Vector3(
-              hit.face.a,
-              hit.face.b,
-              hit.face.c,
-            );
-            const faceWeights = hit.barycoord.clone();
-
-            // Update material based on type (TSL or GLSL)
-            if (useTSL) {
-              // TSL material has updateView method
-              (material as TSLImpostorMaterial).updateView(
-                faceIndices,
-                faceWeights,
-              );
-            } else {
-              // GLSL material uses updateImpostorMaterial
-              const viewData: ImpostorViewData = { faceIndices, faceWeights };
-              updateImpostorMaterial(
-                material as THREE.ShaderMaterial,
-                viewData,
-              );
-            }
-          }
-        }
+        // Update TSL material view
+        material.updateView(faceIndices, faceWeights);
       },
 
       dispose: () => {
         geometry.dispose();
-        if (!useTSL) {
-          unregisterMaterial(material as THREE.ShaderMaterial);
-        }
         material.dispose();
       },
     };
 
     // Add lighting update function if normals are available
-    // Note: updateImpostorLighting uses simplified format (lightDirection, lightColor, etc.)
-    // TSL updateLighting uses full format (directionalLights[], pointLights[])
-    if (normalAtlasTexture) {
-      if (useTSL) {
-        // TSL material has updateLighting method if AAA enabled
-        const tslMat = material as TSLImpostorMaterial;
-        if (tslMat.updateLighting) {
-          instance.updateLighting = (lighting) => {
-            // Convert simple lighting format to TSL AAA format
-            // The simple format has: lightDirection, lightColor, lightIntensity, ambientColor, ambientIntensity
-            const directionalLights = lighting.lightDirection
-              ? [
-                  {
-                    direction: lighting.lightDirection,
-                    color: lighting.lightColor ?? new THREE.Vector3(1, 1, 1),
-                    intensity: lighting.lightIntensity ?? 1.0,
-                  },
-                ]
-              : [];
+    if (normalAtlasTexture && material.updateLighting) {
+      instance.updateLighting = (
+        lighting: SimpleLightingConfig | ImpostorLightingConfig,
+      ) => {
+        // Check if this is simple lighting format (has lightDirection) or full format (has directionalLights)
+        if ("directionalLights" in lighting || "pointLights" in lighting) {
+          // Full format - pass directly
+          material.updateLighting!(lighting as ImpostorLightingConfig);
+        } else {
+          // Simple format - convert to full format
+          const simple = lighting as SimpleLightingConfig;
+          const directionalLights = simple.lightDirection
+            ? [
+                {
+                  direction: simple.lightDirection,
+                  color: simple.lightColor ?? new THREE.Vector3(1, 1, 1),
+                  intensity: simple.lightIntensity ?? 1.0,
+                },
+              ]
+            : [];
 
-            tslMat.updateLighting!({
-              ambientColor: lighting.ambientColor,
-              ambientIntensity: lighting.ambientIntensity,
-              directionalLights,
-              pointLights: [],
-            });
-          };
+          material.updateLighting!({
+            ambientColor: simple.ambientColor,
+            ambientIntensity: simple.ambientIntensity,
+            directionalLights,
+            pointLights: [],
+          });
         }
-      } else {
-        instance.updateLighting = (lighting) => {
-          updateImpostorLighting(material as THREE.ShaderMaterial, lighting);
-        };
-      }
-    }
-
-    // Add AAA lighting update functions if this is an AAA bake
-    if (isAAA && !useTSL) {
-      // Only for GLSL - TSL uses updateLighting above
-      instance.updateAAALighting = (config: AAALightingConfig) => {
-        updateImpostorAAALighting(material as THREE.ShaderMaterial, config);
-      };
-      instance.syncLightingFromScene = (scene: THREE.Scene) => {
-        syncImpostorLightingFromScene(material as THREE.ShaderMaterial, scene);
       };
     }
 
     // Add dissolve update function if dissolve is enabled
-    if (useTSL) {
-      // TSL material has impostorUniforms with playerPos
-      const tslMat = material as TSLImpostorMaterial;
-      if (tslMat.impostorUniforms?.playerPos) {
-        instance.updateDissolve = (playerPos: THREE.Vector3) => {
-          tslMat.impostorUniforms.playerPos!.value.copy(playerPos);
-        };
-      }
-    } else {
-      // GLSL material has dissolveUniforms
-      const glslMat = material as THREE.ShaderMaterial & {
-        dissolveUniforms?: { playerPos: { value: THREE.Vector3 } };
+    if (material.impostorUniforms?.playerPos) {
+      instance.updateDissolve = (playerPos: THREE.Vector3) => {
+        material.impostorUniforms.playerPos!.value.copy(playerPos);
       };
-      if (glslMat.dissolveUniforms) {
-        instance.updateDissolve = (playerPos: THREE.Vector3) => {
-          glslMat.dissolveUniforms!.playerPos.value.copy(playerPos);
-        };
-      }
     }
 
     return instance;
@@ -492,49 +412,31 @@ export class OctahedralImpostor {
    * @param bakeResult - The bake result
    * @param count - Number of instances
    * @param size - Size of each impostor
-   * @param options - Optional configuration (useTSL for WebGPU compatibility)
    * @returns Instanced mesh and update function
    */
   createInstancedMesh(
     bakeResult: ImpostorBakeResult,
     count: number,
     size: number = 1,
-    options?: { useTSL?: boolean },
   ): {
     mesh: THREE.InstancedMesh;
-    material: THREE.ShaderMaterial | TSLImpostorMaterial;
+    material: TSLImpostorMaterial;
     setPosition: (index: number, position: THREE.Vector3) => void;
     update: (camera: THREE.Camera) => void;
     dispose: () => void;
   } {
-    const {
+    const { atlasTexture, normalAtlasTexture, gridSizeX, gridSizeY, octType } =
+      bakeResult;
+
+    // Create TSL material (WebGPU only - no GLSL fallback)
+    const material = createTSLImpostorMaterial({
       atlasTexture,
       normalAtlasTexture,
       gridSizeX,
       gridSizeY,
-      octMeshData,
-    } = bakeResult;
-
-    const useTSL = options?.useTSL ?? false;
-
-    // Create material with lighting support if normal atlas exists
-    // Use TSL for WebGPU, GLSL for WebGL
-    const material: THREE.ShaderMaterial | TSLImpostorMaterial = useTSL
-      ? createTSLImpostorMaterial({
-          atlasTexture,
-          normalAtlasTexture,
-          gridSizeX,
-          gridSizeY,
-          enableAAA: !!normalAtlasTexture,
-          enableSpecular: !!normalAtlasTexture,
-        })
-      : createImpostorMaterial({
-          atlasTexture,
-          normalAtlasTexture,
-          gridSizeX,
-          gridSizeY,
-          enableLighting: normalAtlasTexture != null,
-        });
+      enableAAA: !!normalAtlasTexture,
+      enableSpecular: !!normalAtlasTexture,
+    });
 
     const geometry = new THREE.PlaneGeometry(size, size);
     const mesh = new THREE.InstancedMesh(geometry, material, count);
@@ -544,13 +446,8 @@ export class OctahedralImpostor {
     const quaternion = new THREE.Quaternion();
     const scale = new THREE.Vector3(1, 1, 1);
 
-    // Raycaster for atlas view selection
-    const raycaster = new THREE.Raycaster();
+    // Reusable vector for view direction
     const viewDir = new THREE.Vector3();
-
-    // Reusable vectors for view data
-    const faceIndices = new THREE.Vector3();
-    const faceWeights = new THREE.Vector3();
 
     return {
       mesh,
@@ -570,37 +467,16 @@ export class OctahedralImpostor {
         // Calculate view direction from camera to forest center (origin)
         viewDir.set(0, 0, 0).sub(camera.position).normalize();
 
-        // Use octahedron raycasting to find the best atlas cells for this view
-        if (octMeshData?.filledMesh) {
-          raycaster.set(new THREE.Vector3(0, 0, 0), viewDir);
-          const hits = raycaster.intersectObject(octMeshData.filledMesh);
+        // O(1) direction-to-cell lookup - NO RAYCASTING!
+        const { faceIndices, faceWeights } = directionToGridCell(
+          viewDir,
+          gridSizeX,
+          gridSizeY,
+          octType,
+        );
 
-          if (hits.length > 0 && hits[0].face) {
-            const face = hits[0].face;
-            const bary = hits[0].uv
-              ? new THREE.Vector3(
-                  1 - hits[0].uv.x - hits[0].uv.y,
-                  hits[0].uv.x,
-                  hits[0].uv.y,
-                )
-              : new THREE.Vector3(0.34, 0.33, 0.33);
-
-            faceIndices.set(face.a, face.b, face.c);
-            faceWeights.copy(bary);
-
-            // Update material - handle both TSL and GLSL interfaces
-            if (useTSL) {
-              (material as TSLImpostorMaterial).updateView(
-                faceIndices,
-                faceWeights,
-              );
-            } else {
-              const glslMat = material as THREE.ShaderMaterial;
-              glslMat.uniforms.faceIndices.value.set(face.a, face.b, face.c);
-              glslMat.uniforms.faceWeights.value.copy(bary);
-            }
-          }
-        }
+        // Update TSL material view
+        material.updateView(faceIndices, faceWeights);
 
         // Billboard orientation: all instances face the camera
         const lookAtMatrix = new THREE.Matrix4();

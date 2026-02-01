@@ -57,6 +57,7 @@ import {
   setImpostorAlphaThreshold,
   getImpostorAlphaThreshold,
 } from "@hyperscape/impostor";
+import { NavigationVisualizer } from "./NavigationVisualizer.js";
 
 // DOM elements
 const canvasContainer = document.getElementById("canvas-container")!;
@@ -308,6 +309,39 @@ const townSizeSpan = document.getElementById("townSize")!;
 const townBuildingsSpan = document.getElementById("townBuildings")!;
 const townSafeZoneSpan = document.getElementById("townSafeZone")!;
 
+// Navigation controls
+const navigationControls = document.getElementById("navigation-controls")!;
+const navOptionsPanel = document.getElementById("nav-options")!;
+const navShowNavigationCheckbox = document.getElementById(
+  "navShowNavigation",
+) as HTMLInputElement;
+const navShowWalkableTilesCheckbox = document.getElementById(
+  "navShowWalkableTiles",
+) as HTMLInputElement;
+const navShowDoorsCheckbox = document.getElementById(
+  "navShowDoors",
+) as HTMLInputElement;
+const navShowStairsCheckbox = document.getElementById(
+  "navShowStairs",
+) as HTMLInputElement;
+const navShowWallsCheckbox = document.getElementById(
+  "navShowWalls",
+) as HTMLInputElement;
+const navShowEntryPointsCheckbox = document.getElementById(
+  "navShowEntryPoints",
+) as HTMLInputElement;
+const navShowDemoPathsCheckbox = document.getElementById(
+  "navShowDemoPaths",
+) as HTMLInputElement;
+const navClearPathBtn = document.getElementById(
+  "navClearPath",
+) as HTMLButtonElement;
+const navFloorsSpan = document.getElementById("navFloors")!;
+const navWalkableSpan = document.getElementById("navWalkable")!;
+const navWallsSpan = document.getElementById("navWalls")!;
+const navDoorsSpan = document.getElementById("navDoors")!;
+const navStairsSpan = document.getElementById("navStairs")!;
+
 // Performance stats DOM elements
 const fpsSpan = document.getElementById("fps")!;
 const drawCallsSpan = document.getElementById("drawCalls")!;
@@ -384,6 +418,9 @@ let townGroup: THREE.Group | null = null;
 
 type GeneratorMode = "tree" | "plant" | "rock" | "building" | "town";
 let currentMode: GeneratorMode = "tree";
+
+// Navigation visualization
+let navigationVisualizer: NavigationVisualizer | null = null;
 
 // Impostor state
 let treeImpostor: TreeImpostor | null = null;
@@ -515,6 +552,47 @@ async function initScene(): Promise<void> {
     }
   });
 
+  // Create navigation visualizer
+  navigationVisualizer = new NavigationVisualizer(scene, camera);
+
+  // Handle navigation click events (left click = point A, right click = point B)
+  // Use click detection that distinguishes between clicks and drags (for OrbitControls compatibility)
+  let mouseDownPos: { x: number; y: number; button: number } | null = null;
+  const CLICK_THRESHOLD = 5; // pixels - if mouse moves more than this, it's a drag
+
+  renderer.domElement.addEventListener("mousedown", (e: MouseEvent) => {
+    if (!navigationVisualizer?.isEnabled()) return;
+    if (currentMode !== "building" && currentMode !== "town") return;
+    if (e.button !== 0 && e.button !== 2) return;
+
+    mouseDownPos = { x: e.clientX, y: e.clientY, button: e.button };
+  });
+
+  renderer.domElement.addEventListener("mouseup", (e: MouseEvent) => {
+    if (!mouseDownPos) return;
+    if (!navigationVisualizer?.isEnabled()) return;
+    if (currentMode !== "building" && currentMode !== "town") return;
+
+    // Check if this was a click (not a drag)
+    const dx = e.clientX - mouseDownPos.x;
+    const dy = e.clientY - mouseDownPos.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    if (distance < CLICK_THRESHOLD && e.button === mouseDownPos.button) {
+      navigationVisualizer.handleClick(e, renderer.domElement, e.button);
+      updateNavigationStats();
+    }
+
+    mouseDownPos = null;
+  });
+
+  // Prevent context menu on right-click when navigation is enabled
+  renderer.domElement.addEventListener("contextmenu", (e: MouseEvent) => {
+    if (navigationVisualizer?.isEnabled()) {
+      e.preventDefault();
+    }
+  });
+
   // Hide loading
   loading.style.display = "none";
 }
@@ -602,6 +680,18 @@ function setMode(mode: GeneratorMode): void {
   setVisible(townStatsPanel, mode === "town");
 
   setVisible(treeDisplayControls, mode === "tree");
+
+  // Show navigation controls for building/town modes
+  const showNavigation = mode === "building" || mode === "town";
+  setVisible(navigationControls, showNavigation);
+
+  // Disable navigation when switching away from building/town
+  if (!showNavigation && navigationVisualizer) {
+    navigationVisualizer.setEnabled(false);
+    navShowNavigationCheckbox.checked = false;
+    setVisible(navOptionsPanel, false);
+  }
+
   resetStats();
 }
 
@@ -773,7 +863,10 @@ function createImpostorInstanceFromBake(
   }
 
   // createInstance now reads dimensions from bounding box, scale is just a multiplier
-  const instance = debugImpostor.createInstance(bakeResult, scale);
+  // Use TSL (WebGPU) materials since we're using WebGPURenderer
+  const instance = debugImpostor.createInstance(bakeResult, scale, {
+    useTSL: true,
+  });
 
   // Calculate Y offset so billboard sits on ground
   // The plane is now maxDimension × maxDimension (square)
@@ -1190,6 +1283,38 @@ function updateBuildingStats(stats: BuildingStats): void {
   buildingFootprintSpan.textContent = stats.footprintCells.toString();
 }
 
+function updateNavigationStats(): void {
+  if (!navigationVisualizer) return;
+
+  const stats = navigationVisualizer.getStats();
+  if (stats) {
+    navFloorsSpan.textContent = stats.floors.toString();
+    navWalkableSpan.textContent = stats.walkableTiles.toString();
+    navWallsSpan.textContent = stats.walls.toString();
+    navDoorsSpan.textContent = stats.doors.toString();
+    navStairsSpan.textContent = stats.stairs.toString();
+  } else {
+    navFloorsSpan.textContent = "-";
+    navWalkableSpan.textContent = "-";
+    navWallsSpan.textContent = "-";
+    navDoorsSpan.textContent = "-";
+    navStairsSpan.textContent = "-";
+  }
+}
+
+function updateNavigationOptions(): void {
+  if (!navigationVisualizer) return;
+
+  navigationVisualizer.setOptions({
+    showWalkableTiles: navShowWalkableTilesCheckbox.checked,
+    showDoors: navShowDoorsCheckbox.checked,
+    showStairs: navShowStairsCheckbox.checked,
+    showWalls: navShowWallsCheckbox.checked,
+    showEntryPoints: navShowEntryPointsCheckbox.checked,
+    showDemoPaths: navShowDemoPathsCheckbox.checked,
+  });
+}
+
 /**
  * Update building roof visibility based on checkbox state.
  * Hides actual roofs and terrace roofs, but NOT ceiling tiles
@@ -1241,6 +1366,12 @@ function generateBuilding(): void {
   updateBuildingStats(result.stats);
   updateBuildingRoofVisibility(); // Apply roof visibility based on checkbox
   fitCameraToObject(result.mesh, 1.5);
+
+  // Update navigation visualizer with building layout
+  if (navigationVisualizer) {
+    navigationVisualizer.setBuilding(result.layout, { x: 0, y: 0, z: 0 }, 0);
+    updateNavigationStats();
+  }
 }
 
 function generateTown(): void {
@@ -1552,7 +1683,28 @@ function generateTown(): void {
   townBuildingsSpan.textContent = `${town.buildings.length} buildings, ${pathCount} paths, ${landmarkCount} landmarks`;
   townSafeZoneSpan.textContent = `${town.safeZoneRadius}m (${town.internalRoads?.length ?? 0} roads)`;
 
-  fitCameraToObject(group, 1.8);
+  // Center camera on the town - target the center explicitly
+  const townCenter = new THREE.Vector3(0, 0, 0);
+  const townRadius = town.safeZoneRadius;
+  const cameraDistance = townRadius * 2.5;
+
+  controls.target.copy(townCenter);
+  camera.position.set(
+    cameraDistance * 0.7,
+    cameraDistance * 0.5,
+    cameraDistance * 0.7,
+  );
+  camera.updateProjectionMatrix();
+  controls.update();
+
+  // Update navigation visualizer with town data
+  // For town mode, select first building by default to show navigation
+  if (navigationVisualizer && buildingGenerator && town.buildings.length > 0) {
+    navigationVisualizer.setTown(town, buildingGenerator);
+    // Select first building to show its navigation
+    navigationVisualizer.selectBuilding(0);
+    updateNavigationStats();
+  }
 }
 
 function generateCurrent(): void {
@@ -1738,7 +1890,7 @@ function animate(): void {
 /**
  * Bake tree impostor atlas.
  */
-function bakeImpostor(): void {
+async function bakeImpostor(): Promise<void> {
   if (!currentTree) {
     alert("Generate a tree first!");
     return;
@@ -1808,16 +1960,18 @@ function bakeImpostor(): void {
   let bakeResult: ImpostorBakeResult | null = null;
   if (sourceMode === "tree") {
     // Create and bake impostor from live tree (TreeImpostor path)
+    // Use TSL (WebGPU) materials since we're using WebGPURenderer
     treeImpostor = new TreeImpostor({
       gridSizeX,
       gridSizeY,
       atlasSize,
       alphaTest: getImpostorAlphaThreshold(),
       enableLighting, // Bake with normals for dynamic lighting
+      useTSL: true, // WebGPU: Use TSL materials
     });
 
     try {
-      treeImpostor.bake(currentTree, renderer);
+      await treeImpostor.bake(currentTree, renderer);
       bakeResult = treeImpostor.getBakeResult();
     } catch (e) {
       console.error("Baking failed:", e);
@@ -1832,7 +1986,7 @@ function bakeImpostor(): void {
     try {
       // Use bakeWithNormals if lighting is enabled, otherwise regular bake
       if (enableLighting) {
-        bakeResult = debugImpostor.bakeWithNormals(bakeSource, {
+        bakeResult = await debugImpostor.bakeWithNormals(bakeSource, {
           atlasWidth: atlasSize,
           atlasHeight: atlasSize,
           gridSizeX,
@@ -1842,7 +1996,7 @@ function bakeImpostor(): void {
           backgroundAlpha: 0,
         });
       } else {
-        bakeResult = debugImpostor.bake(bakeSource, {
+        bakeResult = await debugImpostor.bake(bakeSource, {
           atlasWidth: atlasSize,
           atlasHeight: atlasSize,
           gridSizeX,
@@ -2312,6 +2466,37 @@ function setupEventListeners(): void {
   townSeedInput.addEventListener("keypress", (e) => {
     if (e.key === "Enter") {
       generateTown();
+    }
+  });
+
+  // Navigation controls
+  navShowNavigationCheckbox.addEventListener("change", () => {
+    const enabled = navShowNavigationCheckbox.checked;
+    setVisible(navOptionsPanel, enabled);
+    if (navigationVisualizer) {
+      navigationVisualizer.setEnabled(enabled);
+      if (enabled) {
+        updateNavigationStats();
+      }
+    }
+  });
+
+  navShowWalkableTilesCheckbox.addEventListener(
+    "change",
+    updateNavigationOptions,
+  );
+  navShowDoorsCheckbox.addEventListener("change", updateNavigationOptions);
+  navShowStairsCheckbox.addEventListener("change", updateNavigationOptions);
+  navShowWallsCheckbox.addEventListener("change", updateNavigationOptions);
+  navShowEntryPointsCheckbox.addEventListener(
+    "change",
+    updateNavigationOptions,
+  );
+  navShowDemoPathsCheckbox.addEventListener("change", updateNavigationOptions);
+
+  navClearPathBtn.addEventListener("click", () => {
+    if (navigationVisualizer) {
+      navigationVisualizer.clearUserPath();
     }
   });
 }

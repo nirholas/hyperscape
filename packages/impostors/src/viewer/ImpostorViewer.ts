@@ -6,43 +6,40 @@
  */
 
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { texture as tslTexture } from "three/tsl";
 import * as THREE_WEBGPU from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { texture as tslTexture } from "three/tsl";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { Pane } from "tweakpane";
 
 /** Material type for WebGPU */
 type BasicMaterial = MeshBasicNodeMaterial;
-import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { Pane } from "tweakpane";
 
+import type {
+  ImpostorBakeResult,
+  OctahedronMeshData,
+  OctahedronTypeValue,
+  PBRBakeModeValue,
+  TSLImpostorMaterial,
+} from "../lib";
 import {
   OctahedralImpostor,
   OctahedronType,
   PBRBakeMode,
   buildOctahedronMesh,
-  lerpOctahedronGeometry,
   createTSLImpostorMaterial,
-  updateImpostorMaterial,
-  updateImpostorAAALighting,
+  lerpOctahedronGeometry,
 } from "../lib";
-import type {
-  OctahedronTypeValue,
-  OctahedronMeshData,
-  PBRBakeModeValue,
-  ImpostorBakeResult,
-  ImpostorViewData,
-  TSLImpostorMaterial,
-} from "../lib";
-
-// WebGPU renderer type (for future use)
-void THREE_WEBGPU;
-void createTSLImpostorMaterial;
 import {
   createColoredCube,
   generateHSLGradientColors,
   mapLinear,
 } from "../lib/utils";
+
+// WebGPU renderer type (for future use)
+void THREE_WEBGPU;
+void createTSLImpostorMaterial;
 
 // Import Text from troika-three-text for debug labels
 // @ts-expect-error - troika-three-text doesn't have type definitions
@@ -168,7 +165,7 @@ export class ImpostorViewer {
       gridSizeY: config.gridSizeY ?? 31,
       octType: config.octType ?? OctahedronType.HEMI,
       showDebugUI: config.showDebugUI ?? true,
-      pbrMode: config.pbrMode ?? PBRBakeMode.BASIC, // Use BASIC for Canvas-based atlas
+      pbrMode: config.pbrMode ?? PBRBakeMode.FULL, // Use FULL for normals + depth + lighting
       rendererType: config.rendererType ?? "webgl",
     };
 
@@ -481,14 +478,22 @@ export class ImpostorViewer {
 
   /**
    * Set the source mesh to create impostor from
+   * Pass null to clear the current mesh
    */
-  async setSourceMesh(mesh: THREE.Mesh | THREE.Group): Promise<void> {
+  async setSourceMesh(mesh: THREE.Mesh | THREE.Group | null): Promise<void> {
     // Remove old mesh
     if (this.sourceMesh) {
       this.scene.remove(this.sourceMesh);
     }
 
     this.sourceMesh = mesh;
+
+    // If null, just clear
+    if (!mesh) {
+      this.cleanup();
+      return;
+    }
+
     await this.generate();
   }
 
@@ -845,11 +850,17 @@ export class ImpostorViewer {
       });
     }
 
+    // Scale impostor based on bounding sphere diameter
+    const diameter = this.bakeResult.boundingSphere.radius * 2;
+
     this.impostorMesh = new THREE.Mesh(
       new THREE.PlaneGeometry(1, 1),
       this.impostorMaterial,
     );
-    this.impostorMesh.position.z = 2;
+    // Scale to match original mesh size
+    this.impostorMesh.scale.setScalar(diameter);
+    // Position at z=2, with bottom of quad at ground level (y = radius since quad is centered)
+    this.impostorMesh.position.set(0, diameter / 2, 2);
     this.scene.add(this.impostorMesh);
 
     const wireframeMat = this.createBasicMaterial({
@@ -860,7 +871,9 @@ export class ImpostorViewer {
       new THREE.PlaneGeometry(1, 1),
       wireframeMat,
     );
-    this.wireframeMesh.position.z = 2;
+    // Match impostor scale and position
+    this.wireframeMesh.scale.setScalar(diameter);
+    this.wireframeMesh.position.set(0, diameter / 2, 2);
     this.wireframeMesh.visible = this.debugState.showWireframe;
     this.scene.add(this.wireframeMesh);
 
@@ -1191,25 +1204,17 @@ export class ImpostorViewer {
       specularShininess: 32,
     };
 
-    // Helper to update lighting for either material type
+    // Helper to update lighting for TSL material
     const updateLighting = (
-      config: Parameters<typeof updateImpostorAAALighting>[1],
+      config: Parameters<NonNullable<TSLImpostorMaterial["updateLighting"]>>[0],
     ) => {
       if (!this.impostorMaterial || !this.bakeResult?.normalAtlasTexture)
         return;
 
-      if (this.isWebGPU) {
-        // TSL material
-        const tslMat = this.impostorMaterial as TSLImpostorMaterial;
-        if (tslMat.updateLighting) {
-          tslMat.updateLighting(config);
-        }
-      } else {
-        // GLSL material
-        updateImpostorAAALighting(
-          this.impostorMaterial as THREE.ShaderMaterial,
-          config,
-        );
+      // TSL material
+      const tslMat = this.impostorMaterial as TSLImpostorMaterial;
+      if (tslMat.updateLighting) {
+        tslMat.updateLighting(config);
       }
     };
 
@@ -1428,22 +1433,9 @@ export class ImpostorViewer {
 
     // Update impostor
     if (this.impostorMesh && this.impostorMaterial) {
-      // Use proper view data update based on material type
-      if (this.isWebGPU) {
-        // TSL material
-        const tslMat = this.impostorMaterial as TSLImpostorMaterial;
-        tslMat.updateView(this.currentFaceIndices, this.currentFaceWeights);
-      } else {
-        // GLSL ShaderMaterial
-        const viewData: ImpostorViewData = {
-          faceIndices: this.currentFaceIndices,
-          faceWeights: this.currentFaceWeights,
-        };
-        updateImpostorMaterial(
-          this.impostorMaterial as THREE.ShaderMaterial,
-          viewData,
-        );
-      }
+      // TSL material
+      const tslMat = this.impostorMaterial as TSLImpostorMaterial;
+      tslMat.updateView(this.currentFaceIndices, this.currentFaceWeights);
 
       this.impostorMesh.lookAt(this.camera.position);
 
@@ -1475,6 +1467,20 @@ export class ImpostorViewer {
    */
   resize(): void {
     this.handleResize();
+  }
+
+  /**
+   * Get the Three.js scene
+   */
+  getScene(): THREE.Scene {
+    return this.scene;
+  }
+
+  /**
+   * Get the renderer instance
+   */
+  getRenderer(): THREE.WebGLRenderer | THREE_WEBGPU.WebGPURenderer {
+    return this.renderer;
   }
 
   /**

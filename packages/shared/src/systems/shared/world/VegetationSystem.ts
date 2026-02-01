@@ -55,7 +55,6 @@ import {
   type LODDistancesWithSq,
 } from "./GPUVegetation";
 import { csmLevels } from "./Environment";
-import { updateTreeInstances } from "./ProcgenTreeCache";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
 import {
   isGPUComputeAvailable,

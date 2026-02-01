@@ -11,7 +11,6 @@
  */
 
 import type { Item, EquipmentSlot } from "../../../types/game/item-types";
-import { WeaponType } from "../../../types/game/item-types";
 
 /**
  * Arrow data from the ammunition manifest

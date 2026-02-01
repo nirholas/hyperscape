@@ -18,9 +18,6 @@
  */
 
 type CryptoModule = typeof import("crypto");
-type CryptoRequire = (moduleId: "crypto") => CryptoModule;
-
-declare const require: CryptoRequire;
 
 // Lazy-loaded crypto module (Node.js only)
 let cryptoModule: typeof import("crypto") | null = null;

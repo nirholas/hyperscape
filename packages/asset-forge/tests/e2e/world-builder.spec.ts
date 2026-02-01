@@ -168,9 +168,8 @@ test.describe("World Builder - Preset Selection", () => {
   test("should change terrain when preset is selected", async ({ page }) => {
     const presetSelect = page.locator("select").first();
     if (await presetSelect.isVisible({ timeout: 5000 })) {
-      // Get initial state - use more specific selector
+      // Get stats display element - use more specific selector
       const statsDisplay = page.locator('span:has-text("Towns:")').first();
-      const initialStats = await statsDisplay.textContent();
 
       // Change preset
       await presetSelect.selectOption({ index: 1 });

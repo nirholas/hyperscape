@@ -785,8 +785,6 @@ export class AggroSystem extends SystemBase {
   private _mobStatesArrayDirty = true;
 
   private updateMobAI(): void {
-    const now = Date.now();
-
     // Increment tick counter for tolerance system
     this.currentTick++;
 

@@ -306,7 +306,6 @@ describe("Building-Terrain Interaction", () => {
       const building = collisionService.getBuilding(BUILDING_ID)!;
       const bbox = building.boundingBox;
       const floor0 = building.floors[0];
-      const buildingElevation = floor0.elevation;
 
       const holeTilesWithNoElevation: string[] = [];
 
@@ -606,7 +605,6 @@ describe("Building-Terrain Interaction", () => {
 
           const inFootprint = collisionService.isTileInBuildingFootprint(x, z);
           const inBbox = collisionService.isTileInBuildingBoundingBox(x, z);
-          const elevation = collisionService.getFloorElevation(x, z, 0);
 
           if (inFootprint) {
             row += "F"; // Floor tile (has elevation)

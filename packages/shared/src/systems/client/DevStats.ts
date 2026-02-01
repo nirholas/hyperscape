@@ -927,14 +927,6 @@ export class DevStats extends System {
                 100
               ).toFixed(1)
             : "0.0";
-        const visiblePercent =
-          cullingInfo.totalVertices > 0
-            ? (
-                (cullingInfo.visibleVertices / cullingInfo.totalVertices) *
-                100
-              ).toFixed(1)
-            : "0.0";
-
         // Color based on culling effectiveness (green = good culling)
         const culledColor =
           parseFloat(culledPercent) > 30 ? "#4ade80" : "#fbbf24";
@@ -1392,13 +1384,6 @@ export class DevStats extends System {
       const category = getCategory(sys.avg);
       // Bar width: 8ms = 100%
       const barWidth = Math.min(100, (sys.avg / 8) * 100);
-
-      // Show phase breakdown if significant
-      const hasPhaseBreakdown =
-        sys.fixedUpdate > 0.1 || sys.update > 0.1 || sys.lateUpdate > 0.1;
-      const phaseInfo = hasPhaseBreakdown
-        ? ` <span style="color: #666; font-size: 8px;">(f:${sys.fixedUpdate.toFixed(1)} u:${sys.update.toFixed(1)} l:${sys.lateUpdate.toFixed(1)})</span>`
-        : "";
 
       html += `
         <div style="display: flex; align-items: center; gap: 4px; margin: 3px 0; padding: 2px 4px; background: ${category.bgColor}; border-radius: 3px;">

@@ -10,7 +10,6 @@ import {
   createRng,
   CELL_SIZE,
   WALL_THICKNESS,
-  FLOOR_THICKNESS,
   WALL_HEIGHT,
   FLOOR_HEIGHT,
   ROOF_THICKNESS,
@@ -40,7 +39,7 @@ interface AABB {
  * We analyze the geometry to find individual box components by looking at
  * disconnected vertex groups
  */
-function extractAABBsFromGeometry(
+function _extractAABBsFromGeometry(
   geometry: THREE.BufferGeometry,
   label: string,
 ): AABB[] {
@@ -69,7 +68,7 @@ function extractAABBsFromGeometry(
  * Check if two AABBs overlap (with a small epsilon for numerical precision)
  * Returns true if boxes overlap in volume (not just touch)
  */
-function aabbsOverlap(a: AABB, b: AABB, epsilon = 0.001): boolean {
+function _aabbsOverlap(a: AABB, b: AABB, epsilon = 0.001): boolean {
   // Check for separation on each axis
   // Boxes overlap if they overlap on ALL three axes
   const overlapX = a.minX < b.maxX - epsilon && a.maxX > b.minX + epsilon;
@@ -103,7 +102,7 @@ function getOverlapVolume(a: AABB, b: AABB): number {
  * Detailed geometry extractor that creates separate AABBs for each component
  * by analyzing the geometry triangles
  */
-function extractDetailedAABBs(geometry: THREE.BufferGeometry): AABB[] {
+function _extractDetailedAABBs(geometry: THREE.BufferGeometry): AABB[] {
   const position = geometry.attributes.position;
   if (!position) return [];
 
@@ -221,8 +220,8 @@ function verifyCornerAlignment(layout: {
   floorPlans: Array<{ footprint: boolean[][] }>;
 }): { valid: boolean; issues: string[] } {
   const issues: string[] = [];
-  const halfCell = CELL_SIZE / 2;
-  const halfThick = WALL_THICKNESS / 2;
+  const _halfCell = CELL_SIZE / 2;
+  const _halfThick = WALL_THICKNESS / 2;
 
   for (let floorIdx = 0; floorIdx < layout.floorPlans.length; floorIdx++) {
     const footprint = layout.floorPlans[floorIdx].footprint;
@@ -696,8 +695,8 @@ function verifyGeometryLevels(layout: {
     // Expected Y levels for this floor
     const floorY = floorIdx * FLOOR_HEIGHT + FOUNDATION_HEIGHT;
     const wallHeight = isTopFloor ? WALL_HEIGHT : FLOOR_HEIGHT;
-    const wallTopY = floorY + wallHeight;
-    const ceilingY = (floorIdx + 1) * FLOOR_HEIGHT + FOUNDATION_HEIGHT;
+    const _wallTopY = floorY + wallHeight;
+    const _ceilingY = (floorIdx + 1) * FLOOR_HEIGHT + FOUNDATION_HEIGHT;
 
     const halfWidth = (layout.width * CELL_SIZE) / 2;
     const halfDepth = (layout.depth * CELL_SIZE) / 2;
@@ -903,7 +902,7 @@ function verifyFloorAlignment(layout: {
     const footprint = layout.floorPlans[floorIdx].footprint;
     const depth = footprint.length;
     const width = footprint[0]?.length || 0;
-    const y = floorIdx * FLOOR_HEIGHT;
+    const _y = floorIdx * FLOOR_HEIGHT;
 
     for (let row = 0; row < depth; row++) {
       for (let col = 0; col < width; col++) {
@@ -1122,7 +1121,7 @@ describe("BUILDING_RECIPES", () => {
       "frontSide",
     ];
 
-    for (const [typeKey, recipe] of Object.entries(BUILDING_RECIPES)) {
+    for (const [_typeKey, recipe] of Object.entries(BUILDING_RECIPES)) {
       for (const field of requiredFields) {
         expect(recipe).toHaveProperty(field);
       }
@@ -1349,7 +1348,7 @@ describe("Building Geometry Validation", () => {
       const layout = result!.layout;
       const halfWidth = (layout.width * CELL_SIZE) / 2;
       const halfDepth = (layout.depth * CELL_SIZE) / 2;
-      const floorInset = WALL_THICKNESS / 2;
+      const _floorInset = WALL_THICKNESS / 2;
 
       for (let floorIdx = 0; floorIdx < layout.floors; floorIdx++) {
         const footprint = layout.floorPlans[floorIdx].footprint;
@@ -1550,8 +1549,6 @@ describe("Building Geometry Validation", () => {
           seed: `ceiling_floor_${i}`,
         });
         if (!result || result.layout.floors < 2) continue;
-
-        const layout = result.layout;
 
         // For floor 0, ceiling is at: (0 + 1) * FLOOR_HEIGHT + FOUNDATION_HEIGHT = FLOOR_HEIGHT + FOUNDATION_HEIGHT
         // For floor 1, floor is at: 1 * FLOOR_HEIGHT + FOUNDATION_HEIGHT = FLOOR_HEIGHT + FOUNDATION_HEIGHT
@@ -1865,7 +1862,7 @@ describe("Building Geometry Validation", () => {
 
       if (resultWithStairs && resultWithStairs.layout.stairs) {
         const stairs = resultWithStairs.layout.stairs;
-        const layout = resultWithStairs.layout as {
+        const _layout = resultWithStairs.layout as {
           stairs: {
             col: number;
             row: number;
@@ -1875,8 +1872,8 @@ describe("Building Geometry Validation", () => {
         };
 
         // Stairs should span exactly two cells
-        const stairCellCount = 2;
-        const expectedStairLength = CELL_SIZE; // From cell center to cell center
+        const _stairCellCount = 2;
+        const _expectedStairLength = CELL_SIZE; // From cell center to cell center
 
         // Verify stair and landing cells are adjacent
         const colDiff = Math.abs(stairs.col - stairs.landing.col);
@@ -1952,8 +1949,8 @@ describe("Building Geometry Validation", () => {
   describe("Specific edge case tests", () => {
     it("1x1 cell building should have exactly 4 corners", () => {
       // Create a minimal building
-      const recipe = BUILDING_RECIPES["simple-house"];
-      const rng = createRng("1x1_test");
+      const _recipe = BUILDING_RECIPES["simple-house"];
+      const _rng = createRng("1x1_test");
 
       // Force 1x1 by adjusting layout manually isn't possible, but we can test smallest possible
       const result = generator.generate("simple-house", {

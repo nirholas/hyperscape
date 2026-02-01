@@ -14,7 +14,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { BuildingCollisionService } from "../BuildingCollisionService";
 import { CollisionMatrix } from "../../movement/CollisionMatrix";
-import { CollisionFlag, CollisionMask } from "../../movement/CollisionFlags";
+import { CollisionFlag } from "../../movement/CollisionFlags";
 import { BFSPathfinder } from "../../movement/BFSPathfinder";
 import type { BuildingLayoutInput } from "../../../../types/world/building-collision-types";
 import type { TileCoord } from "../../movement/TileSystem";
@@ -669,11 +669,6 @@ describe("Door Detection Accuracy", () => {
 
     const entrance = entranceTiles[0];
 
-    // Exterior tile should be outside building bbox
-    // Interior tile should be inside building bbox
-    const building = collisionService.getBuilding(buildingId);
-    const bbox = building!.boundingBox;
-
     // For north-facing door, exterior Z should be less than minTileZ
     // Interior Z should be >= minTileZ
     expect(entrance.direction).toBe("north");
@@ -1196,8 +1191,6 @@ describe("Edge Cases and Regression Prevention", () => {
   });
 
   it("should not allow movement to non-existent floor", () => {
-    const buildingId = "diagonal-test";
-
     // Try to move on floor 5 which doesn't exist
     const validation = collisionService.canMoveFromTo(
       { x: 0, z: 0 },

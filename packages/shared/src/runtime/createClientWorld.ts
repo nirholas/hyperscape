@@ -82,6 +82,9 @@ import {
   TREE_PRESETS,
 } from "../systems/shared/world/ProcgenTreeCache";
 
+// PhysX loading - used to defer heavy work until WASM is loaded
+import { waitForPhysX } from "../physics/PhysXManager";
+
 // RPG systems are registered via SystemLoader to keep them modular
 import { registerSystems } from "../systems/shared";
 
@@ -94,7 +97,7 @@ import { LODs } from "../systems/shared";
 import { HealthBars } from "../systems/client/HealthBars";
 import { EquipmentVisualSystem } from "../systems/client/EquipmentVisualSystem";
 import { ZoneVisualsSystem } from "../systems/client/ZoneVisualsSystem";
-import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
+// ResourceTileDebugSystem available for debugging: import { ResourceTileDebugSystem } from "../systems/client/ResourceTileDebugSystem";
 import { ZoneDetectionSystem } from "../systems/shared/death/ZoneDetectionSystem";
 import { InteractionRouter } from "../systems/client/interaction";
 import { Particles } from "../systems/shared";
@@ -291,11 +294,25 @@ export function createClientWorld() {
     try {
       await registerSystems(world);
 
-      // Pre-warm procgen tree cache in parallel (prevents hitches when trees first appear)
-      // This runs async and doesn't block other init - trees will be ready when needed
-      prewarmTreeCache([...TREE_PRESETS]).catch((err) => {
-        console.warn("[createClientWorld] Tree cache pre-warm failed:", err);
-      });
+      // Pre-warm procgen tree cache AFTER PhysX is loaded (prevents WASM timeout)
+      // Tree generation is CPU-intensive and can block WASM instantiation if run in parallel.
+      // By waiting for PhysX first, we ensure critical physics initialization completes
+      // before starting the heavy tree pre-warming work.
+      // This runs async and doesn't block other init - trees will be ready when needed.
+      (async () => {
+        try {
+          // Wait for PhysX to be loaded first (with generous timeout for retries)
+          await waitForPhysX("TreePrewarm", 120000);
+          console.log(
+            "[createClientWorld] PhysX loaded, starting tree cache pre-warm...",
+          );
+
+          // Now safe to run heavy tree generation
+          await prewarmTreeCache([...TREE_PRESETS]);
+        } catch (err) {
+          console.warn("[createClientWorld] Tree cache pre-warm failed:", err);
+        }
+      })();
 
       // CRITICAL: Initialize newly registered systems
       const worldOptions = {

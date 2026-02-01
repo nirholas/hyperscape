@@ -1738,7 +1738,9 @@ export class PlayerLocal extends Entity implements HotReloadable {
     }
 
     // Wait for PhysX to be ready - required for player physics
-    await waitForPhysX("PlayerLocal", 10000); // 10 second timeout
+    // By this point, Physics system should have already loaded PhysX,
+    // but we wait with a generous timeout just in case of race conditions
+    await waitForPhysX("PlayerLocal", 60000); // 60 second timeout
 
     // Get the global PHYSX object - required
     const PHYSX = getPhysX();

@@ -23,13 +23,6 @@ export {
   type ImpostorBakeResult,
   type ImpostorInstance,
   type ImpostorViewData,
-  createImpostorMaterial,
-  updateImpostorMaterial,
-  updateImpostorLighting,
-  createSimpleImpostorMaterial,
-  // Debug mode utilities
-  setImpostorDebugMode,
-  getImpostorDebugMode,
-  cycleImpostorDebugMode,
-  type ImpostorDebugMode,
+  createTSLImpostorMaterial,
+  type TSLImpostorMaterial,
 } from "@hyperscape/impostor";

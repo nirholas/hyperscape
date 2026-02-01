@@ -236,7 +236,7 @@ describe("Rock Generation Algorithms", () => {
     it("avoids underwater positions", () => {
       ctx = createTestContext(0, 0, {
         waterThreshold: 10,
-        getHeightAt: (x, z) => (x < 50 ? 5 : 15), // Left half underwater
+        getHeightAt: (x, _z) => (x < 50 ? 5 : 15), // Left half underwater
       });
 
       const rocks = generateRocks(ctx, rockConfig, "forest");
@@ -249,7 +249,7 @@ describe("Rock Generation Algorithms", () => {
 
     it("avoids road positions", () => {
       ctx = createTestContext(0, 0, {
-        isOnRoad: (x, z) => x > 40 && x < 60, // Road in middle
+        isOnRoad: (x, _z) => x > 40 && x < 60, // Road in middle
       });
 
       const rocks = generateRocks(ctx, rockConfig, "forest");
@@ -406,7 +406,7 @@ describe("Plant Generation Algorithms", () => {
     it("avoids underwater positions", () => {
       ctx = createTestContext(0, 0, {
         waterThreshold: 10,
-        getHeightAt: (x, z) => (x < 50 ? 5 : 15),
+        getHeightAt: (x, _z) => (x < 50 ? 5 : 15),
       });
 
       const plants = generatePlants(ctx, plantConfig, "forest");
@@ -928,7 +928,7 @@ describe("Error Handling - Invalid Inputs", () => {
 describe("Data Verification", () => {
   describe("Position Verification", () => {
     it("position.y matches getHeightAt result", () => {
-      const heightFn = (x: number, z: number) => 50 + Math.sin(x * 0.1) * 10;
+      const heightFn = (x: number, _z: number) => 50 + Math.sin(x * 0.1) * 10;
       const ctx = createTestContext(0, 0, { getHeightAt: heightFn });
 
       const rockConfig: BiomeRockConfig = {
@@ -1109,7 +1109,7 @@ describe("Terrain Constraints", () => {
           const dist = Math.sqrt(dx * dx + dz * dz);
           return dist < 30 ? 20 : 5; // Center above water, edges below
         },
-        isOnRoad: (x, z) => {
+        isOnRoad: (x, _z) => {
           // Road running through middle
           const localX = x % 100;
           return localX > 45 && localX < 55;
@@ -1129,7 +1129,6 @@ describe("Terrain Constraints", () => {
 
       for (const rock of rocks) {
         const localX = rock.position.x % 100;
-        const localZ = rock.position.z % 100;
 
         // Should not be on road
         expect(localX < 45 || localX > 55).toBe(true);
@@ -1309,7 +1308,7 @@ describe("VegetationInstance Structure", () => {
 
 describe("Biome Defaults Completeness", () => {
   it("all rock biome presets have matching distribution", () => {
-    for (const [biome, config] of Object.entries(ROCK_BIOME_DEFAULTS)) {
+    for (const [, config] of Object.entries(ROCK_BIOME_DEFAULTS)) {
       for (const preset of config.presets) {
         expect(config.distribution[preset]).toBeDefined();
         expect(config.distribution[preset]).toBeGreaterThan(0);
@@ -1318,7 +1317,7 @@ describe("Biome Defaults Completeness", () => {
   });
 
   it("all plant biome presets have matching distribution", () => {
-    for (const [biome, config] of Object.entries(PLANT_BIOME_DEFAULTS)) {
+    for (const [, config] of Object.entries(PLANT_BIOME_DEFAULTS)) {
       for (const preset of config.presets) {
         expect(config.distribution[preset]).toBeDefined();
         expect(config.distribution[preset]).toBeGreaterThan(0);
@@ -1394,7 +1393,7 @@ describe("ProcgenRockCache Exports", () => {
 
   describe("BIOME_ROCK_PRESETS", () => {
     it("contains arrays of valid preset names", () => {
-      for (const [biome, presets] of Object.entries(BIOME_ROCK_PRESETS)) {
+      for (const [, presets] of Object.entries(BIOME_ROCK_PRESETS)) {
         expect(Array.isArray(presets)).toBe(true);
         expect(presets.length).toBeGreaterThan(0);
         for (const preset of presets) {
@@ -1468,7 +1467,7 @@ describe("ProcgenPlantCache Exports", () => {
 
   describe("BIOME_PLANT_PRESETS", () => {
     it("contains arrays of valid preset names", () => {
-      for (const [biome, presets] of Object.entries(BIOME_PLANT_PRESETS)) {
+      for (const [, presets] of Object.entries(BIOME_PLANT_PRESETS)) {
         expect(Array.isArray(presets)).toBe(true);
         expect(presets.length).toBeGreaterThan(0);
         for (const preset of presets) {

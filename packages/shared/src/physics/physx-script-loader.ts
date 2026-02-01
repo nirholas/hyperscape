@@ -1,6 +1,12 @@
 /**
  * Direct script loader for PhysX
  * This loads PhysX by directly injecting the script tag
+ *
+ * Features:
+ * - Automatic retry with exponential backoff on failure
+ * - Proper CDN URL resolution with fallbacks
+ * - WASM instantiation timeout handling
+ * - Robust error recovery
  */
 
 import type PhysX from "@hyperscape/physx-js-webidl";
@@ -9,112 +15,116 @@ import type { PhysXModule } from "../types/systems/physics";
 type PhysXInitOptions = Parameters<typeof PhysX>[0];
 interface PhysXWindow extends Window {
   PhysX?: typeof PhysX;
+  __CDN_URL?: string;
+  Module?: Record<string, unknown>;
 }
 
-export async function loadPhysXScript(
+/** Configuration for retry behavior */
+const RETRY_CONFIG = {
+  maxRetries: 3,
+  initialDelayMs: 1000,
+  maxDelayMs: 10000,
+  backoffMultiplier: 2,
+};
+
+/** Timeout for WASM instantiation after script loads */
+const WASM_INIT_TIMEOUT_MS = 60000; // 60 seconds for WASM init
+
+/**
+ * Resolves the CDN URL for loading PhysX assets.
+ * Checks multiple sources in priority order:
+ * 1. window.__CDN_URL (set by application)
+ * 2. Current origin for localhost
+ * 3. Falls back to current origin (never hardcoded external URLs)
+ */
+function resolveCdnUrl(): string {
+  const w = window as PhysXWindow;
+
+  // First priority: explicitly set CDN URL
+  if (w.__CDN_URL) {
+    return w.__CDN_URL;
+  }
+
+  // Second priority: use current origin (works for both dev and production)
+  // The server should serve PhysX files at /web/ path
+  return window.location.origin;
+}
+
+/**
+ * Sleep for a specified duration
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Calculate delay for exponential backoff
+ */
+function getRetryDelay(attempt: number): number {
+  const delay =
+    RETRY_CONFIG.initialDelayMs *
+    Math.pow(RETRY_CONFIG.backoffMultiplier, attempt);
+  return Math.min(delay, RETRY_CONFIG.maxDelayMs);
+}
+
+/**
+ * Load PhysX script and initialize WASM with timeout
+ */
+async function loadAndInitPhysX(
+  cdnUrl: string,
   options?: PhysXInitOptions,
 ): Promise<PhysXModule> {
-  // Check if PhysX is already loaded
   const w = window as PhysXWindow;
+
+  // Check if PhysX is already loaded
   if (w.PhysX) {
-    return w.PhysX!(options);
+    console.log("[physx-script-loader] PhysX already loaded, reusing...");
+    return initPhysXModule(w.PhysX, cdnUrl, options);
   }
 
   return new Promise((resolve, reject) => {
-    // Check again in case it was loaded while we were waiting
-    if (w.PhysX) {
-      w.PhysX!(options).then(resolve).catch(reject);
-      return;
-    }
-
-    // Compute CDN URL for WASM location
-    const windowWithCdn = window as Window & { __CDN_URL?: string };
-    const cdnUrl =
-      windowWithCdn.__CDN_URL ||
-      (window.location.hostname === "localhost"
-        ? window.location.origin
-        : "http://localhost:8080");
-
     // Set up Module configuration BEFORE loading the script
     // This ensures locateFile is available when Emscripten looks for the WASM
-    const windowWithModule = window as Window & {
-      Module?: Record<string, unknown>;
-    };
-    if (!windowWithModule.Module) {
-      windowWithModule.Module = {};
+    if (!w.Module) {
+      w.Module = {};
     }
-    windowWithModule.Module.locateFile = (wasmFileName: string) => {
+
+    // Configure locateFile for the Module global
+    w.Module.locateFile = (wasmFileName: string) => {
       if (wasmFileName.endsWith(".wasm")) {
         const url = `${cdnUrl}/web/${wasmFileName}?v=1.0.0`;
         console.log(
-          `[physx-script-loader] locateFile called for ${wasmFileName}, returning: ${url}`,
+          `[physx-script-loader] Module.locateFile: ${wasmFileName} -> ${url}`,
         );
         return url;
       }
       return wasmFileName;
     };
 
+    // Check if script is already in the DOM but PhysX not initialized yet
+    const existingScript = document.querySelector(
+      'script[src*="physx-js-webidl.js"]',
+    );
+    if (existingScript) {
+      console.log(
+        "[physx-script-loader] Script already in DOM, waiting for PhysX global...",
+      );
+      waitForPhysXGlobal(cdnUrl, options).then(resolve).catch(reject);
+      return;
+    }
+
     const script = document.createElement("script");
-    // Use static version for cache key - only change this when PhysX binary is updated
-    // This allows browser caching between page loads while still allowing forced refresh when needed
     const scriptUrl = `${cdnUrl}/web/physx-js-webidl.js?v=1.0.0`;
 
     console.log("[physx-script-loader] Loading PhysX from:", scriptUrl);
     console.log("[physx-script-loader] CDN URL:", cdnUrl);
-    console.log("[physx-script-loader] Options:", options);
 
     script.src = scriptUrl;
     script.async = true;
 
     script.onload = () => {
-      console.log(
-        "[physx-script-loader] Script loaded, checking PhysX global...",
-      );
-      // Give it a moment to initialize
-      setTimeout(() => {
-        const w2 = window as PhysXWindow;
-        if (w2.PhysX) {
-          console.log(
-            "[physx-script-loader] PhysX global found, initializing WASM...",
-          );
-          const PhysXFn = w2.PhysX!;
-          // Merge our locateFile with any options passed in
-          const mergedOptions = {
-            ...options,
-            locateFile: (file: string) => {
-              if (file.endsWith(".wasm")) {
-                const url = `${cdnUrl}/web/${file}?v=1.0.0`;
-                console.log(
-                  `[physx-script-loader] PhysXFn locateFile called for ${file}, returning: ${url}`,
-                );
-                return url;
-              }
-              return file;
-            },
-          };
-          PhysXFn(mergedOptions)
-            .then((physx) => {
-              console.log(
-                "[physx-script-loader] PhysX WASM initialized successfully",
-              );
-              resolve(physx);
-            })
-            .catch((error) => {
-              console.error(
-                "[physx-script-loader] PhysX initialization failed:",
-                error,
-              );
-              reject(error);
-            });
-        } else {
-          console.error(
-            "[physx-script-loader] PhysX function not found after script load",
-          );
-          reject(
-            new Error("PhysX global function not found after script load"),
-          );
-        }
-      }, 100);
+      console.log("[physx-script-loader] Script loaded successfully");
+      waitForPhysXGlobal(cdnUrl, options).then(resolve).catch(reject);
     };
 
     script.onerror = (error) => {
@@ -122,11 +132,154 @@ export async function loadPhysXScript(
         "[physx-script-loader] Failed to load PhysX script:",
         error,
       );
-      reject(new Error("Failed to load PhysX script"));
+      // Remove failed script from DOM to allow retry
+      script.remove();
+      reject(new Error(`Failed to load PhysX script from ${scriptUrl}`));
     };
 
     document.head.appendChild(script);
   });
+}
+
+/**
+ * Wait for PhysX global to become available after script load
+ */
+async function waitForPhysXGlobal(
+  cdnUrl: string,
+  options?: PhysXInitOptions,
+): Promise<PhysXModule> {
+  const w = window as PhysXWindow;
+  const maxWaitTime = 5000; // 5 seconds for the global to appear
+  const checkInterval = 100;
+  let waited = 0;
+
+  while (!w.PhysX && waited < maxWaitTime) {
+    await sleep(checkInterval);
+    waited += checkInterval;
+  }
+
+  if (!w.PhysX) {
+    throw new Error(
+      `PhysX global not found after ${maxWaitTime}ms - script may have failed to execute`,
+    );
+  }
+
+  console.log("[physx-script-loader] PhysX global found, initializing WASM...");
+  return initPhysXModule(w.PhysX, cdnUrl, options);
+}
+
+/**
+ * Initialize PhysX module with WASM
+ * Includes timeout handling for stuck WASM instantiation
+ */
+async function initPhysXModule(
+  PhysXFn: typeof PhysX,
+  cdnUrl: string,
+  options?: PhysXInitOptions,
+): Promise<PhysXModule> {
+  // Merge our locateFile with any options passed in
+  const mergedOptions = {
+    ...options,
+    locateFile: (file: string) => {
+      if (file.endsWith(".wasm")) {
+        const url = `${cdnUrl}/web/${file}?v=1.0.0`;
+        console.log(`[physx-script-loader] locateFile: ${file} -> ${url}`);
+        return url;
+      }
+      return file;
+    },
+  };
+
+  // Create WASM initialization with timeout
+  const initPromise = PhysXFn(mergedOptions);
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    setTimeout(() => {
+      reject(
+        new Error(
+          `PhysX WASM instantiation timeout after ${WASM_INIT_TIMEOUT_MS / 1000} seconds`,
+        ),
+      );
+    }, WASM_INIT_TIMEOUT_MS);
+  });
+
+  try {
+    const physx = await Promise.race([initPromise, timeoutPromise]);
+    console.log("[physx-script-loader] PhysX WASM initialized successfully");
+    return physx;
+  } catch (error) {
+    console.error(
+      "[physx-script-loader] PhysX WASM initialization failed:",
+      error,
+    );
+    throw error;
+  }
+}
+
+/**
+ * Load PhysX script with automatic retry on failure
+ *
+ * @param options - PhysX initialization options
+ * @returns Promise that resolves with the initialized PhysX module
+ */
+export async function loadPhysXScript(
+  options?: PhysXInitOptions,
+): Promise<PhysXModule> {
+  const w = window as PhysXWindow;
+
+  // Check if PhysX is already fully loaded and initialized
+  if (w.PhysX) {
+    try {
+      const cdnUrl = resolveCdnUrl();
+      return await initPhysXModule(w.PhysX, cdnUrl, options);
+    } catch {
+      console.warn(
+        "[physx-script-loader] Existing PhysX failed to initialize, will retry fresh load",
+      );
+      // Clear the failed PhysX to allow fresh load
+      delete w.PhysX;
+    }
+  }
+
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= RETRY_CONFIG.maxRetries; attempt++) {
+    const cdnUrl = resolveCdnUrl();
+
+    if (attempt > 0) {
+      const delay = getRetryDelay(attempt - 1);
+      console.log(
+        `[physx-script-loader] Retry ${attempt}/${RETRY_CONFIG.maxRetries} after ${delay}ms delay...`,
+      );
+      await sleep(delay);
+    }
+
+    try {
+      console.log(
+        `[physx-script-loader] Loading attempt ${attempt + 1}/${RETRY_CONFIG.maxRetries + 1}`,
+      );
+      return await loadAndInitPhysX(cdnUrl, options);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      console.error(
+        `[physx-script-loader] Attempt ${attempt + 1} failed:`,
+        lastError.message,
+      );
+
+      // Clear any partial state to allow clean retry
+      delete w.PhysX;
+      const existingScript = document.querySelector(
+        'script[src*="physx-js-webidl.js"]',
+      );
+      if (existingScript) {
+        existingScript.remove();
+      }
+    }
+  }
+
+  throw new Error(
+    `Failed to load PhysX after ${RETRY_CONFIG.maxRetries + 1} attempts. Last error: ${lastError?.message}`,
+  );
 }
 
 export default loadPhysXScript;

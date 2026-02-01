@@ -14,7 +14,6 @@ import {
   PlacementBuffer,
   EPS,
   INF,
-  NULL_INDEX,
   MATRIX_6X6_SIZE,
   MATRIX_8X8_SIZE,
   MAX_BONES_PER_VERTEX,
@@ -23,19 +22,13 @@ import { HalfEdgeBundle, getHalfEdgeBundle } from "./connectivity.js";
 import { getCombinedMetric } from "./quadric.js";
 import { interpolateSkinWeights } from "./collapse.js";
 import {
-  dot5,
-  norm5,
   midpoint3,
   midpoint2,
   quadraticForm6,
-  quadraticForm8,
-  zero6x6,
   zero8x8,
   get6x6,
-  set6x6,
   get8x8,
   set8x8,
-  add6x6,
   solveQP,
 } from "./math.js";
 
@@ -45,7 +38,6 @@ import {
 
 // Edge endpoints
 const vi = new Uint32Array(2);
-const tci = new Uint32Array(2);
 
 // Seam endpoint bundles
 const eP0 = [

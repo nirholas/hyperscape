@@ -15,15 +15,35 @@
  * - Variants are generated with different seeds for unique shapes
  * - LOD1/LOD2 meshes use progressively simpler geometry
  * - Clones are returned to callers (shared geometry, individual transforms)
+ *
+ * Persistence:
+ * - Generated variants are cached in IndexedDB for persistence across sessions
+ * - On app load, checks IndexedDB first to avoid regeneration
+ * - Cache is version-aware and invalidates on version change
  */
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenRockInstancer } from "./ProcgenRockInstancer";
 import type { World } from "../../../core/World";
+import {
+  procgenCacheDB,
+  serializeGeometry,
+  deserializeGeometry,
+  serializeColor,
+  deserializeColor,
+  type SerializedRockVariant,
+  type SerializedGeometry,
+} from "../../../utils/rendering/ProcgenCacheDB";
 
 /** Number of variants to cache per rock preset */
 const VARIANTS_PER_PRESET = 3;
+
+/**
+ * Cache version - increment this when the generation algorithm changes
+ * to invalidate cached variants and force regeneration.
+ */
+const CACHE_VERSION = 1;
 
 /** World reference for instancer registration */
 let worldRef: World | null = null;
@@ -163,7 +183,6 @@ function generateLOD1Rock(
   >,
   presetName: string,
   seed: number,
-  useTSL = false,
 ): { mesh: THREE.Mesh; vertexCount: number; triangleCount: number } | null {
   const result = generator.generateFromPreset(presetName, {
     seed,
@@ -171,7 +190,6 @@ function generateLOD1Rock(
       subdivisions: LOD1_SUBDIVISIONS,
       smooth: { iterations: 1, strength: 0.3 },
     },
-    useTSL,
   });
 
   if (!result) return null;
@@ -187,7 +205,7 @@ function extractRockMetadata(mesh: THREE.Mesh): {
   averageColor: THREE.Color;
   dimensions: { width: number; height: number; depth: number };
 } {
-  let averageColor = new THREE.Color(0x7a7a7a); // Default gray
+  const averageColor = new THREE.Color(0x7a7a7a); // Default gray
 
   // Extract average color from vertex colors
   const geometry = mesh.geometry;
@@ -259,6 +277,69 @@ function generateLOD2CardRock(
 }
 
 /**
+ * Serialize a rock variant for IndexedDB storage.
+ */
+function serializeRockVariant(variant: RockVariant): SerializedRockVariant {
+  // Serialize LOD2 card geometries
+  const lod2Geometries: SerializedGeometry[] = [];
+  if (variant.lod2Group) {
+    variant.lod2Group.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        lod2Geometries.push(serializeGeometry(child.geometry));
+      }
+    });
+  }
+
+  return {
+    geometry: serializeGeometry(variant.mesh.geometry),
+    lod1Geometry: variant.lod1Mesh
+      ? serializeGeometry(variant.lod1Mesh.geometry)
+      : undefined,
+    lod2Geometries: lod2Geometries.length > 0 ? lod2Geometries : undefined,
+    dimensions: { ...variant.dimensions },
+    averageColor: serializeColor(variant.averageColor),
+    vertexCount: variant.vertexCount,
+    triangleCount: variant.triangleCount,
+  };
+}
+
+/**
+ * Deserialize a rock variant from IndexedDB storage.
+ */
+function deserializeRockVariant(data: SerializedRockVariant): RockVariant {
+  // Deserialize main geometry and create mesh
+  const geometry = deserializeGeometry(data.geometry);
+  const material = new MeshBasicNodeMaterial();
+  material.vertexColors = true;
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.name = "ProcgenRock_LOD0";
+
+  // Deserialize LOD1 if present
+  let lod1Mesh: THREE.Mesh | null = null;
+  if (data.lod1Geometry) {
+    const lod1Geo = deserializeGeometry(data.lod1Geometry);
+    const lod1Mat = new MeshBasicNodeMaterial();
+    lod1Mat.vertexColors = true;
+    lod1Mesh = new THREE.Mesh(lod1Geo, lod1Mat);
+    lod1Mesh.name = "ProcgenRock_LOD1";
+  }
+
+  // Deserialize LOD2 card group
+  const averageColor = deserializeColor(data.averageColor);
+  const lod2Group = generateLOD2CardRock(data.dimensions, averageColor);
+
+  return {
+    mesh,
+    lod1Mesh,
+    lod2Group,
+    vertexCount: data.vertexCount,
+    triangleCount: data.triangleCount,
+    dimensions: { ...data.dimensions },
+    averageColor,
+  };
+}
+
+/**
  * Generate rock variants for a preset.
  */
 async function generateVariants(presetName: string): Promise<RockVariant[]> {
@@ -270,9 +351,6 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     );
     return [];
   }
-
-  // Detect WebGPU to use TSL materials (avoids ShaderMaterial compatibility issues)
-  const useTSL = worldRef?.graphics?.isWebGPU === true;
 
   const variants: RockVariant[] = [];
   const generator = new RockGenerator();
@@ -288,11 +366,10 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
     }
 
-    // Generate LOD0 (full detail) - use TSL for WebGPU compatibility
+    // Generate LOD0 (full detail)
     const result = generator.generateFromPreset(presetName, {
       seed,
       params: { subdivisions: LOD0_SUBDIVISIONS },
-      useTSL,
     });
 
     if (!result) {
@@ -307,7 +384,7 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     const { averageColor, dimensions } = extractRockMetadata(result.mesh);
 
     // Generate LOD1 and LOD2
-    const lod1Result = generateLOD1Rock(generator, presetName, seed, useTSL);
+    const lod1Result = generateLOD1Rock(generator, presetName, seed);
     const lod2Group = generateLOD2CardRock(dimensions, averageColor);
 
     variants.push({
@@ -331,8 +408,19 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
     const avgTris = Math.round(totalTris / variants.length);
     console.log(
       `[ProcgenRockCache] Generated ${variants.length} variants for "${presetName}" ` +
-        `(avg: ${avgVerts} verts, ${avgTris} tris, TSL: ${useTSL})`,
+        `(avg: ${avgVerts} verts, ${avgTris} tris)`,
     );
+
+    // Save to IndexedDB for persistence
+    const serialized = variants.map(serializeRockVariant);
+    procgenCacheDB
+      .saveCachedVariants("rocks", presetName, serialized, CACHE_VERSION)
+      .catch((err) =>
+        console.warn(
+          `[ProcgenRockCache] Failed to persist ${presetName}:`,
+          err,
+        ),
+      );
   }
 
   return variants;
@@ -340,6 +428,7 @@ async function generateVariants(presetName: string): Promise<RockVariant[]> {
 
 /**
  * Ensure variants are loaded for a preset.
+ * Checks IndexedDB cache first, generates only if not found.
  */
 export async function ensureRockVariantsLoaded(
   presetName: string,
@@ -347,7 +436,7 @@ export async function ensureRockVariantsLoaded(
   let cache = presetCache.get(presetName);
 
   if (cache?.variants.length) {
-    return; // Already loaded
+    return; // Already loaded in memory
   }
 
   if (cache?.loading && cache.loadPromise) {
@@ -364,7 +453,27 @@ export async function ensureRockVariantsLoaded(
   presetCache.set(presetName, cache);
 
   const loadPromise = (async () => {
-    const variants = await generateVariants(presetName);
+    // Try to load from IndexedDB first
+    const cached =
+      await procgenCacheDB.loadCachedVariants<SerializedRockVariant>(
+        "rocks",
+        presetName,
+        CACHE_VERSION,
+      );
+
+    let variants: RockVariant[];
+
+    if (cached && cached.length > 0) {
+      // Deserialize from cache
+      variants = cached.map(deserializeRockVariant);
+      console.log(
+        `[ProcgenRockCache] Loaded ${variants.length} cached variants for "${presetName}"`,
+      );
+    } else {
+      // Generate fresh variants
+      variants = await generateVariants(presetName);
+    }
+
     const existingCache = presetCache.get(presetName);
     if (existingCache) {
       existingCache.variants = variants;
@@ -497,7 +606,7 @@ export function removeRockInstance(instanceId: string): boolean {
 }
 
 /**
- * Clear all cached rock variants.
+ * Clear all cached rock variants (memory only).
  */
 export function clearRockCache(): void {
   // Dispose geometries and materials
@@ -526,7 +635,17 @@ export function clearRockCache(): void {
     }
   }
   presetCache.clear();
-  console.log("[ProcgenRockCache] Cache cleared");
+  console.log("[ProcgenRockCache] Memory cache cleared");
+}
+
+/**
+ * Clear all cached rock variants (memory + IndexedDB).
+ * Use this to force regeneration on next load.
+ */
+export async function clearRockCacheAll(): Promise<void> {
+  clearRockCache();
+  await procgenCacheDB.clearStore("rocks");
+  console.log("[ProcgenRockCache] All caches cleared (memory + IndexedDB)");
 }
 
 /**

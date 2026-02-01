@@ -14,14 +14,9 @@ import {
 
 // Mock performance.now() for time control
 let mockTime = 0;
-const originalPerformanceNow = performance.now;
 
 function setMockTime(time: number) {
   mockTime = time;
-}
-
-function advanceMockTime(delta: number) {
-  mockTime += delta;
 }
 
 describe("FrameBudgetManager", () => {

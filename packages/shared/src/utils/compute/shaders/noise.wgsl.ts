@@ -17,7 +17,8 @@
  * Call initializePermutationTable() to generate a seeded table.
  */
 
-import { WGSL_COMMON } from "./common.wgsl";
+// Re-export common for consumers that need both common and noise shaders
+export { WGSL_COMMON } from "./common.wgsl";
 
 // ============================================================================
 // PERMUTATION TABLE SETUP

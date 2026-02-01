@@ -10,13 +10,12 @@ import {
   type World,
   ALL_WORLD_AREAS,
   isPositionInsideCombatArena,
-  getDuelArenaConfig,
 } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import type { DuelSystem } from "../../../DuelSystem";
 import type { PendingDuelChallengeManager } from "../../PendingDuelChallengeManager";
 import { Logger, RateLimitService } from "../../services";
-import { sendToSocket, getPlayerId } from "../common";
+import { sendToSocket } from "../common";
 
 // ============================================================================
 // Rate Limiter

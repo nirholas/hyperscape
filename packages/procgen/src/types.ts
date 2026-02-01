@@ -253,6 +253,19 @@ export type TreeParams = {
   /** Leaf bend toward light (0-1) */
   leafBend: number;
 
+  /**
+   * Number of branch levels that get leaves (default: 1 = deepest only).
+   * Set to 2 to place leaves at levels-1 AND levels-2.
+   * Higher values fill canopy more densely but increase leaf count.
+   */
+  leafDistributionLevels: number;
+
+  /**
+   * Scale factor for leaves on non-deepest levels (default: 0.5).
+   * Leaves on levels-2 get scaled by this factor (fewer, smaller leaves).
+   */
+  leafSecondaryScale: number;
+
   // ===== BLOSSOMS =====
 
   /** Blossom shape type (1-3) */
@@ -404,6 +417,14 @@ export type TreeGenerationOptions = {
 };
 
 /**
+ * Leaf sampling mode for LOD reduction.
+ * - 'sequential': Take first N leaves (fastest, but removes from end of generation order)
+ * - 'random': Seeded random shuffle then take first N (uniform random distribution)
+ * - 'spatial': Spatially-stratified sampling to maintain canopy coverage (best visual quality)
+ */
+export type LeafSamplingMode = "sequential" | "random" | "spatial";
+
+/**
  * Options for geometry generation.
  */
 export type GeometryOptions = {
@@ -421,7 +442,55 @@ export type GeometryOptions = {
   maxBranchDepth?: number;
   /** Maximum total stems to render (prevents memory explosion for complex trees, default 2000) */
   maxStems?: number;
+  /** Leaf sampling mode for LOD reduction (default: 'spatial') */
+  leafSamplingMode?: LeafSamplingMode;
+  /** Seed for random/spatial sampling (default: 0 = use generation seed) */
+  leafSamplingSeed?: number;
+  /** Leaf scale multiplier for LOD (larger leaves at lower LODs maintain coverage) */
+  leafScaleMultiplier?: number;
 };
+
+/**
+ * Pre-defined LOD level presets for tree geometry.
+ * LOD0 = Full quality, LOD1 = Medium (~30% verts), LOD2 = Low (~10% verts)
+ */
+export const TREE_LOD_PRESETS = {
+  /** Full quality - all detail */
+  lod0: {
+    radialSegments: 8,
+    branchCaps: true,
+    vertexColors: true,
+    maxLeaves: 50000,
+    maxBranchDepth: undefined, // Use tree params
+    maxStems: 2000,
+    leafSamplingMode: "spatial",
+    leafScaleMultiplier: 1.0,
+  } as GeometryOptions,
+
+  /** Medium quality - reduced geometry (~30% verts) */
+  lod1: {
+    radialSegments: 5,
+    branchCaps: false,
+    vertexColors: true,
+    maxLeaves: 15000,
+    maxBranchDepth: 2,
+    maxStems: 600,
+    leafSamplingMode: "spatial",
+    leafScaleMultiplier: 1.3, // Slightly larger leaves to compensate for fewer
+  } as GeometryOptions,
+
+  /** Low quality - minimal geometry (~10% verts) */
+  lod2: {
+    radialSegments: 4,
+    branchCaps: false,
+    vertexColors: false,
+    maxLeaves: 5000,
+    maxBranchDepth: 1,
+    maxStems: 200,
+    leafSamplingMode: "spatial",
+    leafScaleMultiplier: 1.6, // Larger leaves for sparse coverage
+  } as GeometryOptions,
+} as const;
 
 /**
  * Options for instanced tree rendering.

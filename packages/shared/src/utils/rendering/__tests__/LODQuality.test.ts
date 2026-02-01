@@ -180,9 +180,13 @@ describe("LOD Distances - Mobile AAA Quality", () => {
   });
 
   describe("Category-specific distances", () => {
-    const categories = Object.keys(LOD_DISTANCES);
+    // Categories that skip intermediate LODs (lod1 == lod2 or lod2 == impostor)
+    const skipLODCategories = ["building"];
+    const standardCategories = Object.keys(LOD_DISTANCES).filter(
+      (c) => !skipLODCategories.includes(c),
+    );
 
-    it.each(categories)(
+    it.each(standardCategories)(
       "%s should have ascending LOD distances",
       (category) => {
         const distances = LOD_DISTANCES[category];
@@ -191,6 +195,14 @@ describe("LOD Distances - Mobile AAA Quality", () => {
         expect(distances.imposterDistance).toBeLessThan(distances.fadeDistance);
       },
     );
+
+    it("building should skip intermediate LODs", () => {
+      // Buildings intentionally skip LOD1/LOD2 - go directly from full detail to impostor
+      const distances = LOD_DISTANCES.building;
+      expect(distances.lod1Distance).toBe(distances.imposterDistance);
+      expect(distances.lod2Distance).toBe(distances.imposterDistance);
+      expect(distances.imposterDistance).toBeLessThan(distances.fadeDistance);
+    });
 
     it("trees should have reasonable draw distances", () => {
       // Trees may have optimized (shorter) fade distances for performance

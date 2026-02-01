@@ -73,15 +73,11 @@ import {
 import { csmLevels } from "../../systems/shared/world/Environment";
 import { ImpostorManager, BakePriority } from "../../systems/shared/rendering";
 import {
-  createImpostorMaterial,
   createTSLImpostorMaterial,
-  updateImpostorMaterial,
   isTSLImpostorMaterial,
-  type ImpostorViewData,
   type ImpostorBakeResult,
   type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
-import { isWebGPURenderer } from "./RendererFactory";
 import { isGPUComputeAvailable, getGlobalCullingManager } from "../compute";
 
 // ============================================================================
@@ -1516,19 +1512,12 @@ export class MobInstancedRenderer {
     this._imposterFaceIndices.set(flatIndex, flatIndex, flatIndex);
     // Note: _imposterFaceWeights is always (1, 0, 0), no need to update
 
-    // Update material using appropriate method based on material type
-    // TSL materials have updateView method, GLSL uses updateImpostorMaterial
+    // Update TSL material view (WebGPU only)
     if (isTSLImpostorMaterial(imposter.material)) {
       imposter.material.updateView(
         this._imposterFaceIndices,
         this._imposterFaceWeights,
       );
-    } else {
-      const viewData: ImpostorViewData = {
-        faceIndices: this._imposterFaceIndices,
-        faceWeights: this._imposterFaceWeights,
-      };
-      updateImpostorMaterial(imposter.material, viewData);
     }
   }
 
@@ -2603,26 +2592,14 @@ export class MobInstancedRenderer {
       ? boundingSphere.radius * 2 * scaleMultiplier
       : height;
 
-    // Create material using appropriate type based on renderer backend
-    // WebGPU requires TSL (node-based) material, WebGL uses GLSL ShaderMaterial
-    const renderer = this.world.graphics?.renderer;
-    const useWebGPU = renderer && isWebGPURenderer(renderer);
-
-    const material: ImposterMaterialType = useWebGPU
-      ? createTSLImpostorMaterial({
-          atlasTexture,
-          gridSizeX,
-          gridSizeY,
-          transparent: true,
-          depthWrite: true,
-        })
-      : createImpostorMaterial({
-          atlasTexture,
-          gridSizeX,
-          gridSizeY,
-          transparent: true,
-          depthWrite: true,
-        });
+    // Create TSL material for WebGPU (no WebGL fallback)
+    const material: ImposterMaterialType = createTSLImpostorMaterial({
+      atlasTexture,
+      gridSizeX,
+      gridSizeY,
+      transparent: true,
+      depthWrite: true,
+    });
     this.world.setupMaterial(material);
 
     // Create billboard geometry and instanced mesh

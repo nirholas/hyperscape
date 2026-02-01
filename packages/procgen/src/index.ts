@@ -7,8 +7,9 @@
  * @packageDocumentation
  */
 
-// Types
+// Types and LOD Presets
 export * from "./types.js";
+export { TREE_LOD_PRESETS } from "./types.js";
 
 // Math utilities
 export {
@@ -67,6 +68,11 @@ export {
   computeQuickVertexAO,
   enableVertexColorMaterials,
   type VertexAOOptions,
+  // TSL (WebGPU) instanced leaf material - GLSL version removed
+  createInstancedLeafMaterialTSL,
+  type TSLInstancedLeafMaterial,
+  type TSLInstancedLeafMaterialOptions,
+  type TSLLeafShape,
 } from "./geometry/index.js";
 
 // Parameters and presets
@@ -137,14 +143,8 @@ export {
   type ImpostorBakeResult,
   type ImpostorInstance,
   type ImpostorViewData,
-  createImpostorMaterial,
-  updateImpostorMaterial,
-  createSimpleImpostorMaterial,
-  // Debug mode utilities
-  setImpostorDebugMode,
-  getImpostorDebugMode,
-  cycleImpostorDebugMode,
-  type ImpostorDebugMode,
+  createTSLImpostorMaterial,
+  type TSLImpostorMaterial,
 } from "./impostor/index.js";
 
 // Additional generators (namespaced to avoid export collisions)

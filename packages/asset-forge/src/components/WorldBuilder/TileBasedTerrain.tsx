@@ -7,6 +7,8 @@
  * - Tile loading/unloading based on camera position
  * - Fly camera controls for exploration
  * - Town markers showing generated towns
+ *
+ * Uses WebGPU renderer for TSL/node materials compatibility.
  */
 
 import { BuildingGenerator } from "@hyperscape/procgen/building";
@@ -24,7 +26,6 @@ import React, {
   useState,
   useMemo,
 } from "react";
-import * as THREE from "three";
 import {
   MeshStandardNodeMaterial,
   MeshBasicNodeMaterial,
@@ -32,6 +33,12 @@ import {
 } from "three/webgpu";
 
 import type { WorldCreationConfig } from "./types";
+
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
 
 // Type aliases for clarity (all WebGPU-compatible NodeMaterials)
 const TownBasicMat = MeshBasicNodeMaterial;
@@ -663,7 +670,7 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   onFlyModeChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const animationIdRef = useRef<number>(0);
@@ -1268,22 +1275,14 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     }
   }, [onFlyModeChange]);
 
-  // Initialize Three.js scene
+  // Initialize Three.js scene with WebGPU
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    let mounted = true;
 
-    // Scene
+    // Scene (create before async renderer init)
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(0x87ceeb); // Sky blue
     scene.fog = new THREE.Fog(0x87ceeb, 500, 3000);
@@ -1898,46 +1897,70 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     document.addEventListener("pointerlockchange", handlePointerLockChange);
     container.addEventListener("click", handleClick);
 
-    // Animation loop
-    let lastTime = performance.now();
-    // Track camera rotation for minimap (throttled updates)
-    let lastRotationUpdate = 0;
-
-    const animate = () => {
-      animationIdRef.current = requestAnimationFrame(animate);
-
-      const now = performance.now();
-      const deltaTime = Math.min((now - lastTime) / 1000, 0.1); // Cap delta
-      lastTime = now;
-
-      updateCamera(deltaTime);
-      updateTiles();
-
-      // Update LOD objects based on camera position
-      townMarkers.traverse((child) => {
-        if (child instanceof THREE.LOD) {
-          child.update(camera);
-        }
+    // Async WebGPU renderer initialization
+    const initRenderer = async () => {
+      const renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
       });
 
-      // Update camera rotation for minimap (throttle to every 100ms)
-      if (now - lastRotationUpdate > 100) {
-        setCameraRotationY(cameraStateRef.current.euler.y);
-        lastRotationUpdate = now;
+      if (!mounted) {
+        renderer.dispose();
+        return;
       }
 
-      renderer.render(scene, camera);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Animation loop
+      let lastTime = performance.now();
+      // Track camera rotation for minimap (throttled updates)
+      let lastRotationUpdate = 0;
+
+      const animate = () => {
+        if (!mounted) return;
+        animationIdRef.current = requestAnimationFrame(animate);
+
+        const now = performance.now();
+        const deltaTime = Math.min((now - lastTime) / 1000, 0.1); // Cap delta
+        lastTime = now;
+
+        updateCamera(deltaTime);
+        updateTiles();
+
+        // Update LOD objects based on camera position
+        townMarkers.traverse((child) => {
+          if (child instanceof THREE.LOD) {
+            child.update(camera);
+          }
+        });
+
+        // Update camera rotation for minimap (throttle to every 100ms)
+        if (now - lastRotationUpdate > 100) {
+          setCameraRotationY(cameraStateRef.current.euler.y);
+          lastRotationUpdate = now;
+        }
+
+        renderer.render(scene, camera);
+      };
+      animate();
     };
-    animate();
+
+    initRenderer();
 
     // Handle resize
     const handleResize = () => {
-      if (!container || !camera || !renderer) return;
+      if (!container || !camera || !rendererRef.current) return;
       const width = container.clientWidth;
       const height = container.clientHeight;
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+      rendererRef.current.setSize(width, height);
     };
     window.addEventListener("resize", handleResize);
 
@@ -2009,9 +2032,16 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       currentTerrainMaterial.current?.dispose();
       currentWaterMaterial.current?.dispose();
 
-      renderer.dispose();
-      if (container && renderer.domElement.parentNode === container) {
-        container.removeChild(renderer.domElement);
+      // Dispose WebGPU renderer
+      if (rendererRef.current) {
+        if (
+          container &&
+          rendererRef.current.domElement.parentNode === container
+        ) {
+          container.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+        rendererRef.current = null;
       }
 
       // Exit pointer lock if active

@@ -103,7 +103,6 @@ import THREE from "../../../extras/three/three";
 import {
   createCpuDispatcher,
   getActorsFromHeader,
-  cleanupPxVec3,
   vector3ToPxVec3,
   setTransformFromMatrix4,
 } from "../../../utils/physics/PhysicsUtils";
@@ -409,7 +408,11 @@ export class Physics extends SystemBase implements IPhysics {
 
   async init(): Promise<void> {
     // Use waitForPhysX to ensure PhysX is loaded
-    const info = await waitForPhysX("Physics", 30000); // 30 second timeout
+    // Timeout increased to 120s to account for:
+    // 1. Script loader retries (3 attempts with exponential backoff)
+    // 2. WASM compilation time
+    // 3. Heavy main thread work (tree generation) during startup
+    const info = await waitForPhysX("Physics", 120000); // 120 second timeout
     this.version = info.version;
     this.allocator = info.allocator;
     this.errorCb = info.errorCb;

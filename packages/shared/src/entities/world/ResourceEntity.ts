@@ -80,7 +80,6 @@ import { getCameraPosition } from "../../utils/rendering/AnimationLOD";
 import {
   getTreeMeshClone,
   getTreeLOD1Clone,
-  getVariantIndex,
   addTreeInstance,
   removeTreeInstance,
   setProcgenTreeWorld,

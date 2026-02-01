@@ -13,5 +13,6 @@ export * from "./ModelCache";
 // - canTransferCanvas()
 // - detectRenderingCapabilities().supportsOffscreenCanvas
 export * from "./PostProcessingFactory";
+export * from "./ProcgenCacheDB";
 export * from "./RendererFactory";
 export * from "./UIRenderer";

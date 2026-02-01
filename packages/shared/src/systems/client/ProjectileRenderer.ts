@@ -808,9 +808,6 @@ export class ProjectileRenderer extends System {
    * Update trail positions for a spell projectile
    */
   private updateTrail(proj: ActiveProjectile, progress: number): void {
-    const spellConfig = proj.visualConfig as SpellVisualConfig;
-    const trailFade = spellConfig.trailFade ?? 0.35;
-
     // Store current position in trail history
     proj.trailPositions[proj.trailIndex].copy(proj.sprite.position);
     proj.trailIndex = (proj.trailIndex + 1) % proj.trailPositions.length;
@@ -833,7 +830,7 @@ export class ProjectileRenderer extends System {
           trail.sprite.material.opacity = this.getTrailOpacity(
             t,
             proj.trailSprites.length,
-            spellConfig,
+            proj.visualConfig as SpellVisualConfig,
           );
         }
       }

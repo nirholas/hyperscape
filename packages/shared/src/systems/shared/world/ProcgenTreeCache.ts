@@ -65,6 +65,15 @@ import * as THREE_WEBGPU from "three/webgpu";
 import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenTreeInstancer } from "./ProcgenTreeInstancer";
 import type { World } from "../../../core/World";
+import {
+  procgenCacheDB,
+  serializeGeometry,
+  deserializeGeometry,
+  serializeColor,
+  deserializeColor,
+  type SerializedTreeVariant,
+  type SerializedGeometry,
+} from "../../../utils/rendering/ProcgenCacheDB";
 
 // TSL functions from three/webgpu
 const {
@@ -73,15 +82,12 @@ const {
   uniform,
   float,
   vec2,
-  vec3,
   vec4,
   add,
   sub,
   mul,
-  div,
   abs,
   sin,
-  cos,
   atan,
   pow,
   floor,
@@ -91,11 +97,16 @@ const {
   mix,
   smoothstep,
   dot,
-  step,
 } = THREE_WEBGPU.TSL;
 
 /** Number of variants to cache per tree preset */
 const VARIANTS_PER_PRESET = 3;
+
+/**
+ * Cache version - increment this when the generation algorithm changes
+ * to invalidate cached variants and force regeneration.
+ */
+const CACHE_VERSION = 1;
 
 /**
  * Crown shape types for LOD2 procedural billboards.
@@ -726,6 +737,120 @@ function generateLOD2CardTree(
   };
 }
 
+/**
+ * Serialize a THREE.Group's meshes to an array of geometries.
+ */
+function serializeGroupGeometries(group: THREE.Group): SerializedGeometry[] {
+  const geometries: SerializedGeometry[] = [];
+  group.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.geometry) {
+      geometries.push(serializeGeometry(child.geometry));
+    }
+  });
+  return geometries;
+}
+
+/**
+ * Serialize a tree variant for IndexedDB storage.
+ */
+function serializeTreeVariant(variant: TreeVariant): SerializedTreeVariant {
+  return {
+    geometries: serializeGroupGeometries(variant.group),
+    lod1Geometries: variant.lod1Group
+      ? serializeGroupGeometries(variant.lod1Group)
+      : undefined,
+    lod2Geometries: variant.lod2Group
+      ? serializeGroupGeometries(variant.lod2Group)
+      : undefined,
+    dimensions: { ...variant.dimensions },
+    leafColor: serializeColor(variant.leafColor),
+    barkColor: serializeColor(variant.barkColor),
+    vertexCount: variant.vertexCount,
+    triangleCount: variant.triangleCount,
+    lod1VertexCount: variant.lod1VertexCount,
+    lod1TriangleCount: variant.lod1TriangleCount,
+    lod2VertexCount: variant.lod2VertexCount,
+    lod2TriangleCount: variant.lod2TriangleCount,
+  };
+}
+
+/**
+ * Deserialize a tree variant from IndexedDB storage.
+ * Creates simplified meshes from stored geometry - materials are basic.
+ */
+function deserializeTreeVariant(
+  data: SerializedTreeVariant,
+  presetName: string,
+): TreeVariant {
+  const leafColor = deserializeColor(data.leafColor);
+  const barkColor = deserializeColor(data.barkColor);
+
+  // Reconstruct LOD0 group from geometries
+  const group = new THREE.Group();
+  group.name = `Tree_${presetName}_LOD0`;
+
+  // Create meshes from serialized geometries
+  // First geometry is typically trunk/branches, second is leaves
+  for (let i = 0; i < data.geometries.length; i++) {
+    const geo = deserializeGeometry(data.geometries[i]);
+    const mat = new MeshBasicNodeMaterial();
+
+    // Use vertex colors if available, otherwise use bark/leaf color
+    if (geo.attributes.color) {
+      mat.vertexColors = true;
+    } else {
+      mat.color = i === 0 ? barkColor.clone() : leafColor.clone();
+    }
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = i === 0 ? "Trunk" : "Leaves";
+    group.add(mesh);
+  }
+
+  // Reconstruct LOD1 group
+  let lod1Group: THREE.Group | null = null;
+  if (data.lod1Geometries && data.lod1Geometries.length > 0) {
+    lod1Group = new THREE.Group();
+    lod1Group.name = `Tree_${presetName}_LOD1`;
+    for (let i = 0; i < data.lod1Geometries.length; i++) {
+      const geo = deserializeGeometry(data.lod1Geometries[i]);
+      const mat = new MeshBasicNodeMaterial();
+      if (geo.attributes.color) {
+        mat.vertexColors = true;
+      } else {
+        mat.color = i === 0 ? barkColor.clone() : leafColor.clone();
+      }
+      const mesh = new THREE.Mesh(geo, mat);
+      lod1Group.add(mesh);
+    }
+  }
+
+  // Regenerate LOD2 card tree (procedural materials can't be serialized easily)
+  const seed = VARIANT_SEEDS[0]; // Use first seed for consistency
+  const lod2Result = generateLOD2CardTree(
+    data.dimensions,
+    leafColor,
+    barkColor,
+    presetName,
+    seed,
+  );
+
+  return {
+    group,
+    lod1Group,
+    lod2Group: lod2Result.group,
+    vertexCount: data.vertexCount,
+    triangleCount: data.triangleCount,
+    lod1VertexCount: data.lod1VertexCount,
+    lod1TriangleCount: data.lod1TriangleCount,
+    lod2VertexCount: data.lod2VertexCount,
+    lod2TriangleCount: data.lod2TriangleCount,
+    dimensions: { ...data.dimensions },
+    leafColor,
+    barkColor,
+  };
+}
+
 async function generateVariants(presetName: string): Promise<TreeVariant[]> {
   const loaded = await loadProcgen();
 
@@ -741,13 +866,17 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
   let totalLod2Verts = 0;
   let totalLod2Tris = 0;
 
+  // Helper to yield to main thread - allows WASM loading and other async work
+  const yield_ = (): Promise<void> =>
+    new Promise((resolve) => setTimeout(resolve, 0));
+
   for (let i = 0; i < VARIANTS_PER_PRESET; i++) {
     const seed = VARIANT_SEEDS[i];
 
     // Yield between variants to prevent blocking main thread during pre-warm
     // This spreads CPU-intensive tree generation across multiple frames
     if (i > 0) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await yield_();
     }
 
     try {
@@ -756,6 +885,9 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
         geometry: LOD0_GEOMETRY_OPTIONS,
       });
       const result = generator.generate(seed);
+
+      // Yield after heavy LOD0 generation to allow WASM loading
+      await yield_();
 
       // Count vertices and triangles for LOD0
       let vertexCount = 0;
@@ -782,6 +914,9 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
 
       // Generate LOD1 using procgen with reduced settings (same seed for visual consistency)
       const lod1Result = await generateLOD1Tree(presetName, seed);
+
+      // Yield after LOD1 generation
+      await yield_();
 
       // Generate LOD2 "card tree" - ultra-simplified with procedural crown
       // Crown shape is determined by the tree preset (conical for conifers, rounded for deciduous, etc.)
@@ -837,6 +972,17 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
         `LOD2=${totalLod2Verts} verts/${Math.round(totalLod2Tris)} tris (${lod2Reduction}% reduction)`,
     );
 
+    // Save to IndexedDB for persistence
+    const serialized = variants.map(serializeTreeVariant);
+    procgenCacheDB
+      .saveCachedVariants("trees", presetName, serialized, CACHE_VERSION)
+      .catch((err) =>
+        console.warn(
+          `[ProcgenTreeCache] Failed to persist ${presetName}:`,
+          err,
+        ),
+      );
+
     // Register first variant with instancer for batched rendering
     // All instances will share this geometry via instancing
     if (worldRef && variants.length > 0) {
@@ -878,6 +1024,7 @@ function getOrCreateCacheEntry(presetName: string): PresetCache {
 
 /**
  * Ensure variants are loaded for a preset.
+ * Checks IndexedDB cache first, generates only if not found.
  */
 async function ensureVariantsLoaded(presetName: string): Promise<PresetCache> {
   const cache = getOrCreateCacheEntry(presetName);
@@ -894,7 +1041,44 @@ async function ensureVariantsLoaded(presetName: string): Promise<PresetCache> {
   cache.loading = true;
   cache.loadPromise = (async () => {
     try {
-      cache.variants = await generateVariants(presetName);
+      // Try to load from IndexedDB first
+      const cached =
+        await procgenCacheDB.loadCachedVariants<SerializedTreeVariant>(
+          "trees",
+          presetName,
+          CACHE_VERSION,
+        );
+
+      if (cached && cached.length > 0) {
+        // Deserialize from cache
+        cache.variants = cached.map((data) =>
+          deserializeTreeVariant(data, presetName),
+        );
+        console.log(
+          `[ProcgenTreeCache] Loaded ${cache.variants.length} cached variants for "${presetName}"`,
+        );
+
+        // Register first variant with instancer for batched rendering
+        if (worldRef && cache.variants.length > 0) {
+          try {
+            const instancer = ProcgenTreeInstancer.getInstance(worldRef);
+            instancer.registerPreset(
+              presetName,
+              cache.variants[0].group,
+              cache.variants[0].lod1Group,
+              cache.variants[0].lod2Group,
+            );
+          } catch (error) {
+            console.warn(
+              `[ProcgenTreeCache] Failed to register with instancer:`,
+              error,
+            );
+          }
+        }
+      } else {
+        // Generate fresh variants
+        cache.variants = await generateVariants(presetName);
+      }
     } finally {
       cache.loading = false;
     }
@@ -1017,9 +1201,31 @@ export async function getTreeLOD1Clone(
 }
 
 /**
+ * Yield to the main event loop.
+ * Uses requestIdleCallback for better scheduling when available,
+ * falls back to setTimeout for compatibility.
+ */
+function yieldToMainThread(delayMs = 10): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof requestIdleCallback !== "undefined") {
+      // Use requestIdleCallback for better scheduling - yields when browser is idle
+      requestIdleCallback(() => resolve(), { timeout: 100 });
+    } else {
+      // Fallback: setTimeout with small delay to allow other async tasks
+      setTimeout(resolve, delayMs);
+    }
+  });
+}
+
+/**
  * Pre-warm the cache for common presets.
  * Call this during game initialization to avoid hitches during gameplay.
  * Does nothing on server.
+ *
+ * This function processes presets sequentially (not in parallel) and yields
+ * between each preset to allow other important initialization tasks like
+ * WASM loading to get CPU time. This prevents PhysX WASM timeouts during
+ * heavy tree generation.
  *
  * @param presetNames - Array of preset names to pre-load
  */
@@ -1037,13 +1243,32 @@ export async function prewarmCache(presetNames: string[]): Promise<void> {
   }
 
   console.log(
-    `[ProcgenTreeCache] Pre-warming cache for ${presetNames.length} presets...`,
+    `[ProcgenTreeCache] Pre-warming cache for ${presetNames.length} presets (sequential with yielding)...`,
   );
 
   const startTime = Date.now();
 
-  // Load all presets in parallel
-  await Promise.all(presetNames.map((name) => ensureVariantsLoaded(name)));
+  // Process presets sequentially with yielding between each
+  // This prevents blocking the main thread for too long and allows
+  // other important async work (like WASM instantiation) to complete
+  for (let i = 0; i < presetNames.length; i++) {
+    const name = presetNames[i];
+
+    // Yield before each preset (except the first) to give other tasks CPU time
+    // This is critical for allowing PhysX WASM to load during tree generation
+    if (i > 0) {
+      await yieldToMainThread();
+    }
+
+    await ensureVariantsLoaded(name);
+
+    // Log progress periodically
+    if ((i + 1) % 4 === 0 || i === presetNames.length - 1) {
+      console.log(
+        `[ProcgenTreeCache] Pre-warm progress: ${i + 1}/${presetNames.length} presets`,
+      );
+    }
+  }
 
   const elapsed = Date.now() - startTime;
   const stats = getCacheStats();
@@ -1092,6 +1317,9 @@ export function getCacheStats(): {
 /**
  * Clear the cache (for testing or memory management).
  */
+/**
+ * Clear the cache (memory only, for testing or memory management).
+ */
 export function clearCache(): void {
   for (const cache of presetCache.values()) {
     for (const variant of cache.variants) {
@@ -1115,7 +1343,17 @@ export function clearCache(): void {
   }
 
   presetCache.clear();
-  console.log("[ProcgenTreeCache] Cache cleared");
+  console.log("[ProcgenTreeCache] Memory cache cleared");
+}
+
+/**
+ * Clear all cached tree variants (memory + IndexedDB).
+ * Use this to force regeneration on next load.
+ */
+export async function clearCacheAll(): Promise<void> {
+  clearCache();
+  await procgenCacheDB.clearStore("trees");
+  console.log("[ProcgenTreeCache] All caches cleared (memory + IndexedDB)");
 }
 
 /**

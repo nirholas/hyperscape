@@ -17,7 +17,8 @@
  */
 
 import { WGSL_COMMON_EXTENDED } from "./common.wgsl";
-import { WGSL_NOISE_FUNCTIONS } from "./noise.wgsl";
+// Re-export noise functions for consumers that need both grass and noise shaders
+export { WGSL_NOISE_FUNCTIONS } from "./noise.wgsl";
 
 // ============================================================================
 // GRASS STRUCTS

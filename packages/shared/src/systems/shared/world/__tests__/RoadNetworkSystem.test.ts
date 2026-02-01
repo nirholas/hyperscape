@@ -5,6 +5,18 @@
 
 import { describe, it, expect } from "vitest";
 
+// ============== Types for testing ==============
+type TileEdge = "north" | "south" | "east" | "west";
+
+interface RoadBoundaryExit {
+  roadId: string;
+  position: { x: number; z: number };
+  direction: number;
+  tileX: number;
+  tileZ: number;
+  edge: TileEdge;
+}
+
 // ============== Constants (must match RoadNetworkSystem.ts) ==============
 const ROAD_WIDTH = 4;
 const PATH_STEP_SIZE = 20;
@@ -744,6 +756,483 @@ describe("RoadNetworkSystem Algorithms", () => {
       expect(isOnRoad(50, 0, roads)).toBe(true); // On first segment
       expect(isOnRoad(100, 50, roads)).toBe(true); // On second segment
       expect(isOnRoad(50, 50, roads)).toBe(false); // Not on any segment
+    });
+  });
+
+  describe("getDistanceToNearestRoad", () => {
+    function getDistanceToNearestRoad(
+      x: number,
+      z: number,
+      roads: Array<{ path: RoadPathPoint[]; width: number }>,
+    ): number {
+      let minDistance = Infinity;
+      for (const road of roads) {
+        for (let i = 0; i < road.path.length - 1; i++) {
+          const p1 = road.path[i];
+          const p2 = road.path[i + 1];
+          minDistance = Math.min(
+            minDistance,
+            distanceToSegment(x, z, p1.x, p1.z, p2.x, p2.z),
+          );
+        }
+      }
+      return minDistance;
+    }
+
+    it("returns 0 for point on road center", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      expect(getDistanceToNearestRoad(50, 0, roads)).toBe(0);
+    });
+
+    it("returns exact distance perpendicular to road", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      // Point 5m away perpendicular to road
+      expect(getDistanceToNearestRoad(50, 5, roads)).toBeCloseTo(5, 5);
+      expect(getDistanceToNearestRoad(50, -10, roads)).toBeCloseTo(10, 5);
+    });
+
+    it("returns distance to nearest segment endpoint", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      // Point beyond road end - distance to endpoint
+      expect(getDistanceToNearestRoad(110, 0, roads)).toBeCloseTo(10, 5);
+      expect(getDistanceToNearestRoad(-10, 0, roads)).toBeCloseTo(10, 5);
+    });
+
+    it("handles diagonal roads", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 100, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      // Point on diagonal road center
+      expect(getDistanceToNearestRoad(50, 50, roads)).toBeCloseTo(0, 5);
+      // Point perpendicular to diagonal: (55, 45) is 10/sqrt(2) away from line y=x
+      const perpDist = 10 / Math.sqrt(2); // ~7.07m
+      expect(getDistanceToNearestRoad(55, 45, roads)).toBeCloseTo(perpDist, 4);
+    });
+
+    it("returns Infinity for empty roads array", () => {
+      expect(getDistanceToNearestRoad(50, 50, [])).toBe(Infinity);
+    });
+
+    it("finds minimum across multiple roads", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+        {
+          path: [
+            { x: 50, z: 10, y: 0 },
+            { x: 50, z: 100, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      // Point at (50, 5) - 5m from first road, 5m from second road
+      expect(getDistanceToNearestRoad(50, 5, roads)).toBeCloseTo(5, 5);
+      // Point at (50, 8) - 8m from first road, 2m from second road
+      expect(getDistanceToNearestRoad(50, 8, roads)).toBeCloseTo(2, 5);
+    });
+
+    it("handles road at exact boundary (halfWidth)", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      const halfWidth = ROAD_WIDTH / 2;
+      // Point exactly at road edge
+      expect(getDistanceToNearestRoad(50, halfWidth, roads)).toBeCloseTo(
+        halfWidth,
+        5,
+      );
+    });
+
+    it("handles very small distances (sub-meter)", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      expect(getDistanceToNearestRoad(50, 0.1, roads)).toBeCloseTo(0.1, 5);
+      expect(getDistanceToNearestRoad(50, 0.01, roads)).toBeCloseTo(0.01, 5);
+    });
+
+    it("handles large distances", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 0, y: 0 },
+            { x: 100, z: 0, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      expect(getDistanceToNearestRoad(50, 1000, roads)).toBeCloseTo(1000, 5);
+    });
+
+    it("handles negative coordinates", () => {
+      const roads = [
+        {
+          path: [
+            { x: -100, z: -100, y: 0 },
+            { x: 100, z: 100, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      expect(getDistanceToNearestRoad(0, 0, roads)).toBeCloseTo(0, 5);
+      expect(getDistanceToNearestRoad(-50, -50, roads)).toBeCloseTo(0, 5);
+    });
+  });
+
+  describe("Grass-Road Fade Calculation", () => {
+    // Test the smoothstep fade logic used in ProceduralGrass
+    function smoothstepJS(edge0: number, edge1: number, x: number): number {
+      const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+      return t * t * (3 - 2 * t);
+    }
+
+    function calculateGrassFade(
+      distance: number,
+      roadWidth: number,
+      fadeWidth: number,
+    ): number {
+      const halfWidth = roadWidth / 2;
+      if (distance <= halfWidth) {
+        return 0; // Inside road - no grass
+      } else if (distance < halfWidth + fadeWidth) {
+        return smoothstepJS(0, 1, (distance - halfWidth) / fadeWidth);
+      }
+      return 1; // Full grass
+    }
+
+    it("returns 0 inside road center", () => {
+      expect(calculateGrassFade(0, 4, 2)).toBe(0);
+    });
+
+    it("returns 0 at road edge (distance = halfWidth)", () => {
+      expect(calculateGrassFade(2, 4, 2)).toBe(0);
+    });
+
+    it("returns ~0 just beyond road edge", () => {
+      expect(calculateGrassFade(2.01, 4, 2)).toBeCloseTo(0, 2);
+    });
+
+    it("returns ~0.5 at midpoint of fade zone", () => {
+      // halfWidth=2, fadeWidth=2, midpoint at distance=3
+      expect(calculateGrassFade(3, 4, 2)).toBeCloseTo(0.5, 1);
+    });
+
+    it("returns ~1 at end of fade zone", () => {
+      // halfWidth=2, fadeWidth=2, end at distance=4
+      expect(calculateGrassFade(3.99, 4, 2)).toBeCloseTo(1, 1);
+    });
+
+    it("returns 1 beyond fade zone", () => {
+      expect(calculateGrassFade(5, 4, 2)).toBe(1);
+      expect(calculateGrassFade(100, 4, 2)).toBe(1);
+    });
+
+    it("handles narrow roads (2m width)", () => {
+      expect(calculateGrassFade(0, 2, 2)).toBe(0);
+      expect(calculateGrassFade(1, 2, 2)).toBe(0);
+      expect(calculateGrassFade(2, 2, 2)).toBeCloseTo(0.5, 1);
+      expect(calculateGrassFade(3, 2, 2)).toBe(1);
+    });
+
+    it("handles wide roads (8m main street)", () => {
+      expect(calculateGrassFade(0, 8, 2)).toBe(0);
+      expect(calculateGrassFade(4, 8, 2)).toBe(0);
+      expect(calculateGrassFade(5, 8, 2)).toBeCloseTo(0.5, 1);
+      expect(calculateGrassFade(6, 8, 2)).toBe(1);
+    });
+
+    it("handles town paths (3m width)", () => {
+      expect(calculateGrassFade(0, 3, 2)).toBe(0);
+      expect(calculateGrassFade(1.5, 3, 2)).toBe(0);
+      expect(calculateGrassFade(2.5, 3, 2)).toBeCloseTo(0.5, 1);
+      expect(calculateGrassFade(3.5, 3, 2)).toBe(1);
+    });
+
+    it("smoothstep produces smooth curve (no discontinuities)", () => {
+      const fadeWidth = 2;
+      const halfWidth = 2;
+      let prevValue = 0;
+      for (let d = halfWidth; d <= halfWidth + fadeWidth; d += 0.1) {
+        const value = calculateGrassFade(d, 4, fadeWidth);
+        expect(value).toBeGreaterThanOrEqual(prevValue);
+        prevValue = value;
+      }
+    });
+
+    it("smoothstep derivative is 0 at boundaries", () => {
+      // Smoothstep has 0 derivative at edge0 and edge1
+      const nearStart = calculateGrassFade(2.001, 4, 2);
+      const atStart = calculateGrassFade(2.0, 4, 2);
+      expect(nearStart - atStart).toBeLessThan(0.001);
+
+      const nearEnd = calculateGrassFade(3.999, 4, 2);
+      const atEnd = calculateGrassFade(4.0, 4, 2);
+      expect(atEnd - nearEnd).toBeLessThan(0.01);
+    });
+  });
+
+  describe("Grass-Road Integration (End-to-End)", () => {
+    // This test simulates what ProceduralGrass.generateHeightmapTexture() does
+    // to verify the complete pipeline from roads → distance → grassiness
+
+    function simulateGrassHeightmapGeneration(
+      roads: Array<{ path: RoadPathPoint[]; width: number }>,
+      samplePoints: Array<{ x: number; z: number }>,
+      fadeWidth: number,
+    ): Array<{ x: number; z: number; grassiness: number }> {
+      return samplePoints.map(({ x, z }) => {
+        // Step 1: Calculate distance to nearest road (like RoadNetworkSystem.getDistanceToNearestRoad)
+        let minDistance = Infinity;
+        for (const road of roads) {
+          for (let i = 0; i < road.path.length - 1; i++) {
+            const p1 = road.path[i];
+            const p2 = road.path[i + 1];
+            minDistance = Math.min(
+              minDistance,
+              distanceToSegment(x, z, p1.x, p1.z, p2.x, p2.z),
+            );
+          }
+        }
+
+        // Step 2: Calculate grassiness with fade (like ProceduralGrass road fade logic)
+        let grassiness = 1.0;
+        if (roads.length > 0 && minDistance < Infinity) {
+          // Find width of closest road
+          let closestWidth = ROAD_WIDTH;
+          for (const road of roads) {
+            for (let i = 0; i < road.path.length - 1; i++) {
+              const p1 = road.path[i];
+              const p2 = road.path[i + 1];
+              const d = distanceToSegment(x, z, p1.x, p1.z, p2.x, p2.z);
+              if (d === minDistance) {
+                closestWidth = road.width;
+              }
+            }
+          }
+
+          const halfWidth = closestWidth / 2;
+          if (minDistance <= halfWidth) {
+            grassiness = 0;
+          } else if (minDistance < halfWidth + fadeWidth) {
+            const t = (minDistance - halfWidth) / fadeWidth;
+            grassiness = t * t * (3 - 2 * t); // smoothstep
+          }
+        }
+
+        return { x, z, grassiness };
+      });
+    }
+
+    it("excludes grass on road center", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      const samples = [
+        { x: 50, z: 50 }, // On road center
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBe(0);
+    });
+
+    it("excludes grass at road edge", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH, // 4m wide, halfWidth = 2m
+        },
+      ];
+      const samples = [
+        { x: 50, z: 52 }, // 2m from center = at edge
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBe(0);
+    });
+
+    it("fades grass in transition zone", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      const samples = [
+        { x: 50, z: 53 }, // 3m from center = 1m into fade zone
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBeGreaterThan(0);
+      expect(result[0].grassiness).toBeLessThan(1);
+    });
+
+    it("has full grass beyond fade zone", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      const samples = [
+        { x: 50, z: 55 }, // 5m from center = beyond fade
+        { x: 50, z: 60 }, // 10m from center = well beyond
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBe(1);
+      expect(result[1].grassiness).toBe(1);
+    });
+
+    it("handles multiple roads correctly", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+        {
+          path: [
+            { x: 50, z: 0, y: 0 },
+            { x: 50, z: 100, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+      const samples = [
+        { x: 50, z: 50 }, // Intersection - on both roads
+        { x: 30, z: 50 }, // On first road only
+        { x: 50, z: 30 }, // On second road only
+        { x: 30, z: 30 }, // Not on any road
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBe(0); // On intersection
+      expect(result[1].grassiness).toBe(0); // On first road
+      expect(result[2].grassiness).toBe(0); // On second road
+      expect(result[3].grassiness).toBe(1); // Not on any road
+    });
+
+    it("respects different road widths (town paths vs main roads)", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: 8, // Main road - 8m wide
+        },
+        {
+          path: [
+            { x: 0, z: 70, y: 0 },
+            { x: 100, z: 70, y: 0 },
+          ],
+          width: 3, // Town path - 3m wide
+        },
+      ];
+      const samples = [
+        { x: 50, z: 54 }, // 4m from main road center - still on road
+        { x: 50, z: 71.5 }, // 1.5m from path center - at edge
+      ];
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+      expect(result[0].grassiness).toBe(0); // Inside 8m road (halfWidth=4m)
+      expect(result[1].grassiness).toBe(0); // At edge of 3m path (halfWidth=1.5m)
+    });
+
+    it("produces consistent results across heightmap grid", () => {
+      const roads = [
+        {
+          path: [
+            { x: 0, z: 50, y: 0 },
+            { x: 100, z: 50, y: 0 },
+          ],
+          width: ROAD_WIDTH,
+        },
+      ];
+
+      // Simulate a small heightmap grid sampling
+      const samples: Array<{ x: number; z: number }> = [];
+      for (let x = 0; x < 100; x += 10) {
+        for (let z = 0; z < 100; z += 10) {
+          samples.push({ x, z });
+        }
+      }
+
+      const result = simulateGrassHeightmapGeneration(roads, samples, 2);
+
+      // Verify samples on road have grassiness = 0
+      const onRoadSamples = result.filter(
+        (r) => Math.abs(r.z - 50) <= ROAD_WIDTH / 2,
+      );
+      for (const sample of onRoadSamples) {
+        expect(sample.grassiness).toBe(0);
+      }
+
+      // Verify samples far from road have grassiness = 1
+      const farSamples = result.filter(
+        (r) => Math.abs(r.z - 50) > ROAD_WIDTH / 2 + 2,
+      );
+      for (const sample of farSamples) {
+        expect(sample.grassiness).toBe(1);
+      }
     });
   });
 
@@ -1769,12 +2258,12 @@ describe("RoadNetworkSystem Algorithms", () => {
       const roadId = "town_to_town_road";
 
       // Process tile (0, 0)
-      let tileX = 0;
-      let tileZ = 0;
-      let tileMinX = 0;
-      let tileMaxX = 100;
-      let tileMinZ = 0;
-      let tileMaxZ = 100;
+      const tileX = 0;
+      const tileZ = 0;
+      const tileMinX = 0;
+      const tileMaxX = 100;
+      const tileMinZ = 0;
+      const tileMaxZ = 100;
 
       let clipped = clipSegmentToTile(
         p1.x,
@@ -2215,7 +2704,6 @@ describe("RoadNetworkSystem Algorithms", () => {
 
       const forwardBias = 0.7;
       const directionVariance = Math.PI / 8;
-      let baseDirection = 0; // Heading east
 
       const deviations: number[] = [];
 
@@ -2349,7 +2837,7 @@ describe("RoadNetworkSystem Algorithms", () => {
       const path = [...startPath];
       const last = startPath[startPath.length - 1];
       const prev = startPath[startPath.length - 2];
-      let direction = Math.atan2(last.z - prev.z, last.x - prev.x);
+      const direction = Math.atan2(last.z - prev.z, last.x - prev.x);
       let x = last.x;
       let z = last.z;
 

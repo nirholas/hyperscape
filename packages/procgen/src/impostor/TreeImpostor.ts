@@ -8,11 +8,11 @@ import * as THREE from "three";
 import {
   OctahedralImpostor,
   OctahedronType,
-  updateImpostorLighting,
   type CompatibleRenderer,
   type ImpostorBakeResult,
   type ImpostorInstance,
   type OctahedronTypeValue,
+  type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
 import type { TreeMeshResult } from "../rendering/TreeMesh.js";
 
@@ -47,6 +47,8 @@ export type TreeImpostorOptions = {
   enableLighting?: boolean;
   /** Bake mode (default: 'hybrid' when enableLighting is true) */
   bakeMode?: BakeMode;
+  /** Use TSL (WebGPU) materials instead of GLSL (WebGL). Set true when using WebGPURenderer. */
+  useTSL?: boolean;
 };
 
 const DEFAULT_OPTIONS: Required<TreeImpostorOptions> = {
@@ -57,6 +59,7 @@ const DEFAULT_OPTIONS: Required<TreeImpostorOptions> = {
   alphaTest: 0.1,
   enableLighting: true, // Enable dynamic lighting by default
   bakeMode: "hybrid", // Use hybrid by default for best results
+  useTSL: false, // Default to GLSL for backward compatibility
 };
 
 /**
@@ -140,9 +143,10 @@ export class TreeImpostor {
     };
 
     // Determine bake mode
+    // Use "withNormals" as default for lighting - it uses the blit approach which works with WebGPU
     const bakeMode =
       this.options.bakeMode ??
-      (this.options.enableLighting ? "hybrid" : "standard");
+      (this.options.enableLighting ? "withNormals" : "standard");
     console.log(
       `[TreeImpostor] Baking with mode: ${bakeMode}${isWebGPU ? " (WebGPU)" : " (WebGL)"}`,
     );
@@ -150,14 +154,14 @@ export class TreeImpostor {
     // Bake based on mode - all bake methods are async and must be awaited
     switch (bakeMode) {
       case "hybrid":
-        // Best of both: correct colors + normal maps
+        // Hybrid: color bake + separate normal pass (may have WebGPU issues)
         this.bakeResult = await this.impostor.bakeHybrid(
           treeMesh.group,
           bakeConfig,
         );
         break;
       case "withNormals":
-        // Original method (may have color issues)
+        // Blit-based method - works correctly with WebGPU
         this.bakeResult = await this.impostor.bakeWithNormals(
           treeMesh.group,
           bakeConfig,
@@ -198,7 +202,6 @@ export class TreeImpostor {
   /**
    * Extended impostor instance with lighting support
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private lastInstance:
     | (ImpostorInstance & {
         updateLighting?: (lighting: Record<string, unknown>) => void;
@@ -209,9 +212,13 @@ export class TreeImpostor {
    * Create a single impostor instance for this tree.
    *
    * @param scale - Scale factor (default: 1)
+   * @param options - Instance options (useTSL for WebGPU compatibility, debugMode for diagnosis)
    * @returns Impostor instance with mesh, update, and optionally updateLighting functions
    */
-  createInstance(scale = 1): ImpostorInstance & {
+  createInstance(
+    scale = 1,
+    options?: { useTSL?: boolean; debugMode?: 0 | 1 | 2 | 3 | 4 | 5 | 6 },
+  ): ImpostorInstance & {
     /** Update lighting uniforms (available when baked with enableLighting: true) */
     updateLighting?: (lighting: {
       lightDirection?: THREE.Vector3;
@@ -225,14 +232,29 @@ export class TreeImpostor {
       throw new Error("Must call bake() before creating instances");
     }
 
-    // Pass scale directly - createInstance reads dimensions from bounding box
-    const instance = this.impostor.createInstance(this.bakeResult, scale);
+    // Merge options - prefer instance-level options, fall back to class options
+    const useTSL = options?.useTSL ?? this.options.useTSL;
+    const debugMode = options?.debugMode ?? 0;
+
+    // Pass scale and useTSL option - createInstance reads dimensions from bounding box
+    const instance = this.impostor.createInstance(this.bakeResult, scale, {
+      useTSL,
+      debugMode,
+    });
 
     // Position Y so the bottom of the billboard is at ground level
-    // The plane is now maxDimension × maxDimension (square), so use treeSize
+    // The plane size is maxDimension × maxDimension (square), matching the atlas cell
     // Height offset is the Y position of the bounding box's bottom
     const scaledSize = this.treeSize * scale;
     instance.mesh.position.y = scaledSize / 2 + this.heightOffset * scale;
+
+    // Perform initial update with a default front view direction
+    // This ensures the impostor displays content immediately instead of black
+    // Use a forward direction (camera at Z+, looking toward origin)
+    const defaultCamera = new THREE.PerspectiveCamera();
+    defaultCamera.position.set(0, this.treeHeight * 0.5, this.treeSize * 2);
+    defaultCamera.lookAt(instance.mesh.position);
+    instance.update(defaultCamera);
 
     this.lastInstance = instance;
     return instance;
@@ -268,8 +290,10 @@ export class TreeImpostor {
     if (this.lastInstance?.updateLighting) {
       this.lastInstance.updateLighting(lighting);
     } else if (this.lastInstance?.material) {
-      // Direct uniform update fallback
-      updateImpostorLighting(this.lastInstance.material, lighting);
+      // Direct uniform update via TSL material's updateLighting method
+      const tslMaterial = this.lastInstance
+        .material as unknown as TSLImpostorMaterial;
+      tslMaterial.updateLighting?.(lighting);
     }
   }
 

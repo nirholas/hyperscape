@@ -508,22 +508,17 @@ describe("CPU Fallback Logic", () => {
     });
 
     it("should apply scale correctly", () => {
-      const pos = { x: 0, y: 0, z: 0 };
       const quat = { x: 0, y: 0, z: 0, w: 1 };
       const scale = { x: 2, y: 3, z: 4 };
 
       const x = quat.x,
         y = quat.y,
-        z = quat.z,
-        w = quat.w;
+        z = quat.z;
       const x2 = x + x,
         y2 = y + y,
         z2 = z + z;
-      const xx = x * x2,
-        xy = x * y2,
-        xz = x * z2;
+      const xx = x * x2;
       const yy = y * y2,
-        yz = y * z2,
         zz = z * z2;
 
       const matrix = new Float32Array(16);

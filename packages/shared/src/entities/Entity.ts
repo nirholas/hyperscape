@@ -110,6 +110,9 @@ import {
   type ImpostorOptions,
   LODLevel,
   type ImpostorInitOptions,
+  AnimatedImpostorManager,
+  ANIMATED_LOD_DISTANCES,
+  type AnimatedHLODState,
 } from "../systems/shared/rendering";
 import {
   createTSLImpostorMaterial,
@@ -118,7 +121,6 @@ import {
   type DissolveConfig,
 } from "@hyperscape/impostor";
 import {
-  getLODDistances,
   getLODConfig,
   type LODDistancesWithSq,
 } from "../systems/shared/world/GPUVegetation";
@@ -229,6 +231,9 @@ export class Entity implements IEntity {
     /** Debug impostor material (TSL only - WebGPU) */
     debugImpostorMaterial: TSLImpostorMaterial | null;
   } | null = null;
+
+  /** Animated HLOD state for mobs/NPCs/players with walk cycle impostors */
+  protected animatedHLODState: AnimatedHLODState | null = null;
 
   // Temp objects for HLOD update loop (avoid allocations)
   private _hlodViewDir = new THREE.Vector3();
@@ -1486,7 +1491,7 @@ export class Entity implements IEntity {
       this._entityHealthBarHandle.move(this._uiPositionMatrix);
     }
 
-    // Update HLOD impostor if initialized
+    // Update HLOD impostor if initialized (static impostors)
     if (this.hlodState && this.world.camera) {
       this.updateHLOD(this.world.camera.position);
     } else if (this.hlodState && !this.world.camera && Entity.IMPOSTOR_DEBUG) {
@@ -1498,6 +1503,15 @@ export class Entity implements IEntity {
             `updateHLOD cannot run, LOD labels will not appear`,
         );
       }
+    }
+
+    // Update animated HLOD if initialized (animated impostors for mobs/NPCs/players)
+    if (this.animatedHLODState && this.world.camera) {
+      // Update manager's animation frame (safe to call multiple times per frame - it tracks timing internally)
+      const animManager = AnimatedImpostorManager.getInstance(this.world);
+      animManager.update(performance.now());
+
+      this.updateAnimatedHLOD(this.world.camera.position);
     }
 
     // Show LOD debug labels for entities WITHOUT HLOD (they're always at LOD0)
@@ -1613,6 +1627,200 @@ export class Entity implements IEntity {
     // Only animate at LOD0 (close range)
     // At LOD1+, show frozen idle pose to save CPU
     return this.hlodState.currentLOD === LODLevel.LOD0;
+  }
+
+  /**
+   * Initialize animated HLOD for entities with walk cycle animations (mobs, NPCs, players)
+   *
+   * This uses the AnimatedImpostorManager to:
+   * 1. Bake walk cycle animations into texture arrays (6fps)
+   * 2. Share impostors across all instances of the same model type
+   * 3. Render all animated impostors in a single draw call
+   *
+   * The modelId should be based on MODEL TYPE, not instance ID:
+   * - "mob_goblin" - all goblins share this
+   * - "npc_banker" - all bankers share this
+   * - "player_default" - all default player models share this
+   *
+   * @param modelId - Model type identifier for caching
+   * @param mixer - AnimationMixer controlling the mesh
+   * @param walkClip - Walk cycle animation clip (can be null)
+   */
+  protected async initAnimatedHLOD(
+    modelId: string,
+    mixer: THREE.AnimationMixer | null | undefined,
+    walkClip: THREE.AnimationClip | null | undefined,
+  ): Promise<void> {
+    // Skip on server
+    if (this.world.isServer || !this.mesh) return;
+
+    // Need mixer and walk clip for animated impostors
+    if (!mixer || !walkClip) {
+      console.warn(
+        `[Entity] Cannot init animated HLOD for ${this.name}: no mixer or walk clip`,
+      );
+      return;
+    }
+
+    const manager = AnimatedImpostorManager.getInstance(this.world);
+
+    // Register with manager (handles caching automatically)
+    const registered = await manager.autoRegister(
+      modelId,
+      this.mesh,
+      mixer,
+      walkClip,
+    );
+
+    if (!registered) {
+      console.warn(
+        `[Entity] Failed to register animated HLOD for ${this.name}`,
+      );
+      return;
+    }
+
+    // Compute bounding sphere once for impostor scale
+    const boundingSphere = new THREE.Sphere();
+    new THREE.Box3().setFromObject(this.mesh).getBoundingSphere(boundingSphere);
+
+    // Initialize animated HLOD state with cached bounding radius
+    this.animatedHLODState = {
+      modelId,
+      isImpostor: false,
+      pending: false,
+      currentLOD: 0,
+      boundingRadius: boundingSphere.radius,
+    };
+
+    console.log(
+      `[Entity] ✅ Animated HLOD initialized for ${this.name} (model: ${modelId}, radius: ${boundingSphere.radius.toFixed(2)})`,
+    );
+  }
+
+  /**
+   * Update animated HLOD based on camera distance
+   *
+   * Call this in clientUpdate() for entities with animated impostors.
+   * Handles transitioning between full mesh and animated impostor.
+   *
+   * @param cameraPosition - Current camera position
+   */
+  protected updateAnimatedHLOD(cameraPosition: THREE.Vector3): void {
+    if (!this.animatedHLODState || !this.mesh) return;
+
+    const manager = AnimatedImpostorManager.getInstance(this.world);
+    const distance = this.node.position.distanceTo(cameraPosition);
+
+    // Determine target LOD
+    const distances = ANIMATED_LOD_DISTANCES;
+    let targetLOD: number;
+
+    if (distance > distances.CULL_DISTANCE) {
+      targetLOD = 3; // Culled
+    } else if (distance > distances.IMPOSTOR_DISTANCE) {
+      targetLOD = 2; // Animated impostor
+    } else {
+      targetLOD = 0; // Full mesh
+    }
+
+    // Apply hysteresis to prevent flickering
+    if (targetLOD !== this.animatedHLODState.currentLOD) {
+      const margin = distances.HYSTERESIS;
+
+      // Going to higher detail - require more distance change
+      if (targetLOD < this.animatedHLODState.currentLOD) {
+        if (
+          this.animatedHLODState.currentLOD === 2 &&
+          targetLOD === 0 &&
+          distance > distances.IMPOSTOR_DISTANCE - margin
+        ) {
+          return; // Stay at impostor
+        }
+        if (
+          this.animatedHLODState.currentLOD === 3 &&
+          targetLOD === 2 &&
+          distance > distances.CULL_DISTANCE - margin
+        ) {
+          return; // Stay culled
+        }
+      }
+    }
+
+    // Handle LOD transitions
+    if (targetLOD !== this.animatedHLODState.currentLOD) {
+      const wasImpostor = this.animatedHLODState.currentLOD === 2;
+      const willBeImpostor = targetLOD === 2;
+
+      if (willBeImpostor && !wasImpostor) {
+        // Transition TO impostor - add instance using cached bounding radius
+        const radius = this.animatedHLODState.boundingRadius ?? 1.0;
+
+        const instanceIndex = manager.addInstance(
+          this.id,
+          this.animatedHLODState.modelId,
+          {
+            position: this.node.position,
+            yaw: this.node.rotation.y,
+            animationOffset: Math.random() * 6, // Random phase for desync
+            scale: radius * 2,
+            visible: true,
+          },
+        );
+
+        // IMPORTANT: Only hide mesh if instance was successfully added
+        if (instanceIndex !== -1) {
+          this.mesh.visible = false;
+          this.animatedHLODState.isImpostor = true;
+        } else {
+          // Instance creation failed - stay at full mesh, don't change LOD
+          console.warn(
+            `[Entity] Failed to add impostor instance for ${this.name}, staying at full mesh`,
+          );
+          return;
+        }
+      } else if (wasImpostor && !willBeImpostor) {
+        // Transition FROM impostor - remove instance
+        manager.removeInstance(this.id);
+
+        // Show full mesh (unless culled)
+        this.mesh.visible = targetLOD !== 3;
+        this.animatedHLODState.isImpostor = false;
+      } else if (targetLOD === 3 && this.animatedHLODState.currentLOD !== 3) {
+        // Transition to culled
+        if (wasImpostor) {
+          manager.removeInstance(this.id);
+          this.animatedHLODState.isImpostor = false;
+        }
+        this.mesh.visible = false;
+      } else if (this.animatedHLODState.currentLOD === 3 && targetLOD !== 3) {
+        // Transition from culled
+        this.mesh.visible = targetLOD !== 2;
+      }
+
+      this.animatedHLODState.currentLOD = targetLOD;
+    }
+
+    // Update instance position/yaw if showing as impostor
+    if (this.animatedHLODState.isImpostor) {
+      manager.updateInstance(this.id, {
+        position: this.node.position,
+        yaw: this.node.rotation.y,
+      });
+    }
+  }
+
+  /**
+   * Clean up animated HLOD resources
+   */
+  protected cleanupAnimatedHLOD(): void {
+    if (!this.animatedHLODState) return;
+
+    if (this.animatedHLODState.isImpostor) {
+      const manager = AnimatedImpostorManager.getInstance(this.world);
+      manager.removeInstance(this.id);
+    }
+
+    this.animatedHLODState = null;
   }
 
   /**
@@ -2483,6 +2691,9 @@ export class Entity implements IEntity {
     }
 
     this.hlodState = null;
+
+    // Also cleanup animated HLOD
+    this.cleanupAnimatedHLOD();
   }
 
   // ============================================================================

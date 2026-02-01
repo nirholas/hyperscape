@@ -514,7 +514,7 @@ export class TerrainGenerator {
         );
 
         // Blend biome colors
-        let color = this.biomeSystem.blendBiomeColors(influences);
+        const color = this.biomeSystem.blendBiomeColors(influences);
 
         // Apply shoreline tinting
         if (

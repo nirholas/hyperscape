@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import Navigation from "./components/shared/Navigation";
 import NotificationBar from "./components/shared/NotificationBar";
@@ -7,20 +8,19 @@ import { AppProvider } from "./contexts/AppContext";
 import { NavigationProvider } from "./contexts/NavigationContext";
 import { ArmorFittingPage } from "./pages/ArmorFittingPage";
 import { AssetsPage } from "./pages/AssetsPage";
+import { BuildingGenPage } from "./pages/BuildingGenPage";
 import { EquipmentPage } from "./pages/EquipmentPage";
 import { GenerationPage } from "./pages/GenerationPage";
+import { GrassGenPage } from "./pages/GrassGenPage";
 import { HandRiggingPage } from "./pages/HandRiggingPage";
 import { ManifestsPage } from "./pages/ManifestsPage";
-import { RetargetAnimatePage } from "./pages/RetargetAnimatePage";
-import { WorldBuilderPage } from "./pages/WorldBuilderPage";
-// Procedural generator pages
-import { BuildingGenPage } from "./pages/BuildingGenPage";
-import { TreeGenPage } from "./pages/TreeGenPage";
-import { RockGenPage } from "./pages/RockGenPage";
 import { PlantGenPage } from "./pages/PlantGenPage";
-import { TerrainGenPage } from "./pages/TerrainGenPage";
+import { RetargetAnimatePage } from "./pages/RetargetAnimatePage";
 import { RoadsGenPage } from "./pages/RoadsGenPage";
-import { GrassGenPage } from "./pages/GrassGenPage";
+import { RockGenPage } from "./pages/RockGenPage";
+import { TerrainGenPage } from "./pages/TerrainGenPage";
+import { TreeGenPage } from "./pages/TreeGenPage";
+import { WorldBuilderPage } from "./pages/WorldBuilderPage";
 
 function AppLayout() {
   return (

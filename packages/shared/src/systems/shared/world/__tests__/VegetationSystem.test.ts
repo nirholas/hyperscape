@@ -1212,8 +1212,8 @@ describe("VegetationSystem Algorithms", () => {
 
       // Simulate LOD1 load failure (file not found)
       function simulateLODLoadFailure(
-        state: AssetLoadState,
-        lodLevel: 1 | 2,
+        _state: AssetLoadState,
+        _lodLevel: 1 | 2,
       ): void {
         // On failure, just don't set loaded = true
         // The system falls back to using lower LOD levels
@@ -1340,14 +1340,6 @@ describe("VegetationSystem Algorithms", () => {
       return lod0Path.replace(/\.glb$/i, "_lod1.glb");
     }
 
-    function inferLOD2Path(lod0Path: string): string {
-      return lod0Path.replace(/\.glb$/i, "_lod2.glb");
-    }
-
-    function inferImpostorPath(lod0Path: string): string {
-      return lod0Path.replace(/\.glb$/i, "_impostor.png");
-    }
-
     it("preserves directory structure", () => {
       expect(inferLOD1Path("assets/vegetation/trees/oak/large_oak.glb")).toBe(
         "assets/vegetation/trees/oak/large_oak_lod1.glb",
@@ -1418,7 +1410,6 @@ describe("VegetationSystem Algorithms", () => {
 
     it("zone widths progressively increase with distance", () => {
       // Further zones should be wider (cheaper rendering = longer distance)
-      const lod0ZoneWidth = TREE_CONFIG.lod1Distance - 0;
       const lod1ZoneWidth = TREE_CONFIG.lod2Distance - TREE_CONFIG.lod1Distance;
       const lod2ZoneWidth =
         TREE_CONFIG.imposterDistance - TREE_CONFIG.lod2Distance;
@@ -1453,7 +1444,7 @@ describe("SpatialHashGrid Algorithm", () => {
       minX: number,
       minZ: number,
       maxX: number,
-      maxZ: number,
+      _maxZ: number,
     ) {
       this.cellSize = cellSize;
       this.invCellSize = 1 / cellSize;
@@ -1677,7 +1668,7 @@ describe("Placement Generation Edge Cases", () => {
       }> = [];
       const placements: Array<{ x: number; z: number }> = [];
 
-      for (const layer of layers) {
+      for (const _layer of layers) {
         // Should not execute
         placements.push({ x: 0, z: 0 });
       }
@@ -1757,7 +1748,6 @@ describe("Placement Generation Edge Cases", () => {
 
   describe("clustering edge cases", () => {
     it("handles clustering with clusterSize = 1", () => {
-      const clustering = true;
       const clusterSize = 1;
       const targetCount = 10;
 
@@ -1767,7 +1757,6 @@ describe("Placement Generation Edge Cases", () => {
     });
 
     it("handles clustering with clusterSize > targetCount", () => {
-      const clustering = true;
       const clusterSize = 100;
       const targetCount = 10;
 
@@ -1777,7 +1766,6 @@ describe("Placement Generation Edge Cases", () => {
     });
 
     it("handles clustering disabled", () => {
-      const clustering = false;
       // When clustering is disabled, positions should be uniform random
       const rng = createTileLayerRng("cluster_test", "tree");
       const positions: Array<{ x: number; z: number }> = [];
@@ -2180,15 +2168,12 @@ describe("Concurrent Processing", () => {
         { tileKey: "0_1", generated: false },
       ];
 
-      const BATCH_SIZE = 4; // Larger than tiles count
-
       await Promise.all(tiles.map((tile) => simulateTileGeneration(tile, 10)));
 
       expect(tiles.every((t) => t.generated)).toBe(true);
     });
 
     it("maintains order of results from parallel processing", async () => {
-      const results: string[] = [];
       const items = ["a", "b", "c", "d", "e"];
 
       // Process in parallel but capture results in order

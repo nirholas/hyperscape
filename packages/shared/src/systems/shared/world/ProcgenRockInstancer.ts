@@ -20,7 +20,11 @@
 
 import THREE from "../../../extras/three/three";
 import type { World } from "../../../core/World";
-import { ImpostorManager, BakePriority } from "../rendering/ImpostorManager";
+import {
+  ImpostorManager,
+  BakePriority,
+  ImpostorBakeMode,
+} from "../rendering/ImpostorManager";
 import {
   createTSLImpostorMaterial,
   type TSLImpostorMaterial,
@@ -124,6 +128,12 @@ export class ProcgenRockInstancer {
   private tempPosition = new THREE.Vector3();
   private tempQuat = new THREE.Quaternion();
   private tempScale = new THREE.Vector3();
+
+  // Lighting sync for impostors
+  private _lastLightUpdate = 0;
+  private _lightDir = new THREE.Vector3(0.5, 0.8, 0.3);
+  private _lightColor = new THREE.Vector3(1, 1, 1);
+  private _ambientColor = new THREE.Vector3(0.7, 0.8, 1.0);
 
   private constructor(world: World) {
     this.world = world;
@@ -267,6 +277,62 @@ export class ProcgenRockInstancer {
 
     // Update dirty meshes
     this.commitDirtyMeshes();
+
+    // Sync impostor lighting with scene sun light
+    this.syncImpostorLighting();
+  }
+
+  /**
+   * Sync impostor lighting with scene's sun light.
+   * Throttled to once per frame (~16ms) to avoid redundant updates.
+   */
+  private syncImpostorLighting(): void {
+    const now = performance.now();
+    // Only update lighting once per frame (~16ms)
+    if (now - this._lastLightUpdate < 16) return;
+    this._lastLightUpdate = now;
+
+    // Get environment system for sun light
+    const env = this.world.getSystem("environment") as {
+      sunLight?: THREE.DirectionalLight;
+      lightDirection?: THREE.Vector3;
+    } | null;
+
+    if (!env?.sunLight) return;
+
+    const sun = env.sunLight;
+    // Light direction is negated (light goes FROM direction TO target)
+    if (env.lightDirection) {
+      this._lightDir.copy(env.lightDirection).negate();
+    } else {
+      this._lightDir.set(0.5, 0.8, 0.3);
+    }
+    this._lightColor.set(sun.color.r, sun.color.g, sun.color.b);
+
+    // Update all impostor materials
+    for (const presetData of this.presetMeshes.values()) {
+      if (presetData.impostor) {
+        const material = presetData.impostor.material as TSLImpostorMaterial;
+        if (material.updateLighting) {
+          material.updateLighting({
+            ambientColor: this._ambientColor,
+            ambientIntensity: 0.35,
+            directionalLights: [
+              {
+                direction: this._lightDir,
+                color: this._lightColor,
+                intensity: sun.intensity,
+              },
+            ],
+            specular: {
+              f0: 0.04, // Rocks are slightly shiny
+              shininess: 32,
+              intensity: 0.25,
+            },
+          });
+        }
+      }
+    }
   }
 
   /**
@@ -377,9 +443,9 @@ export class ProcgenRockInstancer {
     mesh: THREE.Mesh,
     presetData: PresetMeshes,
   ): Promise<void> {
-    const impostorKey = `rock_${presetName}`;
+    const impostorKey = `rock_${presetName}_v2`;
 
-    // Get or bake impostor
+    // Get or bake impostor with normals for dynamic lighting
     const result = await this.impostorManager.getOrCreate(impostorKey, mesh, {
       atlasSize: IMPOSTOR_SIZE,
       gridSizeX: 16,
@@ -387,6 +453,7 @@ export class ProcgenRockInstancer {
       hemisphere: true,
       category: "rock",
       priority: BakePriority.NORMAL,
+      bakeMode: ImpostorBakeMode.STANDARD, // Bake with normals for dynamic lighting
     });
 
     if (!result || !result.atlasTexture) {
@@ -396,9 +463,10 @@ export class ProcgenRockInstancer {
       return;
     }
 
-    // Create impostor instanced mesh
+    // Create impostor instanced mesh with normal atlas for dynamic lighting
     const material = createTSLImpostorMaterial({
       atlasTexture: result.atlasTexture,
+      normalAtlasTexture: result.normalAtlasTexture, // Enable dynamic lighting
       gridSizeX: result.gridSizeX,
       gridSizeY: result.gridSizeY,
       transparent: true,

@@ -63,6 +63,27 @@ declare global {
 // BROWSER APIs
 // ============================================================================
 
+// requestIdleCallback API (not available in all environments)
+declare interface IdleDeadline {
+  readonly didTimeout: boolean;
+  timeRemaining(): number;
+}
+
+declare interface IdleRequestOptions {
+  timeout?: number;
+}
+
+declare function requestIdleCallback(
+  callback: (deadline: IdleDeadline) => void,
+  options?: IdleRequestOptions,
+): number;
+
+declare function cancelIdleCallback(handle: number): void;
+
+// WebGPU Types (for compute shaders)
+declare interface GPUBindGroup {}
+declare interface GPUBindGroupEntry {}
+
 // Browser Touch API
 declare interface Touch {
   identifier: number;

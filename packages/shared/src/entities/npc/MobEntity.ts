@@ -1412,50 +1412,26 @@ export class MobEntity extends CombatantEntity {
         // NOW make GLB mesh visible - animation is confirmed to be playing
         this.mesh.visible = true;
 
-        // Initialize HLOD impostor support for non-instanced GLB mobs
-        // (Instanced mobs use MobInstancedRenderer's impostor system instead)
-        // AAA LOD: Bake in idle pose (not T-pose), freeze animations at LOD1
-        await this.initHLOD(`mob_${this.config.mobType}_${this.config.model}`, {
-          category: "mob",
-          atlasSize: 512, // Smaller for mobs
-          hemisphere: true,
-          freezeAnimationAtLOD1: true, // AAA LOD: Freeze animation at medium distance
-          prepareForBake: async () => {
-            // AAA LOD: Ensure mesh is in idle pose before baking impostor
-            // This captures the idle animation frame 0, not T-pose
-            const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
-            if (mixer && this.mesh) {
-              // Reset current action to frame 0 to ensure consistent idle pose
-              const currentAction = (
-                this as { currentAction?: THREE.AnimationAction }
-              ).currentAction;
-              if (currentAction) {
-                currentAction.time = 0;
-              }
+        // Initialize ANIMATED HLOD for walk cycle impostors
+        // Uses shared atlas across all instances of the same mob type
+        const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+        const animationClips = (
+          this as {
+            animationClips?: {
+              idle?: THREE.AnimationClip;
+              walk?: THREE.AnimationClip;
+              run?: THREE.AnimationClip;
+            };
+          }
+        ).animationClips;
 
-              // Apply frame 0 to skeleton (delta=0 applies current time position)
-              mixer.update(0);
+        // Use walk clip for animated impostor (falls back to idle if no walk)
+        const walkClip = animationClips?.walk ?? animationClips?.idle;
 
-              // Force complete skeleton matrix update
-              this.mesh.traverse((child) => {
-                if ((child as THREE.SkinnedMesh).isSkinnedMesh) {
-                  const skinnedMesh = child as THREE.SkinnedMesh;
-                  if (skinnedMesh.skeleton) {
-                    // Update each bone's world matrix
-                    skinnedMesh.skeleton.bones.forEach((bone) =>
-                      bone.updateMatrixWorld(true),
-                    );
-                    // Recompute skeleton's bone matrices
-                    skinnedMesh.skeleton.update();
-                  }
-                }
-              });
+        // Model ID is based on mob TYPE for caching (all goblins share same impostor)
+        const modelId = `mob_${this.config.mobType}`;
 
-              // Update entire mesh hierarchy
-              this.mesh.updateMatrixWorld(true);
-            }
-          },
-        });
+        await this.initAnimatedHLOD(modelId, mixer, walkClip);
 
         return;
       } catch (error) {
@@ -2744,6 +2720,12 @@ export class MobEntity extends CombatantEntity {
         this.mesh.traverse(this._updateSkeletonCallback);
       }
     }
+
+    // ANIMATED HLOD: Switch to animated impostor at distance (GLB mobs with walk cycles)
+    // Uses instanced rendering for efficient crowd rendering (1 draw call for all mobs)
+    if (this.animatedHLODState && this.world.camera?.position) {
+      this.updateAnimatedHLOD(this.world.camera.position as THREE.Vector3);
+    }
   }
 
   /**
@@ -3609,12 +3591,66 @@ export class MobEntity extends CombatantEntity {
         z: this.node.position.z,
       };
 
+      // CRITICAL: Reset animation to idle BEFORE making mesh visible
+      // This prevents T-pose flash on respawn - the death animation was stopped,
+      // so we need to restart the idle animation before showing the mesh again
+      if (this._avatarInstance) {
+        // VRM path: Reset emote to idle
+        const avatarWithEmote = this._avatarInstance as {
+          setEmote?: (emote: string) => void;
+          update: (delta: number) => void;
+        };
+        if (avatarWithEmote.setEmote) {
+          this._currentEmote = Emotes.IDLE;
+          avatarWithEmote.setEmote(Emotes.IDLE);
+        }
+        // Apply first frame to skeleton before showing
+        this._avatarInstance.update(0);
+      } else {
+        // GLB path: Reset mixer to idle animation
+        const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;
+        const animationClips = (
+          this as {
+            animationClips?: {
+              idle?: THREE.AnimationClip;
+              walk?: THREE.AnimationClip;
+            };
+          }
+        ).animationClips;
+        if (mixer && animationClips?.idle) {
+          // Stop all current actions
+          mixer.stopAllAction();
+          // Play idle animation
+          const action = mixer.clipAction(animationClips.idle);
+          action.enabled = true;
+          action.setEffectiveWeight(1.0);
+          action.setLoop(THREE.LoopRepeat, Infinity);
+          action.reset().play();
+          // Apply first frame immediately
+          mixer.update(0);
+          // Update skeleton bones
+          if (this.mesh) {
+            this.mesh.traverse((child) => {
+              if (child instanceof THREE.SkinnedMesh && child.skeleton) {
+                for (const bone of child.skeleton.bones) {
+                  if (bone) bone.updateMatrixWorld(true);
+                }
+                child.skeleton.update();
+              }
+            });
+          }
+        }
+      }
+
+      // Reset idle pose tracking so LOD system knows to apply pose at distance
+      this._hasAppliedIdlePose = true;
+
       // Restore node visibility
       if (this.node && !this.node.visible) {
         this.node.visible = true;
       }
 
-      // Restore mesh visibility
+      // Restore mesh visibility - animation is now set to idle
       if (this.mesh && !this.mesh.visible) {
         this.mesh.visible = true;
       }
@@ -3695,6 +3731,9 @@ export class MobEntity extends CombatantEntity {
       this._instancedHandle = null;
       this._instancedRenderer = null;
     }
+
+    // Clean up animated HLOD (for mobs with walk cycle impostors at distance)
+    this.cleanupAnimatedHLOD();
 
     // Clean up animation mixer (for GLB models)
     const mixer = (this as { mixer?: THREE.AnimationMixer }).mixer;

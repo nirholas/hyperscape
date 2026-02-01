@@ -209,7 +209,6 @@ export function buildSeamEdges(
     const e0_v0_corner = (opp0 + 1) % 3;
     const e0_v1_corner = (opp0 + 2) % 3;
     const f0_v0 = fv[e0_v0_corner];
-    const f0_v1 = fv[e0_v1_corner];
     const f0_t0 = ft[e0_v0_corner];
     const f0_t1 = ft[e0_v1_corner];
 
@@ -230,7 +229,6 @@ export function buildSeamEdges(
     const e1_v0_corner = (opp1 + 1) % 3;
     const e1_v1_corner = (opp1 + 2) % 3;
     const f1_v0 = fv[e1_v0_corner];
-    const f1_v1 = fv[e1_v1_corner];
     const f1_t0 = ft[e1_v0_corner];
     const f1_t1 = ft[e1_v1_corner];
 

@@ -41,10 +41,12 @@ const ACER_PARTIAL: PartialTreeParams = {
   curveV: [200, 100, 100, 0],
   bendV: [0, 50, 0, 0],
   branchDist: [0, 0, 0, 0],
-  leafBlosNum: 30,
+  leafBlosNum: 50, // Increased for fuller canopy
   leafShape: LeafShape.Palmate,
   leafScale: 0.2,
   leafBend: 0.3,
+  leafDistributionLevels: 2, // Leaves on main branches AND twigs for full canopy
+  leafSecondaryScale: 0.4, // Secondary level leaves at 40% density
 };
 
 /** Apple tree - fruit tree with blossoms */
@@ -179,11 +181,13 @@ const BLACK_OAK_PARTIAL: PartialTreeParams = {
   curveBack: [0, -70, 0, 0],
   curveV: [90, 150, -30, 0],
   bendV: [0, 100, 0, 0],
-  leafBlosNum: 45,
+  leafBlosNum: 80, // Increased for fuller canopy
   leafShape: LeafShape.SpikyOak,
   leafScale: 0.2,
   leafScaleX: 0.66,
   leafBend: 0.3,
+  leafDistributionLevels: 2, // Full canopy coverage
+  leafSecondaryScale: 0.4,
   tropism: [0, 0, 0.8],
 };
 

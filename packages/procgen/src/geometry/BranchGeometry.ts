@@ -45,6 +45,9 @@ const DEFAULT_OPTIONS: Required<GeometryOptions> = {
   maxLeaves: 50000,
   maxBranchDepth: Infinity,
   maxStems: 2000, // Safety limit to prevent memory allocation failures
+  leafSamplingMode: "spatial",
+  leafSamplingSeed: 0,
+  leafScaleMultiplier: 1.0,
 };
 
 /**

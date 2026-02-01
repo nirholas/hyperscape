@@ -8,17 +8,18 @@
  * Asset-Forge server to store the baked atlases.
  */
 
-import * as THREE from "three";
-import {
-  GLTFLoader,
-  type GLTF,
-} from "three/examples/jsm/loaders/GLTFLoader.js";
-import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
 import {
   ImpostorBaker,
   OctahedronType,
   type CompatibleRenderer,
 } from "@hyperscape/impostor";
+import { VRMLoaderPlugin, VRM, VRMUtils } from "@pixiv/three-vrm";
+import * as THREE from "three";
+import {
+  GLTFLoader,
+  type GLTF,
+} from "three/examples/jsm/loaders/GLTFLoader.js";
+
 import type {
   OctahedralImpostorBakeConfig,
   ImpostorMetadata,

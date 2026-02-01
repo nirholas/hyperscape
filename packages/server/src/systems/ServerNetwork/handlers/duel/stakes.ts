@@ -21,7 +21,6 @@ import {
   isValidSlotNumber,
 } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
-import { InventoryRepository } from "../../../../database/repositories/InventoryRepository";
 import type { DatabaseConnection } from "../trade/types";
 import { AuditLogger } from "../../services";
 import {

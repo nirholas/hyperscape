@@ -107,12 +107,11 @@ export class Logger {
    * Internal log method that formats and outputs the log entry
    */
   private static log(
-    level: string,
+    _level: string,
     system: string,
     message: string,
     data?: Record<string, unknown>,
   ): void {
-    const timestamp = new Date().toISOString();
     const prefix = `[${system}]`;
 
     if (data && Object.keys(data).length > 0) {

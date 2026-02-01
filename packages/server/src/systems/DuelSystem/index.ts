@@ -26,19 +26,12 @@ import type { World, PlayerID, SlotNumber, ItemID } from "@hyperscape/shared";
 import {
   EventType,
   type DuelRules,
-  type DuelState,
-  type StakedItem,
   validateRuleCombination,
   DuelErrorCode,
-  DeathState,
 } from "@hyperscape/shared";
 import { PendingDuelManager } from "./PendingDuelManager";
 import { ArenaPoolManager } from "./ArenaPoolManager";
-import {
-  DuelSessionManager,
-  type DuelSession,
-  type EquipmentRestrictions,
-} from "./DuelSessionManager";
+import { DuelSessionManager, type DuelSession } from "./DuelSessionManager";
 import { DuelCombatResolver } from "./DuelCombatResolver";
 import {
   isPlayerDisconnectPayload,
@@ -51,9 +44,7 @@ import {
   CLEANUP_INTERVAL_TICKS,
   SESSION_MAX_AGE_TICKS,
   DEATH_RESOLUTION_DELAY_TICKS,
-  POSITION_TOLERANCE,
   ticksToMs,
-  TICK_DURATION_MS,
 } from "./config";
 
 // ============================================================================

@@ -16,16 +16,6 @@ export interface SpatialHashConfig {
 }
 
 /**
- * Edge entry in spatial hash
- */
-interface EdgeEntry {
-  edgeIndex: number;
-  v0: number;
-  v1: number;
-  next: number; // Index of next entry in chain (-1 if end)
-}
-
-/**
  * High-performance spatial hash for edge lookups
  */
 export class EdgeSpatialHash {
@@ -234,11 +224,11 @@ export class EdgeSpatialHash {
    * Update vertex position for all edges containing it
    */
   updateVertex(
-    vi: number,
-    newX: number,
-    newY: number,
-    newZ: number,
-    positions: Float32Array,
+    _vi: number,
+    _newX: number,
+    _newY: number,
+    _newZ: number,
+    _positions: Float32Array,
   ): void {
     // For each edge containing this vertex, we'd need to rehash
     // This is O(degree) which is typically small

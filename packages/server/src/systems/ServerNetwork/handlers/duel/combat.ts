@@ -7,13 +7,7 @@
 
 import type { World } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
-import {
-  getDuelSystem,
-  sendDuelError,
-  sendToSocket,
-  getPlayerId,
-  getSocketByPlayerId,
-} from "./helpers";
+import { getDuelSystem, sendDuelError, getPlayerId } from "./helpers";
 
 // ============================================================================
 // Forfeit Handler

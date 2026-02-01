@@ -71,6 +71,8 @@ export const DEFAULT_PARAMS: TreeParams = {
   leafScale: 0.17,
   leafScaleX: 1,
   leafBend: 0.6,
+  leafDistributionLevels: 1, // Default: only deepest level (original behavior)
+  leafSecondaryScale: 0.5, // Secondary levels get 50% leaf density
 
   // Blossoms
   blossomShape: BlossomShape.Cherry,

@@ -210,7 +210,6 @@ import {
   handleDuelForfeit,
 } from "./handlers/duel";
 import { getDatabase } from "./handlers/common";
-import { sql } from "drizzle-orm";
 import { InventoryRepository } from "../../database/repositories/InventoryRepository";
 
 const defaultSpawn = '{ "position": [0, 50, 0], "quaternion": [0, 0, 0, 1] }';
@@ -659,19 +658,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         winnerName,
         loserId,
         loserName,
-        reason,
         forfeit,
         winnerReceives,
         winnerReceivesValue,
-        challengerStakes,
-        targetStakes,
       } = event as {
         duelId: string;
         winnerId: string;
         winnerName: string;
         loserId: string;
         loserName: string;
-        reason: "death" | "forfeit";
         forfeit: boolean;
         winnerReceives: Array<{
           itemId: string;
@@ -679,16 +674,6 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           value: number;
         }>;
         winnerReceivesValue: number;
-        challengerStakes: Array<{
-          itemId: string;
-          quantity: number;
-          value: number;
-        }>;
-        targetStakes: Array<{
-          itemId: string;
-          quantity: number;
-          value: number;
-        }>;
       };
 
       // Calculate what the loser lost (their stakes)

@@ -230,8 +230,6 @@ export class POISystem extends System {
     const worldSize = TERRAIN_CONSTANTS.TERRAIN_TILE_SIZE * 100;
     const halfWorld = worldSize / 2;
 
-    let totalGenerated = 0;
-
     for (const category of categories) {
       const count = this.config.countPerCategory[category] ?? 0;
       if (count === 0) continue;
@@ -242,7 +240,6 @@ export class POISystem extends System {
         halfWorld,
       );
       this.pois.push(...generated);
-      totalGenerated += generated.length;
     }
 
     // Sort by importance (highest first) for road connection priority

@@ -1,5 +1,7 @@
 /**
  * TerrainPreview - Real-time terrain visualization using @hyperscape/procgen
+ *
+ * Uses WebGPU renderer for TSL/node materials compatibility.
  */
 
 import { TerrainGen, BuildingGen } from "@hyperscape/procgen";
@@ -10,9 +12,14 @@ import React, {
   useState,
   useMemo,
 } from "react";
-import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshStandardNodeMaterial, MeshBasicNodeMaterial } from "three/webgpu";
+
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
 
 export interface TerrainPreviewConfig {
   seed: number;
@@ -117,7 +124,7 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
   className = "",
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -134,10 +141,11 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
     [configOverrides],
   );
 
-  // Initialize Three.js scene
+  // Initialize Three.js scene with WebGPU
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let mounted = true;
     const container = containerRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -152,22 +160,12 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
     camera.position.set(500, 400, 500);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
+    // Town markers group (add before renderer is ready)
+    const townMarkers = new THREE.Group();
+    scene.add(townMarkers);
+    townMarkersRef.current = townMarkers;
 
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 0, 0);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 - 0.1;
-    controlsRef.current = controls;
-
-    // Lighting
+    // Lighting (add before renderer is ready)
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
     scene.add(ambientLight);
 
@@ -175,36 +173,65 @@ export const TerrainPreview: React.FC<TerrainPreviewProps> = ({
     directionalLight.position.set(100, 200, 100);
     scene.add(directionalLight);
 
-    // Town markers group
-    const townMarkers = new THREE.Group();
-    scene.add(townMarkers);
-    townMarkersRef.current = townMarkers;
+    // Async WebGPU initialization
+    const initRenderer = async () => {
+      const renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
+      });
 
-    // Animation loop
-    const animate = () => {
-      animationIdRef.current = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+      if (!mounted) {
+        renderer.dispose();
+        return;
+      }
+
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Controls (after renderer is ready)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.target.set(0, 0, 0);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.maxPolarAngle = Math.PI / 2 - 0.1;
+      controlsRef.current = controls;
+
+      // Animation loop
+      const animate = () => {
+        if (!mounted) return;
+        animationIdRef.current = requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      };
+      animate();
     };
-    animate();
+
+    initRenderer();
 
     // Handle resize
     const handleResize = () => {
+      if (!rendererRef.current) return;
       const w = container.clientWidth;
       const h = container.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      rendererRef.current.setSize(w, h);
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationIdRef.current);
-      controls.dispose();
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
+      controlsRef.current?.dispose();
+      if (rendererRef.current) {
+        if (container.contains(rendererRef.current.domElement)) {
+          container.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+        rendererRef.current = null;
       }
     };
   }, []);

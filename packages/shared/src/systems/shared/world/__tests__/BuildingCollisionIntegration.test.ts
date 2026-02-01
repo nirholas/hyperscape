@@ -80,13 +80,11 @@ function createBankLayout(): BuildingLayoutInput {
 
 describe("Building Collision Integration", () => {
   let world: World;
-  let collision: CollisionMatrix;
   let service: BuildingCollisionService;
   let pathfinder: BFSPathfinder;
 
   beforeEach(() => {
     world = createMockWorld();
-    collision = world.collision as CollisionMatrix;
     service = new BuildingCollisionService(world);
     pathfinder = new BFSPathfinder();
   });
@@ -98,8 +96,6 @@ describe("Building Collision Integration", () => {
 
     const BANK_CENTER_X = 10;
     const BANK_CENTER_Z = 10;
-    const BANK_WIDTH = 3; // cells
-    const BANK_DEPTH = 3; // cells
     const HALF_SIZE = (3 * CELL_SIZE) / 2; // 6 meters = 6 tiles
 
     beforeEach(() => {

@@ -31,19 +31,6 @@ const serverCheckPromise = checkServerAvailable().then((available) => {
   return available;
 });
 
-/**
- * Helper to skip integration tests when server is not available.
- * Must be called at the start of each integration test.
- */
-async function skipIfNoServer(): Promise<boolean> {
-  await serverCheckPromise;
-  if (!serverAvailable) {
-    console.log("  → Skipped: server not available");
-    return true;
-  }
-  return false;
-}
-
 describe("BotPoolManager Unit Tests", () => {
   describe("Configuration", () => {
     it("uses default values", () => {

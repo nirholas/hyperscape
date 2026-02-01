@@ -45,6 +45,8 @@ export type TreeMeshOptions = {
   useInstancedLeaves?: boolean;
   /** Maximum leaf instances when using instanced rendering */
   maxLeafInstances?: number;
+  /** Use TSL (WebGPU-compatible) materials instead of GLSL ShaderMaterial for instanced leaves */
+  useTSL?: boolean;
 };
 
 /**
@@ -161,6 +163,11 @@ export function generateTreeMesh(
     const maxLeaves =
       options.geometry?.maxLeaves ?? options.maxLeafInstances ?? 50000;
 
+    // Extract leaf sampling options from geometry config
+    const leafSamplingMode = options.geometry?.leafSamplingMode ?? "spatial";
+    const leafSamplingSeed =
+      options.geometry?.leafSamplingSeed ?? data.seed ?? 0;
+
     if (useInstanced) {
       // OPTIMIZED: Use instanced rendering for leaves
       instancedLeaves = true;
@@ -171,7 +178,13 @@ export function generateTreeMesh(
           data.leaves,
           data.params,
           data.treeScale,
-          { maxInstances: maxLeaves },
+          {
+            maxInstances: maxLeaves,
+            material: options.leafMaterial,
+            leafSamplingMode,
+            leafSamplingSeed,
+            useTSL: options.useTSL,
+          },
         );
 
         if (result.leaves) {
@@ -203,7 +216,13 @@ export function generateTreeMesh(
           data.leaves,
           data.params,
           data.treeScale,
-          { maxInstances: maxLeaves },
+          {
+            maxInstances: maxLeaves,
+            material: options.leafMaterial,
+            leafSamplingMode,
+            leafSamplingSeed,
+            useTSL: options.useTSL,
+          },
         );
 
         result.mesh.castShadow = options.castShadow ?? true;

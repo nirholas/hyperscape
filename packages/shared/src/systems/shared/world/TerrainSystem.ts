@@ -16,7 +16,6 @@ import { InstancedMeshManager } from "../../../utils/rendering/InstancedMeshMana
 import { CollisionMask } from "../movement/CollisionFlags";
 import { worldToTile } from "../movement/TileSystem";
 import {
-  getTerrainWorkerPool,
   generateTerrainTilesBatch,
   terminateTerrainWorkerPool,
   type TerrainWorkerConfig,
@@ -79,7 +78,6 @@ import { ProcgenRockInstancer } from "./ProcgenRockInstancer";
 //   BIOME_PLANT_PRESETS,
 // } from "./ProcgenPlantCache";
 import { ProcgenPlantInstancer } from "./ProcgenPlantInstancer"; // Still needed for cleanup
-import type { VegetationInstance } from "../../../types/world/world-types";
 import { stationDataProvider } from "../../../data/StationDataProvider";
 import { resolveFootprint } from "../../../types/game/resource-processing-types";
 import { createTerrainMaterial, TerrainUniforms } from "./TerrainShader";
@@ -1649,7 +1647,7 @@ export class TerrainSystem extends System {
       300,
     );
 
-    // Grass rendering now handled by GrassSystem
+    // Grass rendering now handled by ProceduralGrassSystem
   }
 
   private setupServerTerrain(): void {
@@ -1898,7 +1896,7 @@ export class TerrainSystem extends System {
         // Generate visual features and water meshes
         this.generateVisualFeatures(tile);
         this.generateWaterMeshes(tile);
-        // NOTE: Grass rendering is handled by GrassSystem
+        // NOTE: Grass rendering is handled by ProceduralGrassSystem
 
         // Queue resource instances for deferred creation (spreads work across frames)
         if (tile.resources.length > 0 && tile.mesh) {
@@ -2355,8 +2353,6 @@ export class TerrainSystem extends System {
     for (let i = 0; i < vertexCount; i++) {
       const localX = vertices[i * 2];
       const localZ = vertices[i * 2 + 1];
-      const worldX = localX + tileOffsetX;
-      const worldZ = localZ + tileOffsetZ;
 
       let minDistance = Infinity;
       let closestWidth = this.CONFIG.ROAD_WIDTH;
@@ -3060,7 +3056,7 @@ export class TerrainSystem extends System {
 
   /**
    * Check if a world position is inside a flat zone's core area.
-   * Used by GrassSystem to exclude grass from artificial flat areas (buildings, arenas, etc.)
+   * Used by ProceduralGrassSystem to exclude grass from artificial flat areas (buildings, arenas, etc.)
    *
    * @param worldX - World X coordinate
    * @param worldZ - World Z coordinate
@@ -3088,7 +3084,7 @@ export class TerrainSystem extends System {
 
   /**
    * Get terrain color at a world position by sampling the nearest terrain tile vertex.
-   * Used by GrassSystem to match grass color to terrain.
+   * Used by ProceduralGrassSystem to match grass color to terrain.
    *
    * @param worldX - World X coordinate
    * @param worldZ - World Z coordinate
@@ -5295,7 +5291,7 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Get all loaded tiles with their biome (for GrassSystem and other systems)
+   * Get all loaded tiles with their biome (for ProceduralGrassSystem and other systems)
    * Returns ALL tiles regardless of difficulty or mob presence.
    */
   getLoadedTiles(): Array<{

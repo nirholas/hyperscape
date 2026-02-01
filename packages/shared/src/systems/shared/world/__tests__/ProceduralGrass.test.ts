@@ -22,10 +22,12 @@ describe("GRASS_CONFIG", () => {
     });
 
     it("should match grid coverage exactly", () => {
-      const gridCells = Math.floor(
-        (GRASS_CONFIG.GRID_RADIUS * 2) / GRASS_CONFIG.CELL_SIZE,
-      );
-      expect(GRASS_CONFIG.MAX_INSTANCES).toBe(gridCells * gridCells);
+      // MAX_INSTANCES = GRID_CELLS^2 * SUB_CELLS_TOTAL
+      const expected =
+        GRASS_CONFIG.GRID_CELLS *
+        GRASS_CONFIG.GRID_CELLS *
+        GRASS_CONFIG.SUB_CELLS_TOTAL;
+      expect(GRASS_CONFIG.MAX_INSTANCES).toBe(expected);
     });
   });
 
@@ -102,10 +104,19 @@ describe("GRASS_CONFIG", () => {
     });
   });
 
-  describe("blade curve", () => {
-    it("should have reasonable blade curve", () => {
-      expect(GRASS_CONFIG.BLADE_CURVE).toBeGreaterThanOrEqual(0);
-      expect(GRASS_CONFIG.BLADE_CURVE).toBeLessThan(1);
+  describe("road fade configuration", () => {
+    it("should have positive road fade width", () => {
+      expect(GRASS_CONFIG.ROAD_FADE_WIDTH).toBeGreaterThan(0);
+    });
+
+    it("should have reasonable fade width (1-5 meters)", () => {
+      expect(GRASS_CONFIG.ROAD_FADE_WIDTH).toBeGreaterThanOrEqual(1);
+      expect(GRASS_CONFIG.ROAD_FADE_WIDTH).toBeLessThanOrEqual(5);
+    });
+
+    it("road fade width should match terrain blend width (2m)", () => {
+      // ROAD_FADE_WIDTH should match ROAD_BLEND_WIDTH in TerrainSystem
+      expect(GRASS_CONFIG.ROAD_FADE_WIDTH).toBe(2.0);
     });
   });
 });

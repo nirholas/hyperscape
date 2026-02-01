@@ -1,8 +1,9 @@
-import { defineConfig } from "vitest/config";
-import { playwright } from "@vitest/browser-playwright";
-import react from "@vitejs/plugin-react";
 import path from "path";
 import { fileURLToPath } from "url";
+
+import react from "@vitejs/plugin-react";
+import { playwright } from "@vitest/browser-playwright";
+import { defineConfig } from "vitest/config";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 

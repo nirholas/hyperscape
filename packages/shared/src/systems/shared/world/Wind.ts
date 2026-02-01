@@ -1,6 +1,6 @@
 /**
  * Wind system - provides uniforms for shader-based vegetation animation.
- * Used by: GrassSystem, WaterSystem
+ * Used by: ProceduralGrassSystem, WaterSystem
  */
 
 import THREE from "../../../extras/three/three";

@@ -338,20 +338,45 @@ export class Tree {
     );
 
     // Calculate leaf/branch count
+    // Multi-level leaf distribution: allow leaves at levels-1, levels-2, etc.
     let leafCount = 0;
     let branchCount = 0;
     let fLeavesOnSeg = 0;
     let fBranchesOnSeg = 0;
 
-    if (
-      depth === this.params.levels - 1 &&
+    // Determine how many levels from the deepest this branch is
+    const levelsFromDeepest = this.params.levels - 1 - depth;
+    const leafDistLevels = this.params.leafDistributionLevels ?? 1;
+    const secondaryScale = this.params.leafSecondaryScale ?? 0.5;
+
+    // Check if this branch level should have leaves
+    // Leaves appear on the deepest N levels (where N = leafDistributionLevels)
+    const shouldHaveLeaves =
       depth > 0 &&
-      this.params.leafBlosNum !== 0
-    ) {
+      this.params.leafBlosNum !== 0 &&
+      levelsFromDeepest < leafDistLevels;
+
+    // Check if this branch level should have child branches
+    // Branches are created if we're not at the deepest level
+    // (Secondary leaf levels can have BOTH leaves and branches)
+    const shouldHaveBranches = depth < this.params.levels - 1;
+
+    if (shouldHaveLeaves) {
       leafCount = this.calcLeafCount(stem);
       leafCount *= 1 - start / curveRes;
+
+      // Scale down leaves for non-deepest levels (secondary, tertiary, etc.)
+      if (levelsFromDeepest > 0) {
+        // Secondary levels get fewer leaves to avoid overwhelming the tree
+        // The deeper we go toward trunk, the fewer leaves
+        leafCount *= Math.pow(secondaryScale, levelsFromDeepest);
+      }
+
       fLeavesOnSeg = leafCount / curveRes;
-    } else {
+    }
+
+    // Also calculate branches if not at deepest level
+    if (shouldHaveBranches) {
       branchCount = this.calcBranchCount(stem);
       branchCount *= 1 - start / curveRes;
       branchCount *= numBranchesFactor;
@@ -492,9 +517,12 @@ export class Tree {
           }
         }
 
-        // Add branches or leaves
+        // Add branches and/or leaves
+        // Note: With multi-level leaf distribution, secondary leaf levels can have
+        // BOTH branches AND leaves on the same segment
         const rState = this.rng.getState();
 
+        // Generate branches (if not at deepest level)
         if (Math.abs(branchCount) > 0 && depth < this.params.levels - 1) {
           let branchesOnSeg: number;
           if (branchCount < 0) {
@@ -515,11 +543,11 @@ export class Tree {
               false,
             );
           }
-        } else if (
-          Math.abs(leafCount) > 0 &&
-          depth > 0 &&
-          this.generateLeaves
-        ) {
+        }
+
+        // Generate leaves (if on a leaf-bearing level)
+        // This is now independent of branch generation for multi-level distribution
+        if (Math.abs(leafCount) > 0 && depth > 0 && this.generateLeaves) {
           let leavesOnSeg: number;
           if (leafCount < 0) {
             // Fan leaves at end

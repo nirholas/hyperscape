@@ -201,7 +201,7 @@ export class DamageSplatSystem extends System {
       return; // Pool exhausted, skip this splat
     }
 
-    const { canvas, context, texture, sprite, material } = splat;
+    const { context, texture, sprite, material } = splat;
     const size = this.CANVAS_SIZE;
 
     // Clear canvas and redraw

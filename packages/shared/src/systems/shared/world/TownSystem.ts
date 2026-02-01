@@ -519,7 +519,7 @@ export class TownSystem extends System {
   ): TownPath[] {
     const paths: TownPath[] = [];
     const roadHalfWidth = 3; // 6m road width / 2
-    const pathWidth = 1.5;
+    const pathWidth = 3; // Visible walkway to building entrances
 
     for (const building of buildings) {
       if (!building.entrance) continue;

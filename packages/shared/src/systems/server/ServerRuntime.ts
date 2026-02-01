@@ -70,9 +70,6 @@ export class ServerRuntime extends System {
       // Accumulate time
       this.tickAccumulator += deltaTime;
 
-      // Calculate how many ticks we're behind
-      const ticksBehind = Math.floor(this.tickAccumulator / TICK_INTERVAL_MS);
-
       // OSRS-style: Run ticks, but cap at MAX_TICKS_PER_FRAME to prevent tick storms
       let ticksThisFrame = 0;
 

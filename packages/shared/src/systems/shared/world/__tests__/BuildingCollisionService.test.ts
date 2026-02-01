@@ -465,8 +465,6 @@ describe("BuildingCollisionService", () => {
         0,
       );
 
-      const collision = world.collision as CollisionMatrix;
-
       // Get a wall tile before unregistering
       const building = service.getBuilding("building-1");
       const groundFloor = building!.floors.find((f) => f.floorIndex === 0);
@@ -1544,8 +1542,6 @@ describe("BuildingCollisionService", () => {
 
       // Find a walkable tile inside the building
       const groundFloor = building!.floors[0];
-      const walkableTileKey = Array.from(groundFloor.walkableTiles)[0];
-      const [insideTileX, insideTileZ] = walkableTileKey.split(",").map(Number);
 
       // Find the door wall segment
       const doorWall = groundFloor.wallSegments.find(

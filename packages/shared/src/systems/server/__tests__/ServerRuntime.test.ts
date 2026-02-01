@@ -11,7 +11,7 @@
  * functionality, while E2E tests verify actual tick behavior.
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ServerRuntime } from "../ServerRuntime";
 
 // Create a minimal mock World
@@ -53,7 +53,7 @@ describe("ServerRuntime", () => {
   describe("construction", () => {
     it("should create instance without starting", () => {
       const world = createMockWorld();
-      const runtime = new ServerRuntime(world as never);
+      new ServerRuntime(world as never);
 
       // Should not have called tick yet (not started)
       expect(world.tick).not.toHaveBeenCalled();

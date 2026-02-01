@@ -114,3 +114,4 @@ three-octahedral-impostor/
 # The manifests/ directory contains essential JSON data and MUST be tracked
 packages/server/world/assets/
 .wrangler/
+packages/server/world/

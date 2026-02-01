@@ -378,7 +378,6 @@ class MockRoadNetworkSystem {
   private buildTileCache(): void {
     this.tileCache.clear();
     this.boundaryExits = [];
-    const EDGE_EPSILON = 0.01;
 
     for (const road of this.roads) {
       for (let i = 0; i < road.path.length - 1; i++) {
@@ -1419,7 +1418,6 @@ describe("Town and Road System Integration", () => {
       };
 
       const forwardBias = 0.7;
-      const variance = Math.PI / 8;
       const samples = 1000;
 
       let forwardCount = 0;
@@ -1779,7 +1777,6 @@ describe("Town and Road System Integration", () => {
       // Edge is at lastZ (last land point, around z=10) + 30% step toward water
       // With step=10, this is ~z=10 + (-10 * 0.3) = ~7 or slightly south
       // The key is that the HEIGHT at the edge position should be above water
-      const edgeHeight = terrain.getHeightAt(edge!.x, edge!.z);
       // Since z > 0 means land (height 15), edge might be at z ≈ 3 (first land step after 0)
       // After 30% step offset toward water, could be z ≈ 0 or slightly negative
       // What matters is it's CLOSE to the water, not necessarily above z=0

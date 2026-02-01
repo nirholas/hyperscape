@@ -162,7 +162,7 @@ describe("Building Diagonal Wall Clipping Prevention", () => {
   describe("Cardinal Movement", () => {
     it("should BLOCK cardinal movement through walls (no door)", () => {
       const debug = getDebugInfo()!;
-      const { minTileX, minTileZ, maxTileX } = debug.bbox;
+      const { minTileX, minTileZ } = debug.bbox;
 
       // Try to walk through west wall (no door there)
       // Outside tile (west of building)
@@ -275,7 +275,7 @@ describe("Building Diagonal Wall Clipping Prevention", () => {
 
     it("should ALLOW diagonal movement inside building (no walls)", () => {
       const debug = getDebugInfo()!;
-      const { minTileX, minTileZ, maxTileX, maxTileZ } = debug.bbox;
+      const { minTileX, minTileZ } = debug.bbox;
 
       // Interior tiles (both well inside the building)
       const interiorTile1: TileCoord = {
@@ -528,10 +528,6 @@ describe("Building Terrain Blocking", () => {
     const buildings = collisionService.getAllBuildings();
     const building = buildings.find((b) => b.buildingId === BUILDING_ID)!;
     const bbox = building.boundingBox;
-
-    // Find a tile that's inside the bounding box but NOT a walkable tile
-    // This would be under the walls/foundation
-    const floor0 = building.floors[0];
 
     // Check tiles just inside the bounding box boundary
     // These might be under walls, not walkable floor tiles

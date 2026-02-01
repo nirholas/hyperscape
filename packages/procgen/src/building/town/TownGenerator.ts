@@ -75,7 +75,7 @@ const TOWN_CONSTANTS = {
   },
 
   // Path dimensions
-  PATH_WIDTH: 2, // 2m = half cell, grid-aligned
+  PATH_WIDTH: 3, // 3m path width - visible walkway to building doors
 
   // Minimum distances (grid-aligned)
   MIN_BUILDING_SPACING: CELL_SIZE, // 4m = 1 cell gap between buildings
@@ -590,14 +590,11 @@ export class TownGenerator {
       }
     }
 
-    // For terminus layout, truncate to just approach road
+    // For terminus layout, keep the full road length but only mark ONE entry point
+    // This creates a "dead-end" feel while still allowing buildings along the entire road
     if (layoutType === "terminus") {
-      roads.length = 0;
-      roads.push({
-        start: mainStreetStart,
-        end: { x: town.position.x, z: town.position.z },
-        isMain: true,
-      });
+      // Keep the main street at full length (edge to edge through center)
+      // Just reduce entry points to 1 (the "approach" side)
       entryPoints.length = 1;
     }
 
@@ -748,12 +745,12 @@ export class TownGenerator {
       SETBACK,
     } = TOWN_CONSTANTS;
 
-    // Calculate intersection exclusion zone
+    // Calculate intersection exclusion zone - keep it minimal to allow more buildings
     const plazaRadius =
       town.plaza?.radius ??
-      (town.size === "town" ? 8 : town.size === "village" ? 5 : 3);
-    const intersectionClearance =
-      plazaRadius + TOWN_CONSTANTS.ROAD_WIDTH + BUILDING_PADDING;
+      (town.size === "town" ? 6 : town.size === "village" ? 4 : 2);
+    // Only exclude the immediate plaza area, not the whole road intersection
+    const intersectionClearance = plazaRadius + BUILDING_PADDING;
 
     for (let roadIndex = 0; roadIndex < internalRoads.length; roadIndex++) {
       const road = internalRoads[roadIndex];
@@ -781,10 +778,10 @@ export class TownGenerator {
       const facingRight =
         Math.round(rawFacingRight / (Math.PI / 2)) * (Math.PI / 2);
 
-      // Leave space at ends for intersections
-      // Scale offsets based on road length to ensure we can fit buildings on shorter roads
-      const idealOffset = LOT_WIDTH * 1.5; // 24m
-      const minOffset = LOT_WIDTH * 0.5; // 8m minimum
+      // Leave space at ends for road entries
+      // Use smaller offsets to fit more buildings
+      const idealOffset = LOT_WIDTH * 0.75; // 12m
+      const minOffset = LOT_WIDTH * 0.25; // 4m minimum
 
       // Calculate how much space we need and scale offsets if road is short
       const minUsableForOneLot = LOT_WIDTH; // Need at least one lot width

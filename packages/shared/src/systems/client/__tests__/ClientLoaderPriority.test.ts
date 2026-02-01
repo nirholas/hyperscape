@@ -13,7 +13,7 @@
  * - Concurrent request handling
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import THREE from "../../../extras/three/three";
 
 /**

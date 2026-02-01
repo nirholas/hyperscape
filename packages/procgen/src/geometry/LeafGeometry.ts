@@ -19,8 +19,236 @@ import type {
   LeafShapeGeometry,
   TreeParams,
   MeshGeometryData,
+  LeafSamplingMode,
 } from "../types.js";
 import { getLeafShape, getBlossomShape } from "./LeafShapes.js";
+import {
+  createInstancedLeafMaterialTSL,
+  type TSLLeafShape,
+} from "./LeafMaterialTSL.js";
+
+// ============================================================================
+// SEEDED RANDOM NUMBER GENERATOR
+// ============================================================================
+
+/**
+ * Simple seeded PRNG using mulberry32 algorithm.
+ * Produces deterministic random numbers for consistent LOD results.
+ */
+class SeededRandom {
+  private state: number;
+
+  constructor(seed: number) {
+    // Ensure seed is a positive integer
+    this.state = seed >>> 0;
+    if (this.state === 0) this.state = 1;
+  }
+
+  /**
+   * Returns a random number in [0, 1)
+   */
+  next(): number {
+    let t = (this.state += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+
+  /**
+   * Returns a random integer in [0, max)
+   */
+  nextInt(max: number): number {
+    return Math.floor(this.next() * max);
+  }
+}
+
+// ============================================================================
+// LEAF SAMPLING ALGORITHMS
+// ============================================================================
+
+/**
+ * Sample leaves using spatially-stratified sampling.
+ * Divides the canopy into cells and samples proportionally from each
+ * to maintain uniform spatial distribution at lower LODs.
+ *
+ * @param leaves - All leaves to sample from
+ * @param targetCount - Number of leaves to keep
+ * @param seed - Random seed for deterministic sampling
+ * @returns Sampled leaf array with spatial distribution preserved
+ */
+function sampleLeavesSpatially(
+  leaves: LeafData[],
+  targetCount: number,
+  seed: number,
+): LeafData[] {
+  if (leaves.length <= targetCount) {
+    return leaves;
+  }
+
+  const rng = new SeededRandom(seed);
+
+  // Compute bounding box of all leaves
+  const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+  const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+
+  for (const leaf of leaves) {
+    min.min(leaf.position);
+    max.max(leaf.position);
+  }
+
+  // Determine grid resolution based on leaf count and target
+  // More cells = finer spatial distribution, but minimum 2x2x2
+  const reductionRatio = targetCount / leaves.length;
+  // Use more cells for larger reductions to maintain distribution
+  const cellsPerAxis = Math.max(2, Math.min(8, Math.ceil(4 / reductionRatio)));
+
+  const cellSize = new THREE.Vector3();
+  cellSize.subVectors(max, min).divideScalar(cellsPerAxis);
+  // Prevent division by zero for flat canopies
+  if (cellSize.x === 0) cellSize.x = 1;
+  if (cellSize.y === 0) cellSize.y = 1;
+  if (cellSize.z === 0) cellSize.z = 1;
+
+  // Assign each leaf to a cell
+  const cellCount = cellsPerAxis * cellsPerAxis * cellsPerAxis;
+  const cells: LeafData[][] = Array.from({ length: cellCount }, () => []);
+
+  for (const leaf of leaves) {
+    const cx = Math.min(
+      cellsPerAxis - 1,
+      Math.floor((leaf.position.x - min.x) / cellSize.x),
+    );
+    const cy = Math.min(
+      cellsPerAxis - 1,
+      Math.floor((leaf.position.y - min.y) / cellSize.y),
+    );
+    const cz = Math.min(
+      cellsPerAxis - 1,
+      Math.floor((leaf.position.z - min.z) / cellSize.z),
+    );
+    const cellIdx = cx + cy * cellsPerAxis + cz * cellsPerAxis * cellsPerAxis;
+    cells[cellIdx].push(leaf);
+  }
+
+  // Calculate how many leaves to sample from each cell
+  // Proportional to cell population to maintain density distribution
+  const result: LeafData[] = [];
+  let remaining = targetCount;
+  let totalRemaining = leaves.length;
+
+  for (let cellIdx = 0; cellIdx < cellCount; cellIdx++) {
+    const cellLeaves = cells[cellIdx];
+    if (cellLeaves.length === 0) continue;
+
+    // Proportional allocation: (cellSize / totalRemaining) * remaining
+    const cellAllocation = Math.round(
+      (cellLeaves.length / totalRemaining) * remaining,
+    );
+    const toSample = Math.min(cellAllocation, cellLeaves.length);
+
+    if (toSample > 0) {
+      // Shuffle cell leaves using Fisher-Yates
+      for (let i = cellLeaves.length - 1; i > 0; i--) {
+        const j = rng.nextInt(i + 1);
+        [cellLeaves[i], cellLeaves[j]] = [cellLeaves[j], cellLeaves[i]];
+      }
+
+      // Take the first toSample leaves
+      for (let i = 0; i < toSample; i++) {
+        result.push(cellLeaves[i]);
+      }
+    }
+
+    // Update remaining counts for next cell
+    remaining -= toSample;
+    totalRemaining -= cellLeaves.length;
+  }
+
+  // If we haven't reached target due to rounding, fill from any remaining leaves
+  if (result.length < targetCount) {
+    // Collect all unsampled leaves
+    const sampledSet = new Set(result);
+    const unsampled: LeafData[] = [];
+    for (const leaf of leaves) {
+      if (!sampledSet.has(leaf)) {
+        unsampled.push(leaf);
+      }
+    }
+
+    // Shuffle and take remaining
+    for (let i = unsampled.length - 1; i > 0; i--) {
+      const j = rng.nextInt(i + 1);
+      [unsampled[i], unsampled[j]] = [unsampled[j], unsampled[i]];
+    }
+
+    const needed = targetCount - result.length;
+    for (let i = 0; i < needed && i < unsampled.length; i++) {
+      result.push(unsampled[i]);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Sample leaves using random shuffle.
+ * Simple uniform random sampling without spatial weighting.
+ *
+ * @param leaves - All leaves to sample from
+ * @param targetCount - Number of leaves to keep
+ * @param seed - Random seed for deterministic sampling
+ * @returns Randomly sampled leaf array
+ */
+function sampleLeavesRandom(
+  leaves: LeafData[],
+  targetCount: number,
+  seed: number,
+): LeafData[] {
+  if (leaves.length <= targetCount) {
+    return leaves;
+  }
+
+  const rng = new SeededRandom(seed);
+
+  // Fisher-Yates shuffle (in-place on copy)
+  const shuffled = [...leaves];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = rng.nextInt(i + 1);
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  return shuffled.slice(0, targetCount);
+}
+
+/**
+ * Sample leaves based on the specified mode.
+ *
+ * @param leaves - All leaves to sample from
+ * @param targetCount - Number of leaves to keep
+ * @param mode - Sampling mode ('sequential', 'random', or 'spatial')
+ * @param seed - Random seed for deterministic sampling
+ * @returns Sampled leaf array
+ */
+function sampleLeaves(
+  leaves: LeafData[],
+  targetCount: number,
+  mode: LeafSamplingMode,
+  seed: number,
+): LeafData[] {
+  if (leaves.length <= targetCount) {
+    return leaves;
+  }
+
+  switch (mode) {
+    case "spatial":
+      return sampleLeavesSpatially(leaves, targetCount, seed);
+    case "random":
+      return sampleLeavesRandom(leaves, targetCount, seed);
+    case "sequential":
+    default:
+      return leaves.slice(0, targetCount);
+  }
+}
 
 /**
  * Result of instanced leaf generation.
@@ -46,6 +274,12 @@ export type InstancedLeafOptions = {
   alphaTest?: boolean;
   /** Alpha test threshold (default: 0.5) */
   alphaThreshold?: number;
+  /** Leaf sampling mode for LOD reduction (default: 'spatial') */
+  leafSamplingMode?: LeafSamplingMode;
+  /** Seed for deterministic sampling (default: 0) */
+  leafSamplingSeed?: number;
+  /** Use TSL (WebGPU-compatible) material instead of GLSL ShaderMaterial (default: false) */
+  useTSL?: boolean;
 };
 
 // Scratch vectors for hot loops (avoid allocations)
@@ -516,9 +750,9 @@ function calculateFlatNormalsOpt(
     const c = counts[i]!;
     if (c > 0) {
       const idx = i * 3;
-      let nx = normals[idx]! / c;
-      let ny = normals[idx + 1]! / c;
-      let nz = normals[idx + 2]! / c;
+      const nx = normals[idx]! / c;
+      const ny = normals[idx + 1]! / c;
+      const nz = normals[idx + 2]! / c;
       const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
       if (len > 0) {
         normals[idx] = nx / len;
@@ -1034,11 +1268,20 @@ export function generateInstancedLeaves(
     material,
     alphaTest = true,
     alphaThreshold = 0.5,
+    leafSamplingMode = "spatial",
+    leafSamplingSeed = 0,
+    useTSL = false,
   } = options;
 
-  // Limit leaves
-  const leafCount = Math.min(leaves.length, maxInstances);
-  const leafList = leaves.slice(0, leafCount);
+  // Sample leaves using the specified mode (spatial sampling preserves canopy distribution)
+  const targetCount = Math.min(leaves.length, maxInstances);
+  const leafList = sampleLeaves(
+    leaves,
+    targetCount,
+    leafSamplingMode,
+    leafSamplingSeed,
+  );
+  const leafCount = leafList.length;
 
   // Calculate leaf scale
   const gScale = treeScale / params.gScale;
@@ -1052,14 +1295,27 @@ export function generateInstancedLeaves(
   const leafShape = mapLeafShapeToShader(params.leafShape);
 
   // Create or use provided material with proper leaf shape
-  const leafMaterial =
-    material ??
-    createInstancedLeafMaterial({
+  // Use TSL (WebGPU) material when useTSL is true, otherwise fall back to GLSL ShaderMaterial
+  let leafMaterial: THREE.Material;
+  if (material) {
+    leafMaterial = material;
+  } else if (useTSL) {
+    // TSL (WebGPU-compatible) material
+    leafMaterial = createInstancedLeafMaterialTSL({
+      alphaTest: alphaTest ? alphaThreshold : 0,
+      leafShape: leafShape as TSLLeafShape,
+      colorVariation: 0.12,
+      subsurfaceScatter: 0.35,
+    });
+  } else {
+    // GLSL ShaderMaterial (WebGL only)
+    leafMaterial = createInstancedLeafMaterial({
       alphaTest: alphaTest ? alphaThreshold : 0,
       leafShape,
       colorVariation: 0.12,
       subsurfaceScatter: 0.35,
     });
+  }
 
   // Create instanced mesh
   const instancedMesh = new THREE.InstancedMesh(
@@ -1148,6 +1404,8 @@ export function generateInstancedLeavesAndBlossoms(
   leaves: InstancedLeafResult | null;
   blossoms: InstancedLeafResult | null;
 } {
+  const { useTSL = false } = options;
+
   // Separate leaves and blossoms
   const leafData = leaves.filter((l) => !l.isBlossom);
   const blossomData = leaves.filter((l) => l.isBlossom);
@@ -1167,17 +1425,28 @@ export function generateInstancedLeavesAndBlossoms(
       leafScale: params.blossomScale,
       leafScaleX: 1,
     };
+
+    // Create blossom material - use TSL when requested for WebGPU compatibility
+    let blossomMaterial: THREE.Material | undefined;
+    if (!options.material) {
+      if (useTSL) {
+        blossomMaterial = createInstancedLeafMaterialTSL({
+          color: new THREE.Color(0xffc0cb), // Pink for blossoms
+        });
+      } else {
+        blossomMaterial = createInstancedLeafMaterial({
+          color: new THREE.Color(0xffc0cb), // Pink for blossoms
+        });
+      }
+    }
+
     blossomResult = generateInstancedLeaves(
       blossomData,
       blossomParams,
       treeScale,
       {
         ...options,
-        material: options.material
-          ? undefined
-          : createInstancedLeafMaterial({
-              color: new THREE.Color(0xffc0cb), // Pink for blossoms
-            }),
+        material: blossomMaterial,
       },
     );
     blossomResult.mesh.name = "InstancedBlossoms";

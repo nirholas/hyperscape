@@ -65,7 +65,7 @@ export function generateLeafShape(
   config: LeafShapeConfig = DEFAULT_CONFIG,
 ): LeafShapeData {
   // Initialize with default curve
-  let curves: LeafCurve[] = [
+  const curves: LeafCurve[] = [
     createDefaultLeafCurve(config.baseWidth, config.baseHeight),
   ];
 

@@ -1088,7 +1088,7 @@ function generateTrunkMesh(
     }
 
     // right = forward x refVec
-    let right: Point3D = {
+    const right: Point3D = {
       x: forward.y * refVec.z - forward.z * refVec.y,
       y: forward.z * refVec.x - forward.x * refVec.z,
       z: forward.x * refVec.y - forward.y * refVec.x,

@@ -13,7 +13,6 @@ import {
   getFullWorkerUrl,
   type FullWorkerStartMessage,
   type FullWorkerResponse,
-  type FullWorkerProgressMessage,
 } from "./worker/full-worker.js";
 
 // ============================================================================

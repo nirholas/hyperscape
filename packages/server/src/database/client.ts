@@ -65,7 +65,6 @@ let poolInstance: pg.Pool | undefined;
  * Track connection errors for monitoring
  */
 let connectionErrorCount = 0;
-let lastConnectionError: Date | null = null;
 
 /**
  * Detect if connection string is for a serverless database (Neon, Supabase, etc.)
@@ -149,7 +148,6 @@ export async function initializeDatabase(connectionString: string) {
   // Add pool error handlers for connection issues
   pool.on("error", (err) => {
     connectionErrorCount++;
-    lastConnectionError = new Date();
     console.error(
       `[DB] Pool connection error (count: ${connectionErrorCount}):`,
       err.message,

@@ -395,16 +395,6 @@ export class PathfindingDebugSystem extends System {
       ? this.collisionService.getBuildingCount()
       : 0;
 
-    // Check if in bounding box
-    const inBoundingBox = this.collisionService
-      ? this.collisionService.isTileInBuildingBoundingBox(tileX, tileZ)
-      : null;
-
-    // Check building walkability
-    const buildingWalkable = this.collisionService
-      ? this.collisionService.isTileWalkableInBuilding(tileX, tileZ, 0)
-      : true;
-
     const isInside = buildingInfo !== "Not in building";
 
     this.infoDiv.innerHTML = `

@@ -352,7 +352,6 @@ export function calculateSlope(
   sampleDistance: number = 1.0,
 ): number {
   // Sample heights at neighboring points
-  const hCenter = getHeight(x, z);
   const hPosX = getHeight(x + sampleDistance, z);
   const hNegX = getHeight(x - sampleDistance, z);
   const hPosZ = getHeight(x, z + sampleDistance);
@@ -556,18 +555,12 @@ export function createTerrainMaterial(): THREE.Material & {
     ),
   );
 
-  // Road overlay from geometry attribute (0-1)
-  // TEMPORARILY DISABLED - debugging terrain rendering
-  // const roadInfluence = smoothstep(
-  //   float(0.0),
-  //   float(1.0),
-  //   attribute("roadInfluence", "float"),
-  // );
-  // const roadColor = vec3(0.45, 0.35, 0.25);
-  // const roadEdgeColor = vec3(0.5, 0.4, 0.3);
-  // const roadTint = mix(roadEdgeColor, roadColor, roadInfluence);
-  // const baseWithRoads = mix(variedColor, roadTint, roadInfluence);
-  const baseWithRoads = variedColor; // Skip road overlay
+  // Road overlay: blend dirt color based on pre-computed influence (0=terrain, 1=road center)
+  const roadInfluence = attribute("roadInfluence", "float");
+  const roadColor = vec3(0.45, 0.35, 0.25); // Dark brown dirt
+  const roadEdgeColor = vec3(0.5, 0.4, 0.3); // Lighter at edges
+  const roadTint = mix(roadEdgeColor, roadColor, roadInfluence);
+  const baseWithRoads = mix(variedColor, roadTint, roadInfluence);
 
   // === DISTANCE FOG ===
   // NOTE: distSq already computed above for LOD - reusing it here

@@ -1,6 +1,6 @@
 import * as THREE from "three";
-
 import { MeshBasicNodeMaterial } from "three/webgpu";
+
 import { ArmorFittingService } from "../../../../services/fitting/ArmorFittingService";
 import { ExportType } from "../types";
 

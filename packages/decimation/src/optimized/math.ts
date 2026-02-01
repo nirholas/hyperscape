@@ -5,7 +5,7 @@
  * Functions are designed for inlining by JIT compilers.
  */
 
-import { EPS, INF, MATRIX_6X6_SIZE, MATRIX_8X8_SIZE } from "./types.js";
+import { EPS, INF, MATRIX_6X6_SIZE } from "./types.js";
 
 // ============================================================================
 // VECTOR OPERATIONS (INLINE-FRIENDLY)
@@ -989,9 +989,7 @@ export function quadraticForm8(
 
 // Pre-allocated workspace for Cholesky
 const choleskyL6 = new Float64Array(MATRIX_6X6_SIZE);
-const choleskyL8 = new Float64Array(MATRIX_8X8_SIZE);
 const choleskyY6 = new Float64Array(6);
-const choleskyY8 = new Float64Array(8);
 
 /**
  * Cholesky decomposition for 6×6 matrix: M = L * L^T

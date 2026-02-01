@@ -85,23 +85,17 @@ import {
   type RangedCombatStyle,
   type MagicCombatStyle,
   RANGED_STYLE_BONUSES,
-  MAGIC_STYLE_BONUSES,
 } from "../../../types/game/combat-types";
-import {
-  ammunitionService,
-  type ArrowValidationResult,
-} from "./AmmunitionService";
-import { runeService, type RuneValidationResult } from "./RuneService";
+import { ammunitionService } from "./AmmunitionService";
+import { runeService } from "./RuneService";
 import { spellService, type Spell } from "./SpellService";
 import {
   ProjectileService,
-  type CombatProjectile,
   type CreateProjectileParams,
 } from "./ProjectileService";
 import type { EquipmentSystem } from "../character/EquipmentSystem";
 import type { InventorySystem } from "../character/InventorySystem";
 import type { Item, EquipmentSlot } from "../../../types/game/item-types";
-import { WeaponType } from "../../../types/game/item-types";
 
 // Re-export CombatData from CombatStateService for backwards compatibility
 export type { CombatData } from "./CombatStateService";

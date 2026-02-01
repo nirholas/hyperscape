@@ -19,7 +19,6 @@
  * - packages/shared/src/systems/shared/world/GPUVegetation.ts
  */
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
 import {
   Leaf,
   RefreshCw,
@@ -31,10 +30,16 @@ import {
   Palette,
   Download,
 } from "lucide-react";
-import * as THREE from "three";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { MeshStandardNodeMaterial } from "three/webgpu";
+
 import { notify } from "@/utils/notify";
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
 
 // ============================================================================
 // GRASS CONFIGURATION
@@ -282,24 +287,24 @@ function createGrassBladeGeometry(segments: number): THREE.BufferGeometry {
 function generateGrassPatch(
   geometry: THREE.BufferGeometry,
   config: GrassConfig,
-): { mesh: THREE.InstancedMesh; uniforms: Record<string, THREE.IUniform> } {
+): { mesh: THREE.InstancedMesh; uniforms: Record<string, THREE.Uniform> } {
   const { density, patchSize } = config;
   const instanceCount = Math.floor(patchSize * patchSize * density);
 
   // Create uniforms
-  const uniforms = {
-    time: { value: 0.0 },
-    windStrength: { value: config.windStrength },
-    windSpeed: { value: config.windSpeed },
-    gustSpeed: { value: config.gustSpeed },
-    flutterIntensity: { value: config.flutterIntensity },
-    windDirection: { value: new THREE.Vector3(1, 0, 0.3).normalize() },
-    bladeHeight: { value: config.bladeHeight },
-    bladeWidth: { value: config.bladeWidth },
-    baseColor: { value: new THREE.Color(config.baseColor) },
-    tipColor: { value: new THREE.Color(config.tipColor) },
-    darkColor: { value: new THREE.Color(0.22, 0.42, 0.1) }, // Matches terrain grassDark
-    dryColorMix: { value: config.dryColorMix },
+  const uniforms: Record<string, THREE.Uniform> = {
+    time: new THREE.Uniform(0.0),
+    windStrength: new THREE.Uniform(config.windStrength),
+    windSpeed: new THREE.Uniform(config.windSpeed),
+    gustSpeed: new THREE.Uniform(config.gustSpeed),
+    flutterIntensity: new THREE.Uniform(config.flutterIntensity),
+    windDirection: new THREE.Uniform(new THREE.Vector3(1, 0, 0.3).normalize()),
+    bladeHeight: new THREE.Uniform(config.bladeHeight),
+    bladeWidth: new THREE.Uniform(config.bladeWidth),
+    baseColor: new THREE.Uniform(new THREE.Color(config.baseColor)),
+    tipColor: new THREE.Uniform(new THREE.Color(config.tipColor)),
+    darkColor: new THREE.Uniform(new THREE.Color(0.22, 0.42, 0.1)), // Matches terrain grassDark
+    dryColorMix: new THREE.Uniform(config.dryColorMix),
   };
 
   // Create shader material
@@ -376,14 +381,15 @@ function generateGrassPatch(
 
 export const GrassGenPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const grassMeshRef = useRef<THREE.InstancedMesh | null>(null);
-  const uniformsRef = useRef<Record<string, THREE.IUniform> | null>(null);
+  const uniformsRef = useRef<Record<string, THREE.Uniform> | null>(null);
   const animationRef = useRef<number>(0);
   const clockRef = useRef<THREE.Clock>(new THREE.Clock());
+  const generateGrassRef = useRef<(() => void) | null>(null);
 
   const [config, setConfig] = useState<GrassConfig>(DEFAULT_CONFIG);
   const [selectedBiome, setSelectedBiome] = useState<string>("plains");
@@ -395,10 +401,11 @@ export const GrassGenPage: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(true);
 
-  // Initialize scene
+  // Initialize scene with WebGPU
   useEffect(() => {
     if (!containerRef.current) return;
 
+    let mounted = true;
     const container = containerRef.current;
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -414,22 +421,7 @@ export const GrassGenPage: React.FC = () => {
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.target.set(0, 0.5, 0);
-    controls.update();
-    controlsRef.current = controls;
-
-    // Lighting
+    // Lighting (can add before renderer)
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambientLight);
 
@@ -458,59 +450,97 @@ export const GrassGenPage: React.FC = () => {
     gridHelper.position.y = 0.01;
     scene.add(gridHelper);
 
-    // Generate initial grass
-    generateGrass();
+    // Async WebGPU renderer initialization
+    const initRenderer = async () => {
+      const renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
+      });
 
-    // Animation loop
-    let frameCount = 0;
-    let fpsAccumulator = 0;
-
-    const animate = () => {
-      animationRef.current = requestAnimationFrame(animate);
-
-      const delta = clockRef.current.getDelta();
-      const elapsed = clockRef.current.getElapsedTime();
-
-      // Update wind uniforms
-      if (uniformsRef.current) {
-        uniformsRef.current.time.value = elapsed;
+      if (!mounted) {
+        renderer.dispose();
+        return;
       }
 
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Controls (need renderer.domElement)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.target.set(0, 0.5, 0);
       controls.update();
-      renderer.render(scene, camera);
+      controlsRef.current = controls;
 
-      // FPS calculation
-      frameCount++;
-      fpsAccumulator += delta;
-      if (fpsAccumulator >= 1.0) {
-        const fps = Math.round(frameCount / fpsAccumulator);
-        setStats((prev) => (prev ? { ...prev, fps } : null));
-        frameCount = 0;
-        fpsAccumulator = 0;
-      }
+      // Generate initial grass (after renderer is ready)
+      // Use ref to avoid dependency on generateGrass callback
+      generateGrassRef.current?.();
+
+      // Animation loop
+      let frameCount = 0;
+      let fpsAccumulator = 0;
+
+      const animate = () => {
+        if (!mounted) return;
+        animationRef.current = requestAnimationFrame(animate);
+
+        const delta = clockRef.current.getDelta();
+        const elapsed = clockRef.current.getElapsedTime();
+
+        // Update wind uniforms
+        if (uniformsRef.current) {
+          uniformsRef.current.time.value = elapsed;
+        }
+
+        controls.update();
+        renderer.render(scene, camera);
+
+        // FPS calculation
+        frameCount++;
+        fpsAccumulator += delta;
+        if (fpsAccumulator >= 1.0) {
+          const fps = Math.round(frameCount / fpsAccumulator);
+          setStats((prev) => (prev ? { ...prev, fps } : null));
+          frameCount = 0;
+          fpsAccumulator = 0;
+        }
+      };
+
+      animate();
     };
 
-    animate();
+    initRenderer();
 
     // Resize handler
     const handleResize = () => {
-      if (!containerRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
+      if (!container || !rendererRef.current) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      rendererRef.current.setSize(w, h);
     };
 
     window.addEventListener("resize", handleResize);
 
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationRef.current);
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
+
+      // Dispose WebGPU renderer
+      if (rendererRef.current) {
+        if (container.contains(rendererRef.current.domElement)) {
+          container.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+        rendererRef.current = null;
       }
+
+      controlsRef.current?.dispose();
     };
   }, [isDarkMode]);
 
@@ -552,6 +582,11 @@ export const GrassGenPage: React.FC = () => {
 
     setIsGenerating(false);
   }, [config]);
+
+  // Keep ref updated for initialization effect
+  useEffect(() => {
+    generateGrassRef.current = generateGrass;
+  }, [generateGrass]);
 
   // Apply biome preset
   const applyBiomePreset = (biomeName: string) => {

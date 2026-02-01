@@ -301,6 +301,62 @@
             <span id="forestTreeCount">0</span>
           </div>
         </div>
+
+        <div id="navigation-controls" style="display: none;">
+          <h2>Navigation Debug</h2>
+          <div class="checkbox-group">
+            <input type="checkbox" id="navShowNavigation" />
+            <label for="navShowNavigation">Show Navigation</label>
+          </div>
+
+          <div id="nav-options" style="margin-left: 16px; display: none;">
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowWalkableTiles" checked />
+              <label for="navShowWalkableTiles">Walkable Tiles</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowDoors" checked />
+              <label for="navShowDoors">Doors</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowStairs" checked />
+              <label for="navShowStairs">Stairs</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowWalls" checked />
+              <label for="navShowWalls">Walls</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowEntryPoints" checked />
+              <label for="navShowEntryPoints">Entry Points</label>
+            </div>
+
+            <div class="checkbox-group">
+              <input type="checkbox" id="navShowDemoPaths" checked />
+              <label for="navShowDemoPaths">Demo Paths</label>
+            </div>
+
+            <button id="navClearPath" class="secondary" style="margin-top: 8px;">Clear A→B Path</button>
+
+            <div class="stats-panel" style="margin-top: 8px;">
+              <p><span class="stat-label">Floors</span> <span id="navFloors">-</span></p>
+              <p><span class="stat-label">Walkable</span> <span id="navWalkable">-</span></p>
+              <p><span class="stat-label">Walls</span> <span id="navWalls">-</span></p>
+              <p><span class="stat-label">Doors</span> <span id="navDoors">-</span></p>
+              <p><span class="stat-label">Stairs</span> <span id="navStairs">-</span></p>
+            </div>
+
+            <p style="font-size: 11px; color: #888; margin-top: 8px;">
+              <strong>Left-click:</strong> Set point A<br>
+              <strong>Right-click:</strong> Set point B<br>
+              Path shown automatically
+            </p>
+          </div>
+        </div>
       </div>
 
       <!-- CANVAS -->

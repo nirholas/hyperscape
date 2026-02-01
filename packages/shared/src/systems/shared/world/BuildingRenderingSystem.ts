@@ -57,17 +57,10 @@ import THREE, {
   Fn,
   MeshStandardNodeMaterial,
   float,
-  fract,
-  sin,
-  cos,
-  dot,
-  vec2,
-  vec3,
   smoothstep,
   positionWorld,
   step,
   max,
-  min,
   clamp,
   sqrt,
   mod,
@@ -87,27 +80,20 @@ import {
   BuildingGenerator,
   type BuildingLayout,
   CELL_SIZE,
-  WALL_HEIGHT,
   WALL_THICKNESS,
   FLOOR_THICKNESS,
   FLOOR_HEIGHT,
   FOUNDATION_HEIGHT,
   snapToBuildingGrid,
-  BUILDING_GRID_SNAP,
-  TILES_PER_CELL,
 } from "@hyperscape/procgen/building";
 import { getLODDistances, type LODDistancesWithSq } from "./GPUVegetation";
-import { ImpostorManager, BakePriority } from "../rendering";
+import { ImpostorManager, BakePriority, ImpostorBakeMode } from "../rendering";
 import {
-  createImpostorMaterial,
   createTSLImpostorMaterial,
-  updateImpostorMaterial,
   isTSLImpostorMaterial,
   type ImpostorBakeResult,
-  type ImpostorViewData,
   type TSLImpostorMaterial,
 } from "@hyperscape/impostor";
-import { isWebGPURenderer } from "../../../utils/rendering/RendererFactory";
 import { getPhysX } from "../../../physics/PhysXManager";
 import { Layers } from "../../../physics/Layers";
 import type { PhysicsHandle } from "../../../types/systems/physics";
@@ -1020,11 +1006,6 @@ export class BuildingRenderingSystem extends SystemBase {
       `[BuildingRenderingSystem] Starting render: ${towns.length} towns, ${totalBuildingCount} total buildings`,
     );
 
-    // Get terrain system for height queries
-    const terrainSystem = this.world.getSystem("terrain") as {
-      getHeightAt?: (x: number, z: number) => number | null;
-    } | null;
-
     let totalBuildings = 0;
     let renderedBuildings = 0;
     let totalDrawCalls = 0;
@@ -1519,15 +1500,16 @@ export class BuildingRenderingSystem extends SystemBase {
     instancedMesh.visible = false; // Hidden by default, shown when LOD switches
 
     // Set initial transforms for each instance
+    // NOTE: Double the size because impostor baker renders object at ~50% of atlas cell
     for (let i = 0; i < buildings.length; i++) {
       const building = buildings[i];
-      const width = Math.max(building.dimensions.x, building.dimensions.z);
-      const height = building.dimensions.y;
+      const width = Math.max(building.dimensions.x, building.dimensions.z) * 2;
+      const height = building.dimensions.y * 2;
 
       this._tempScale.set(width, height, 1);
       this._tempQuat.identity();
       this._tempVec.copy(building.position);
-      this._tempVec.y += height * 0.5;
+      this._tempVec.y += height * 0.25; // Quarter height since we doubled
 
       this._tempMatrix.compose(this._tempVec, this._tempQuat, this._tempScale);
       instancedMesh.setMatrixAt(i, this._tempMatrix);
@@ -1566,21 +1548,27 @@ export class BuildingRenderingSystem extends SystemBase {
       const dz = cameraPos.z - building.position.z;
       const angle = Math.atan2(dx, dz);
 
-      // Get dimensions
-      const width = Math.max(building.dimensions.x, building.dimensions.z);
-      const height = building.dimensions.y;
+      // Get dimensions (doubled for impostor sizing)
+      const width = Math.max(building.dimensions.x, building.dimensions.z) * 2;
+      const height = building.dimensions.y * 2;
 
       // Update transform
       this._tempQuat.setFromAxisAngle(this._tempVec.set(0, 1, 0), angle);
       this._tempScale.set(width, height, 1);
       this._tempVec.copy(building.position);
-      this._tempVec.y += height * 0.5;
+      this._tempVec.y += height * 0.25; // Quarter height since we doubled
 
       this._tempMatrix.compose(this._tempVec, this._tempQuat, this._tempScale);
       atlas.instancedMesh.setMatrixAt(instanceIndex, this._tempMatrix);
     }
 
     atlas.instancedMesh.instanceMatrix.needsUpdate = true;
+
+    // Sync lighting with scene (atlas material is shared across all buildings)
+    const material = atlas.instancedMesh.material as TSLImpostorMaterial;
+    if (isTSLImpostorMaterial(material) && material.updateLighting) {
+      this.syncImpostorLighting(material);
+    }
   }
 
   /**
@@ -1591,15 +1579,16 @@ export class BuildingRenderingSystem extends SystemBase {
   ): Promise<void> {
     const manager = ImpostorManager.getInstance(this.world);
 
-    // Create unique model ID for caching
-    const modelId = `building_${buildingData.townId}_${buildingData.buildingId}_${buildingData.buildingType}`;
+    // Create unique model ID for caching (v2 = with normal atlas)
+    const modelId = `building_${buildingData.townId}_${buildingData.buildingId}_${buildingData.buildingType}_v2`;
 
-    // Bake using ImpostorManager
+    // Bake using ImpostorManager with normals for dynamic lighting
     const bakeResult = await manager.getOrCreate(modelId, buildingData.mesh, {
       atlasSize: 512,
       hemisphere: true, // Buildings viewed from above
       priority: BakePriority.LOW, // Background baking
       category: "building",
+      bakeMode: ImpostorBakeMode.STANDARD, // Bake with normals for dynamic lighting
     });
 
     buildingData.impostorBakeResult = bakeResult;
@@ -1620,45 +1609,44 @@ export class BuildingRenderingSystem extends SystemBase {
     buildingData: BuildingData,
     bakeResult: ImpostorBakeResult,
   ): THREE.Mesh {
-    const { atlasTexture, gridSizeX, gridSizeY, boundingSphere } = bakeResult;
+    const {
+      atlasTexture,
+      normalAtlasTexture,
+      gridSizeX,
+      gridSizeY,
+      boundingSphere,
+    } = bakeResult;
 
     // Use bounding sphere or dimensions for sizing
+    // NOTE: Multiply by 2 because the impostor baker renders the object at ~50% of the atlas cell
+    // to allow room for different view angles and prevent clipping at edges
     const width = boundingSphere
-      ? boundingSphere.radius * 2
-      : Math.max(buildingData.dimensions.x, buildingData.dimensions.z);
+      ? boundingSphere.radius * 4 // 2x diameter
+      : Math.max(buildingData.dimensions.x, buildingData.dimensions.z) * 2;
     const height = boundingSphere
-      ? boundingSphere.radius * 2
-      : buildingData.dimensions.y;
+      ? boundingSphere.radius * 4 // 2x diameter
+      : buildingData.dimensions.y * 2;
 
-    // Create material using @hyperscape/impostor
-    // Use TSL material for WebGPU, GLSL ShaderMaterial for WebGL
-    const renderer = this.world.graphics?.renderer;
-    const useWebGPU = renderer && isWebGPURenderer(renderer);
-
-    const material: THREE.ShaderMaterial | TSLImpostorMaterial = useWebGPU
-      ? createTSLImpostorMaterial({
-          atlasTexture,
-          gridSizeX,
-          gridSizeY,
-          transparent: true,
-          depthWrite: true,
-        })
-      : createImpostorMaterial({
-          atlasTexture,
-          gridSizeX,
-          gridSizeY,
-          transparent: true,
-          depthWrite: true,
-        });
+    // Create TSL material for WebGPU (no WebGL fallback)
+    // Pass normal atlas for dynamic lighting support
+    const material = createTSLImpostorMaterial({
+      atlasTexture,
+      normalAtlasTexture, // Enable dynamic lighting
+      gridSizeX,
+      gridSizeY,
+      transparent: true,
+      depthWrite: true,
+    });
     this.world.setupMaterial(material);
 
     // Create billboard geometry
     const geometry = new THREE.PlaneGeometry(width, height);
     const mesh = new THREE.Mesh(geometry, material);
 
-    // Position at building center, offset Y by half height
+    // Position at building center, offset Y by quarter height (since we doubled the quad size)
+    // The object is rendered at ~50% of the atlas cell, so actual content center is at 1/4 of quad height
     mesh.position.copy(buildingData.position);
-    mesh.position.y += height * 0.5;
+    mesh.position.y += height * 0.25;
 
     // Store metadata for view updates
     mesh.userData = {
@@ -2701,6 +2689,12 @@ export class BuildingRenderingSystem extends SystemBase {
     }
   }
 
+  /** Cached light direction for impostor lighting */
+  private _lightDir = new THREE.Vector3(0.5, 0.8, 0.3);
+  private _lightColor = new THREE.Vector3(1, 0.98, 0.95);
+  private _ambientColor = new THREE.Vector3(0.6, 0.7, 0.8);
+  private _lastLightUpdate = 0;
+
   /**
    * Update impostor billboard orientation and octahedral view cell.
    */
@@ -2750,14 +2744,136 @@ export class BuildingRenderingSystem extends SystemBase {
     if (isTSLImpostorMaterial(material)) {
       // TSL material uses updateView method
       material.updateView(this._imposterFaceIndices, this._imposterFaceWeights);
-    } else if ((material as THREE.ShaderMaterial).uniforms) {
-      // GLSL material uses updateImpostorMaterial
-      const viewData: ImpostorViewData = {
-        faceIndices: this._imposterFaceIndices,
-        faceWeights: this._imposterFaceWeights,
-      };
-      updateImpostorMaterial(material as THREE.ShaderMaterial, viewData);
+
+      // Update lighting from scene (throttled to once per frame)
+      if (material.updateLighting) {
+        this.syncImpostorLighting(material);
+      }
     }
+  }
+
+  /**
+   * Sync impostor lighting with scene's sun light.
+   * Throttled to once per frame to avoid redundant updates.
+   */
+  private syncImpostorLighting(material: TSLImpostorMaterial): void {
+    const now = performance.now();
+    // Only update lighting once per frame (~16ms)
+    if (now - this._lastLightUpdate < 16) return;
+    this._lastLightUpdate = now;
+
+    // Get environment system for sun light
+    const env = this.world.getSystem("environment") as {
+      sunLight?: THREE.DirectionalLight;
+      lightDirection?: THREE.Vector3;
+    } | null;
+
+    if (env?.sunLight) {
+      const sun = env.sunLight;
+      // Light direction is negated (light goes FROM direction TO target)
+      if (env.lightDirection) {
+        this._lightDir.copy(env.lightDirection).negate();
+      } else {
+        this._lightDir.set(0.5, 0.8, 0.3);
+      }
+      this._lightColor.set(sun.color.r, sun.color.g, sun.color.b);
+
+      material.updateLighting!({
+        ambientColor: this._ambientColor,
+        ambientIntensity: 0.35,
+        directionalLights: [
+          {
+            direction: this._lightDir,
+            color: this._lightColor,
+            intensity: sun.intensity,
+          },
+        ],
+        specular: {
+          f0: 0.04,
+          shininess: 32,
+          intensity: 0.3,
+        },
+      });
+    }
+  }
+
+  // ============================================================================
+  // DEBUG UTILITIES
+  // ============================================================================
+
+  /**
+   * Get building rendering statistics for debugging.
+   */
+  getStats(): {
+    totalTowns: number;
+    totalBuildings: number;
+    buildingsWithImpostors: number;
+    buildingsByLOD: {
+      lod0: number;
+      lod1: number;
+      lod2: number;
+      culled: number;
+    };
+    townsWithAtlas: number;
+    pendingImpostorBakes: number;
+    lodConfig: LODDistancesWithSq;
+    batchingEnabled: boolean;
+  } {
+    let totalBuildings = 0;
+    let buildingsWithImpostors = 0;
+    let townsWithAtlas = 0;
+    const buildingsByLOD = { lod0: 0, lod1: 0, lod2: 0, culled: 0 };
+
+    for (const town of this.townData.values()) {
+      totalBuildings += town.buildings.length;
+      if (town.impostorAtlas) townsWithAtlas++;
+
+      for (const building of town.buildings) {
+        if (building.impostorMesh || building.impostorBakeResult) {
+          buildingsWithImpostors++;
+        }
+        if (building.lodLevel === 0) buildingsByLOD.lod0++;
+        else if (building.lodLevel === 1) buildingsByLOD.lod1++;
+        else if (building.lodLevel === 2) buildingsByLOD.lod2++;
+        else buildingsByLOD.culled++;
+      }
+    }
+
+    return {
+      totalTowns: this.townData.size,
+      totalBuildings,
+      buildingsWithImpostors,
+      buildingsByLOD,
+      townsWithAtlas,
+      pendingImpostorBakes: this._pendingImpostorBakes.length,
+      lodConfig: this.lodConfig,
+      batchingEnabled: BUILDING_PERF_CONFIG.enableStaticBatching,
+    };
+  }
+
+  /**
+   * Debug print building statistics to console.
+   */
+  debugPrintStats(): void {
+    const stats = this.getStats();
+    console.log("=== Building Rendering Stats ===");
+    console.log(`Towns: ${stats.totalTowns}`);
+    console.log(`Total Buildings: ${stats.totalBuildings}`);
+    console.log(`Buildings with Impostors: ${stats.buildingsWithImpostors}`);
+    console.log(`Towns with Impostor Atlas: ${stats.townsWithAtlas}`);
+    console.log(`Pending Impostor Bakes: ${stats.pendingImpostorBakes}`);
+    console.log(`LOD Distribution:`);
+    console.log(`  LOD0 (full detail): ${stats.buildingsByLOD.lod0}`);
+    console.log(`  LOD1 (medium): ${stats.buildingsByLOD.lod1}`);
+    console.log(`  LOD2 (impostor): ${stats.buildingsByLOD.lod2}`);
+    console.log(`  Culled: ${stats.buildingsByLOD.culled}`);
+    console.log(`LOD Distances:`);
+    console.log(`  LOD1: ${this.lodConfig.lod1Distance}m`);
+    console.log(`  LOD2: ${this.lodConfig.lod2Distance}m`);
+    console.log(`  Impostor: ${this.lodConfig.imposterDistance}m`);
+    console.log(`  Fade: ${this.lodConfig.fadeDistance}m`);
+    console.log(`Batching: ${stats.batchingEnabled ? "enabled" : "disabled"}`);
+    console.log("================================");
   }
 
   /**

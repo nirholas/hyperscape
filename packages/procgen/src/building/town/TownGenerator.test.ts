@@ -8,7 +8,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { TownGenerator } from "./TownGenerator";
 import { createTerrainProviderFromGenerator } from "./types";
-import type { TerrainProvider, TownGenerationOptions } from "./types";
+import type { TerrainProvider } from "./types";
 
 // Create a mock terrain generator that implements the interface needed
 const createMockTerrainGenerator = (seed: number = 12345) => ({
@@ -578,11 +578,6 @@ describe("TownGenerator", () => {
       });
       const result = gen.generate();
 
-      // Find towns with paths
-      const townsWithPaths = result.towns.filter(
-        (t) => t.paths && t.paths.length > 0,
-      );
-
       // Villages and towns should have paths (hamlets might not have roads)
       const largerTowns = result.towns.filter(
         (t) => t.size === "village" || t.size === "town",
@@ -644,9 +639,35 @@ describe("TownGenerator", () => {
           expect(pathLength).toBeGreaterThan(0.5);
           expect(pathLength).toBeLessThan(30);
 
-          // Path width should be positive
+          // Path width should be positive and match TOWN_CONSTANTS.PATH_WIDTH (3m)
           expect(path.width).toBeGreaterThan(0);
+          expect(path.width).toBe(3);
         }
+      }
+    });
+
+    it("should generate paths with visible width (3 meters)", () => {
+      const gen = new TownGenerator({
+        seed: 42,
+        config: { townCount: 10 },
+      });
+      const result = gen.generate();
+
+      // Collect all path widths
+      const pathWidths: number[] = [];
+      for (const town of result.towns) {
+        if (!town.paths) continue;
+        for (const path of town.paths) {
+          pathWidths.push(path.width);
+        }
+      }
+
+      // Should have paths generated
+      expect(pathWidths.length).toBeGreaterThan(0);
+
+      // All paths should be 3m wide (visible walkway)
+      for (const width of pathWidths) {
+        expect(width).toBe(3);
       }
     });
 
@@ -725,14 +746,11 @@ describe("TownGenerator", () => {
 
       // Count buildings with and without roadId
       let withRoadId = 0;
-      let withoutRoadId = 0;
 
       for (const town of result.towns) {
         for (const building of town.buildings) {
           if (building.roadId !== undefined && building.roadId >= 0) {
             withRoadId++;
-          } else {
-            withoutRoadId++;
           }
         }
       }
@@ -1177,7 +1195,7 @@ describe("TownGenerator", () => {
           buildingsChecked++;
 
           // Normalize rotation to [0, 2π)
-          let normalizedRotation =
+          const normalizedRotation =
             ((building.rotation % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
           // Check if rotation is close to any valid NESW rotation
@@ -1218,7 +1236,7 @@ describe("TownGenerator", () => {
       for (const hamlet of hamlets) {
         for (const building of hamlet.buildings) {
           // Normalize rotation to [0, 2π)
-          let normalizedRotation =
+          const normalizedRotation =
             ((building.rotation % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
 
           // Check if rotation is a multiple of π/2 (0°, 90°, 180°, 270°)

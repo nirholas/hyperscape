@@ -16,7 +16,6 @@ import {
   norm5,
   sub5,
   scale5,
-  addOuter5To6x6,
   zero6x6,
   set6x6,
   addInPlace6x6,
@@ -221,9 +220,6 @@ export function computeVertexMetrics(
 // ============================================================================
 // GET COMBINED METRIC
 // ============================================================================
-
-// Pre-allocated output for combined metric
-const combinedMetric = new Float64Array(MATRIX_6X6_SIZE);
 
 /**
  * Get combined metric for two vertex-TC pairs being merged.

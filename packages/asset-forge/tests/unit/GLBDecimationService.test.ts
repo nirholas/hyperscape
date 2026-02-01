@@ -8,9 +8,10 @@
  * - Inverse bind matrices and animation data preservation
  */
 
-import { describe, it, expect } from "vitest";
-import { GLBDecimationService } from "../../server/services/GLBDecimationService";
 import type { Vec3 } from "@hyperscape/decimation";
+import { describe, it, expect } from "vitest";
+
+import { GLBDecimationService } from "../../server/services/GLBDecimationService";
 
 // Access private methods for testing via prototype
 const service = new GLBDecimationService();
@@ -321,11 +322,6 @@ describe("GLBDecimationService", () => {
 
 describe("GLBDecimationService - UV Preservation", () => {
   it("remaps UVs correctly using vertex mapping", () => {
-    const originalUVs: [number, number][] = [
-      [0, 0],
-      [1, 0],
-      [0.5, 1],
-    ];
     const originalVertices: Vec3[] = [
       [0, 0, 0],
       [1, 0, 0],

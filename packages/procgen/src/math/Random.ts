@@ -365,7 +365,7 @@ export function createRng(seed: string | number): RNG {
 /**
  * Global seeded random instance
  */
-let globalRandom = new SeededRandom(12345);
+const globalRandom = new SeededRandom(12345);
 
 /**
  * Set the global random seed

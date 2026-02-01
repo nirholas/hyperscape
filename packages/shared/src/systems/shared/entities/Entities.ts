@@ -103,6 +103,7 @@ import {
 } from "../../../types/entities";
 import { getNPCById } from "../../../data/npcs";
 import { NPCBehavior, NPCState } from "../../../types/core/core";
+import { AnimatedImpostorManager } from "../rendering/AnimatedImpostorManager";
 
 /**
  * GenericEntity - Simple entity implementation for non-specialized entities.
@@ -1139,6 +1140,13 @@ export class Entities extends SystemBase implements IEntities {
     // Iterate Set directly instead of Array.from to avoid allocation each frame
     for (const entity of this.hot) {
       entity.lateUpdate?.(delta);
+    }
+
+    // Update animated impostor manager for mob/NPC walking animations at distance
+    // This advances the animation frame counter for all instanced animated impostors
+    if (!this.world.isServer) {
+      const animatedManager = AnimatedImpostorManager.getInstance(this.world);
+      animatedManager.update(performance.now());
     }
   }
 

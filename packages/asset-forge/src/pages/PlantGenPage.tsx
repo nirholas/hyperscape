@@ -9,7 +9,13 @@
  * - GLB export
  */
 
-import React, { useRef, useEffect, useState, useCallback } from "react";
+import {
+  generateFromPreset,
+  getPresetNames,
+  RenderQualityEnum,
+  type PlantPresetName,
+  type PlantGenerationResult,
+} from "@hyperscape/procgen/plant";
 import {
   Flower2,
   RefreshCw,
@@ -21,26 +27,25 @@ import {
   Trash2,
   Database,
 } from "lucide-react";
-import * as THREE from "three";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { MeshStandardNodeMaterial } from "three/webgpu";
-import {
-  generateFromPreset,
-  getPresetNames,
-  RenderQualityEnum,
-  type PlantPresetName,
-  type PlantGenerationResult,
-} from "@hyperscape/procgen/plant";
-import { notify } from "@/utils/notify";
+
 import type { PlantPreset as PlantPresetType } from "@/types/ProcgenPresets";
+import { notify } from "@/utils/notify";
+import {
+  THREE,
+  createWebGPURenderer,
+  type AssetForgeRenderer,
+} from "@/utils/webgpu-renderer";
 
 // API base
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";
 
 export const PlantGenPage: React.FC = () => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -298,9 +303,13 @@ export const PlantGenPage: React.FC = () => {
     [preset, seed, stats],
   );
 
-  // Initialize Three.js scene
+  // Initialize Three.js scene with WebGPU
   useEffect(() => {
     if (!containerRef.current) return;
+
+    let mounted = true;
+    let animationId: number;
+    const container = containerRef.current;
 
     // Scene
     const scene = new THREE.Scene();
@@ -308,32 +317,12 @@ export const PlantGenPage: React.FC = () => {
     sceneRef.current = scene;
 
     // Camera
-    const aspect =
-      containerRef.current.clientWidth / containerRef.current.clientHeight;
+    const aspect = container.clientWidth / container.clientHeight;
     const camera = new THREE.PerspectiveCamera(50, aspect, 0.1, 100);
     camera.position.set(2, 1.5, 2);
     cameraRef.current = camera;
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(
-      containerRef.current.clientWidth,
-      containerRef.current.clientHeight,
-    );
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    containerRef.current.appendChild(renderer.domElement);
-    rendererRef.current = renderer;
-
-    // Controls
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.target.set(0, 0.5, 0);
-    controlsRef.current = controls;
-
-    // Lighting
+    // Lighting (can add before renderer)
     const ambient = new THREE.AmbientLight(0xffffff, 0.5);
     scene.add(ambient);
 
@@ -374,27 +363,57 @@ export const PlantGenPage: React.FC = () => {
     grid.position.y = 0.01;
     scene.add(grid);
 
-    // Animation loop
-    let animationId: number;
-    const animate = () => {
-      animationId = requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
+    // Async WebGPU renderer initialization
+    const initRenderer = async () => {
+      const renderer = await createWebGPURenderer({
+        antialias: true,
+        alpha: true,
+      });
+
+      if (!mounted) {
+        renderer.dispose();
+        return;
+      }
+
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      container.appendChild(renderer.domElement);
+      rendererRef.current = renderer;
+
+      // Controls (need renderer.domElement)
+      const controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.05;
+      controls.target.set(0, 0.5, 0);
+      controlsRef.current = controls;
+
+      // Animation loop
+      const animate = () => {
+        if (!mounted) return;
+        animationId = requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      };
+      animate();
     };
-    animate();
+
+    initRenderer();
 
     // Resize handler
     const handleResize = () => {
-      if (!containerRef.current) return;
-      const w = containerRef.current.clientWidth;
-      const h = containerRef.current.clientHeight;
+      if (!container || !rendererRef.current) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      rendererRef.current.setSize(w, h);
     };
     window.addEventListener("resize", handleResize);
 
     return () => {
+      mounted = false;
       window.removeEventListener("resize", handleResize);
       cancelAnimationFrame(animationId);
 
@@ -406,14 +425,19 @@ export const PlantGenPage: React.FC = () => {
       ground.geometry.dispose();
       groundMat.dispose();
 
-      renderer.dispose();
-
-      if (
-        containerRef.current &&
-        renderer.domElement.parentNode === containerRef.current
-      ) {
-        containerRef.current.removeChild(renderer.domElement);
+      // Dispose WebGPU renderer
+      if (rendererRef.current) {
+        if (
+          container &&
+          rendererRef.current.domElement.parentNode === container
+        ) {
+          container.removeChild(rendererRef.current.domElement);
+        }
+        rendererRef.current.dispose();
+        rendererRef.current = null;
       }
+
+      controlsRef.current?.dispose();
     };
   }, []);
 

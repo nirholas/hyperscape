@@ -79,7 +79,6 @@ import {
   configureShadowMaps,
   getMaxAnisotropy,
   isWebGPURenderer,
-  isWebGLForced,
   type UniversalRenderer,
   logWebGPUInfo,
   getWebGPUCapabilities,
@@ -93,8 +92,6 @@ import {
   setupGPUCompute,
   updateGPUCompute,
   cleanupGPUCompute,
-  isGPUComputeAvailable,
-  getGPUComputeManager,
   type GPUComputeManager,
 } from "../../utils/compute";
 

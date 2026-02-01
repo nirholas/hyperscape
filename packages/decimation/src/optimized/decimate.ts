@@ -6,15 +6,10 @@
 
 import {
   OptimizedMeshData,
-  OptimizedEdgeFlaps,
-  OptimizedVertexMetrics,
-  OptimizedSeamEdgeSet,
-  OptimizedSeamVertexMap,
   OptimizedDecimationOptions,
   OptimizedDecimationResult,
   PlacementBuffer,
   StopReason,
-  INF,
   NULL_INDEX,
   NULL_INDEX_UINT32,
 } from "./types.js";

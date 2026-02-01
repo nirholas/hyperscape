@@ -51,7 +51,7 @@ import {
   isStyleValidForWeapon,
   getAvailableStyles,
 } from "../../../constants/WeaponStyleConfig";
-import type { CombatStyle } from "../../../utils/game/CombatCalculations";
+// CombatStyle type available from: "../../../utils/game/CombatCalculations"
 import type { CombatStyleExtended } from "../../../types/game/combat-types";
 import type {
   HealthUpdateEvent,

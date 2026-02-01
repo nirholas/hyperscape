@@ -11,6 +11,8 @@
  * - Environment detection (browser vs Node.js) for appropriate loading strategy
  * - State tracking (NOT_LOADED, LOADING, LOADED, FAILED)
  * - Dependency notification system for systems that need PhysX
+ * - Automatic retry with exponential backoff on failure
+ * - Configurable timeouts for different environments
  *
  * Usage:
  * ```ts
@@ -150,8 +152,13 @@ class PhysXManager extends EventEmitter {
    * 4. Set global PHYSX object
    * 5. Notify all waiting dependencies
    *
+   * Features:
+   * - Automatic retry on failure (via script loader for browser)
+   * - Proper state management on success/failure
+   * - Event emission for dependent systems
+   *
    * @returns Promise that resolves with PhysX foundation/physics objects
-   * @throws Error if loading fails
+   * @throws Error if loading fails after all retries
    */
   async load(): Promise<PhysXInfo> {
     // If already loaded, return immediately
@@ -164,27 +171,44 @@ class PhysXManager extends EventEmitter {
       return this.loadPromise;
     }
 
-    // If failed, retry
+    // If failed previously, allow retry
     if (this.state === PhysXState.FAILED) {
+      console.log("[PhysXManager] Previous load failed, retrying...");
       this.state = PhysXState.NOT_LOADED;
       this.error = null;
+      this.loadPromise = null;
     }
 
     // Start loading
     this.state = PhysXState.LOADING;
     this.emit("loading");
 
-    this.loadPromise = this.loadPhysXInternal();
+    // Create a new promise that wraps loadPhysXInternal with proper error handling
+    this.loadPromise = (async () => {
+      try {
+        const info = await this.loadPhysXInternal();
+        this.physxInfo = info;
+        this.state = PhysXState.LOADED;
+        this.emit("loaded", info);
 
-    const info = await this.loadPromise;
-    this.physxInfo = info;
-    this.state = PhysXState.LOADED;
-    this.emit("loaded", info);
+        // Notify all waiting dependencies
+        this.notifyWaitingDependencies();
 
-    // Notify all waiting dependencies
-    this.notifyWaitingDependencies();
+        return info;
+      } catch (error) {
+        // State is already set to FAILED in loadPhysXInternal, but ensure it here too
+        this.state = PhysXState.FAILED;
+        this.error = error instanceof Error ? error : new Error(String(error));
+        this.loadPromise = null; // Clear promise to allow retry
 
-    return info;
+        console.error("[PhysXManager] Load failed:", this.error.message);
+        this.emit("failed", this.error);
+
+        throw this.error;
+      }
+    })();
+
+    return this.loadPromise;
   }
 
   /**
@@ -284,6 +308,7 @@ class PhysXManager extends EventEmitter {
    * Browser Environment:
    * - Loads physx-js-webidl.js script tag from CDN
    * - Uses locateFile to find .wasm at CDN/web/physx-js-webidl.wasm
+   * - Includes retry logic for resilience
    *
    * Node.js/Server Environment:
    * - Dynamically imports PhysXManager.server.ts (to avoid bundling Node modules)
@@ -296,7 +321,7 @@ class PhysXManager extends EventEmitter {
    * - PxPhysics (main physics simulation object)
    *
    * @returns PhysX foundation and physics objects
-   * @throws Error if loading fails or times out (30 seconds)
+   * @throws Error if loading fails or times out (90 seconds in browser, includes retries)
    */
   private async loadPhysXInternal(): Promise<PhysXInfo> {
     const isServer =
@@ -311,14 +336,24 @@ class PhysXManager extends EventEmitter {
       typeof process !== "undefined" &&
       (process.env.NODE_ENV === "test" || process.env.VITEST);
 
+    // Timeout is longer for browser to account for:
+    // 1. Network latency fetching WASM file
+    // 2. Heavy computation (tree generation) blocking main thread
+    // 3. Retry attempts with exponential backoff
+    // The script loader has its own internal timeout for WASM instantiation
+    const LOAD_TIMEOUT_MS = isBrowser ? 90000 : 60000; // 90s browser, 60s server
+
     // Create timeout tracking for detecting stuck WASM loading
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    let isTimedOut = false;
     const timeoutPromise = new Promise<never>((_, reject) => {
       timeoutId = setTimeout(() => {
-        isTimedOut = true;
-        reject(new Error("PhysX WASM loading timeout after 30 seconds"));
-      }, 30000);
+        const envType = isBrowser ? "browser" : "server";
+        reject(
+          new Error(
+            `PhysX WASM loading timeout after ${LOAD_TIMEOUT_MS / 1000} seconds (${envType} environment)`,
+          ),
+        );
+      }, LOAD_TIMEOUT_MS);
     });
 
     // Configure WASM loading
@@ -353,17 +388,14 @@ class PhysXManager extends EventEmitter {
       // Provide the WASM module directly
       moduleOptions.wasmBinary = wasmBuffer;
     } else if (isBrowser) {
-      // For browser, always use absolute CDN URL (no Vite proxy)
+      // For browser, the script loader handles CDN URL resolution and locateFile
+      // We pass locateFile here as a fallback for options merging
       moduleOptions.locateFile = (wasmFileName: string) => {
         if (wasmFileName.endsWith(".wasm")) {
           // Use window.__CDN_URL if set by the application
-          // In development, fallback to current origin (Vite dev server)
+          // Falls back to current origin (works for dev and production)
           const windowWithCdn = window as Window & { __CDN_URL?: string };
-          const cdnBaseUrl =
-            windowWithCdn.__CDN_URL ||
-            (window.location.hostname === "localhost"
-              ? window.location.origin
-              : "http://localhost:8080");
+          const cdnBaseUrl = windowWithCdn.__CDN_URL || window.location.origin;
           // Use static version for cache key - only change this when PhysX WASM is updated
           // This allows browser caching between page loads
           const url = `${cdnBaseUrl}/web/${wasmFileName}?v=1.0.0`;
@@ -376,16 +408,21 @@ class PhysXManager extends EventEmitter {
       };
     }
 
-    // Use appropriate loader based on environment (use isBrowser defined at the top of function)
+    // Use appropriate loader based on environment
     let PHYSX: PhysXModule;
 
     // Wrap loading in Promise.race to properly handle timeout
+    // The script loader has its own retry logic for browser environments
     const loadingPromise = (async () => {
       if (isBrowser) {
-        // Browser environment - use script loader
+        // Browser environment - use script loader (has built-in retry)
+        console.log(
+          "[PhysXManager] Starting browser PhysX load with retry support...",
+        );
         return await loadPhysXScript(moduleOptions);
       } else {
         // Node.js/server environment - use dynamic import for ESM compatibility
+        console.log("[PhysXManager] Starting server PhysX load...");
         const physxModule = await import("@hyperscape/physx-js-webidl");
         const PhysXLoader = physxModule.default || physxModule;
 
@@ -404,11 +441,21 @@ class PhysXManager extends EventEmitter {
     } catch (error) {
       // Clear timeout if loading failed for other reasons
       if (timeoutId) clearTimeout(timeoutId);
+
+      // Update state to FAILED
+      this.state = PhysXState.FAILED;
+      this.error = error instanceof Error ? error : new Error(String(error));
+      this.emit("failed", this.error);
+
       throw error;
     }
 
     // Clear the timeout on successful load
     if (timeoutId) clearTimeout(timeoutId);
+
+    console.log(
+      "[PhysXManager] PhysX module loaded, initializing foundation...",
+    );
 
     // Set global PHYSX for compatibility
     Object.defineProperty(globalThis, "PHYSX", {
@@ -447,6 +494,10 @@ class PhysXManager extends EventEmitter {
       version,
       foundation,
       tolerances,
+    );
+
+    console.log(
+      "[PhysXManager] PhysX foundation and physics initialized successfully",
     );
 
     return { version, allocator, errorCb, foundation, physics };
