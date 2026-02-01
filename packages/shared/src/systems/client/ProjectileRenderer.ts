@@ -121,8 +121,6 @@ export class ProjectileRenderer extends System {
 
   // Cached textures to avoid per-projectile allocation
   private arrowTextures: Map<string, THREE.Texture> = new Map();
-  private spellTextures: Map<string, THREE.Texture> = new Map();
-  private trailTexture: THREE.Texture | null = null;
 
   // DataTexture-based glow caches (WebGPU-safe, color baked into pixels)
   // Used for both projectile layers and trail meshes via getCachedGlowTexture()
@@ -163,9 +161,8 @@ export class ProjectileRenderer extends System {
     );
     this.world.on(EventType.COMBAT_PROJECTILE_HIT, this.boundHitHandler, this);
 
-    // Pre-create textures
+    // Pre-create arrow texture
     this.createArrowTexture("default", getArrowVisual("default"));
-    this.createTrailTexture();
   }
 
   /**
@@ -479,103 +476,6 @@ export class ProjectileRenderer extends System {
     group.position.set(startX, startY, startZ);
 
     return { group, sparkMeshes, billboardMeshes };
-  }
-
-  /**
-   * Create spell texture with glow effect
-   */
-  private createSpellTexture(spellId: string, config: SpellVisualConfig): void {
-    if (this.spellTextures.has(spellId)) return;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const size = 64;
-    canvas.width = size;
-    canvas.height = size;
-
-    // Create radial gradient for glowing orb
-    const gradient = ctx.createRadialGradient(
-      size / 2,
-      size / 2,
-      0,
-      size / 2,
-      size / 2,
-      size / 2,
-    );
-
-    // Core color (bright center)
-    const coreColor = config.coreColor ?? 0xffffff;
-    const coreR = (coreColor >> 16) & 255;
-    const coreG = (coreColor >> 8) & 255;
-    const coreB = coreColor & 255;
-
-    // Main color
-    const r = (config.color >> 16) & 255;
-    const g = (config.color >> 8) & 255;
-    const b = config.color & 255;
-
-    // Glow intensity affects gradient stops
-    const glowIntensity = config.glowIntensity;
-
-    gradient.addColorStop(0, `rgba(${coreR}, ${coreG}, ${coreB}, 1)`);
-    gradient.addColorStop(
-      0.2,
-      `rgba(${r}, ${g}, ${b}, ${0.9 * glowIntensity + 0.5})`,
-    );
-    gradient.addColorStop(
-      0.5,
-      `rgba(${r}, ${g}, ${b}, ${0.6 * glowIntensity + 0.2})`,
-    );
-    gradient.addColorStop(
-      0.8,
-      `rgba(${r}, ${g}, ${b}, ${0.3 * glowIntensity})`,
-    );
-    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    this.spellTextures.set(spellId, texture);
-  }
-
-  /**
-   * Create generic trail texture (soft glow)
-   */
-  private createTrailTexture(): void {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const size = 32;
-    canvas.width = size;
-    canvas.height = size;
-
-    const gradient = ctx.createRadialGradient(
-      size / 2,
-      size / 2,
-      0,
-      size / 2,
-      size / 2,
-      size / 2,
-    );
-
-    gradient.addColorStop(0, "rgba(255, 255, 255, 0.8)");
-    gradient.addColorStop(0.4, "rgba(255, 255, 255, 0.4)");
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    this.trailTexture = new THREE.CanvasTexture(canvas);
-    this.trailTexture.needsUpdate = true;
   }
 
   /**
@@ -1234,20 +1134,10 @@ export class ProjectileRenderer extends System {
     }
     this.arrowTextures.clear();
 
-    for (const tex of this.spellTextures.values()) {
-      tex.dispose();
-    }
-    this.spellTextures.clear();
-
     for (const tex of this.spellGlowTextures.values()) {
       tex.dispose();
     }
     this.spellGlowTextures.clear();
-
-    if (this.trailTexture) {
-      this.trailTexture.dispose();
-      this.trailTexture = null;
-    }
 
     // Dispose shared geometry
     if (ProjectileRenderer.particleGeometry) {
