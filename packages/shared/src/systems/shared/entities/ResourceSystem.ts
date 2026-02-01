@@ -728,7 +728,7 @@ export class ResourceSystem extends SystemBase {
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
         sampleInterval: 1, // 1m = 1 tile for tile-accurate detection
-        waterThreshold: 5.4, // TerrainSystem.CONFIG.WATER_THRESHOLD
+        waterThreshold: 9.0, // Must match TerrainSystem.CONFIG.WATER_THRESHOLD
         shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 8, // Increased spacing to spread spots out more
       },
@@ -2158,7 +2158,7 @@ export class ResourceSystem extends SystemBase {
       searchBounds,
       this.terrainSystem.getHeightAt.bind(this.terrainSystem),
       {
-        waterThreshold: 5.4,
+        waterThreshold: 9.0, // Must match TerrainSystem.CONFIG.WATER_THRESHOLD
         shoreMaxHeight: 20.0, // Higher to accommodate elevated island terrain
         minSpacing: 3, // Smaller spacing for relocation candidates
       },
