@@ -213,8 +213,9 @@ const STORAGE_KEY = "hyperscape-window-layout";
  * - 35: Action bar flush at bottom (proper fix: -1px for border)
  * - 36: Action bar stays centered when size changes
  * - 37: Taller chat window in default layout
+ * - 38: Action bar flush with bottom edge
  */
-const SCHEMA_VERSION = 37;
+const SCHEMA_VERSION = 38;
 
 /** Panel ID to icon mapping for tab display migration */
 const PANEL_ICONS: Record<string, string> = {
@@ -784,6 +785,14 @@ const migrations: Record<number, MigrationFn> = {
   // v37: Taller chat window for better visibility
   37: () => {
     debugLog("[WindowStore Migration v37] Clearing all windows - taller chat");
+    return new Map<string, WindowState>();
+  },
+
+  // v38: Action bar flush with bottom edge
+  38: () => {
+    debugLog(
+      "[WindowStore Migration v38] Clearing all windows - action bar flush bottom",
+    );
     return new Map<string, WindowState>();
   },
 };

@@ -194,8 +194,8 @@ export function createDefaultWindows(): WindowConfig[] {
 
   // === BOTTOM CENTER ===
   const actionbarSizing = getResponsivePanelSizing("actionbar", viewport);
-  // Position flush at bottom of viewport (account for 1px bottom border)
-  const actionBarY = viewport.height - actionbarSizing.size.height - 1;
+  // Position flush at bottom of viewport
+  const actionBarY = viewport.height - actionbarSizing.size.height;
   const actionBarX = Math.floor(
     viewport.width / 2 - actionbarSizing.size.width / 2,
   );
