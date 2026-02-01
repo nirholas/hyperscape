@@ -318,7 +318,8 @@ test.describe("Character Selection Screen", () => {
 
     // Music toggle should exist somewhere in the UI
     const count = await musicToggle.count();
-    expect(count).toBeGreaterThanOrEqual(0);
+    // Music controls are expected in most game UIs
+    expect(count).toBeGreaterThanOrEqual(1);
   });
 
   test("should handle character deletion confirmation", async ({ page }) => {
@@ -435,9 +436,9 @@ test.describe("Character Creation Flow", () => {
         '[data-testid="avatar-option"], [class*="avatar"], [class*="character-preset"]',
       );
 
-      // Should have some avatar options
+      // Should have some avatar options for character customization
       const count = await avatarOptions.count();
-      expect(count).toBeGreaterThanOrEqual(0);
+      expect(count).toBeGreaterThanOrEqual(1);
     }
   });
 

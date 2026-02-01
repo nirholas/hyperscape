@@ -218,6 +218,13 @@
       "when": 1769986400000,
       "tag": "0031_add_operations_log_fk",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1769990000000,
+      "tag": "0032_add_runecrafting_skill",
+      "breakpoints": true
     }
   ]
 }
