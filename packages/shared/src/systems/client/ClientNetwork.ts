@@ -1293,7 +1293,22 @@ export class ClientNetwork extends SystemBase {
         // Apply non-transform changes (emote, health, combat state, etc.)
         entity.modify(restChanges);
       } else {
-        entity.modify(changes);
+        // For stationary entities (no TileInterpolator state), route combat rotation
+        // to TileInterpolator which will create a minimal state and apply the quaternion.
+        // This fixes magic/ranged attacks where the player doesn't move toward the target
+        // but still needs to face them.
+        const changesObj = changes as Record<string, unknown>;
+        if (
+          changesObj.q &&
+          Array.isArray(changesObj.q) &&
+          (changesObj.q as number[]).length === 4
+        ) {
+          this.tileInterpolator.setCombatRotation(id, changesObj.q as number[]);
+          const { p, q, ...restChanges } = changesObj;
+          entity.modify(restChanges);
+        } else {
+          entity.modify(changes);
+        }
       }
 
       // Sync entity.data.emote from abbreviated 'e' key
@@ -3681,6 +3696,11 @@ export class ClientNetwork extends SystemBase {
   }) => {
     // Forward to local event system so ProjectileRenderer can show visual effects
     this.world.emit(EventType.COMBAT_PROJECTILE_LAUNCHED, data);
+  };
+
+  onCombatFaceTarget = (data: { playerId: string; targetId: string }) => {
+    // Forward to local event system so PlayerLocal rotates toward combat target
+    this.world.emit(EventType.COMBAT_FACE_TARGET, data);
   };
 
   onXpDrop = (data: {

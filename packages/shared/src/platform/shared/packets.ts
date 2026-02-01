@@ -198,6 +198,7 @@ const names = [
   // Combat visual feedback packets
   'combatDamageDealt',
   'projectileLaunched',  // Server -> Client: ranged/magic projectile for visual rendering
+  'combatFaceTarget',    // Server -> Client: tell player to face combat target (rotation)
   // Player state packets
   'playerUpdated',
   'playerNameChanged',     // Server -> Client: player name change confirmed

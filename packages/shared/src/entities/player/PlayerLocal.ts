@@ -2033,8 +2033,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
         const dx = targetEntity.position.x - this.position.x;
         const dz = targetEntity.position.z - this.position.z;
         const distance2D = Math.sqrt(dx * dx + dz * dz);
-        // Only rotate if target is within reasonable combat range
-        if (distance2D <= 10) {
+        // Only rotate if target is within reasonable combat range (20 tiles covers magic/ranged)
+        if (distance2D <= 20) {
           combatTarget = {
             position: targetEntity.position,
             id: targetEntity.id,
@@ -2056,8 +2056,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
         const dz = targetEntity.position.z - this.position.z;
         const distance2D = Math.sqrt(dx * dx + dz * dz);
 
-        // Only rotate if target is within reasonable combat range
-        if (distance2D <= 10) {
+        // Only rotate if target is within reasonable combat range (20 tiles covers magic/ranged)
+        if (distance2D <= 20) {
           combatTarget = {
             position: targetEntity.position,
             id: targetEntity.id,

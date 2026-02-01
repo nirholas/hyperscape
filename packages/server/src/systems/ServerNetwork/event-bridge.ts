@@ -690,6 +690,18 @@ export class EventBridge {
           this.broadcast.sendToAll("projectileLaunched", data);
         },
       );
+
+      // Forward combat face target events so clients rotate toward their target
+      // Essential for magic/ranged attacks where player is stationary
+      this.world.on(EventType.COMBAT_FACE_TARGET, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          targetId: string;
+        };
+
+        // Send to specific player only — they need to rotate their local character
+        this.broadcast.sendToPlayer(data.playerId, "combatFaceTarget", data);
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up combat events:", _err);
     }

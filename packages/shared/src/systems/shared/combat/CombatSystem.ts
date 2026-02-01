@@ -1760,6 +1760,16 @@ export class CombatSystem extends SystemBase {
       targetType,
     );
 
+    // Emit COMBAT_FACE_TARGET for the attacker so the local player client
+    // rotates toward the target. This is essential for magic/ranged attacks
+    // where the player is stationary (no movement to naturally rotate them).
+    if (attackerType === "player") {
+      this.emitTypedEvent(EventType.COMBAT_FACE_TARGET, {
+        playerId: String(attackerId),
+        targetId: String(targetId),
+      });
+    }
+
     // Auto-retaliate only triggers when player has no current target
     let targetHasValidTarget = false;
     if (canRetaliate) {
