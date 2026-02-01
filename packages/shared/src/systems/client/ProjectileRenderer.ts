@@ -85,12 +85,23 @@ interface ActiveProjectile {
 }
 
 /**
+ * Impact particle from a spell hit burst
+ */
+interface ImpactParticle {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  life: number;
+  maxLife: number;
+}
+
+/**
  * ProjectileRenderer - Client-side projectile visualization
  */
 export class ProjectileRenderer extends System {
   name = "projectile-renderer";
 
   private activeProjectiles: ActiveProjectile[] = [];
+  private activeImpactParticles: ImpactParticle[] = [];
 
   // Projectile movement constants
   private readonly PROJECTILE_SPEED = 12; // Units per second (tiles ~= 1 unit)
@@ -876,8 +887,12 @@ export class ProjectileRenderer extends System {
       const proj = this.activeProjectiles[i];
       const elapsed = now - proj.startTime;
 
-      // Safety timeout
+      // Safety timeout or forced removal from hit event
       if (elapsed > proj.maxLifetime) {
+        // maxLifetime=0 means forced by hit event — spawn impact burst
+        if (proj.maxLifetime === 0) {
+          this.spawnImpactBurst(proj);
+        }
         this.removeProjectile(proj);
         this._toRemove.push(i);
         continue;
@@ -892,6 +907,7 @@ export class ProjectileRenderer extends System {
 
       // Check if we've hit the target
       if (distanceToTarget < this.HIT_THRESHOLD) {
+        this.spawnImpactBurst(proj);
         this.removeProjectile(proj);
         this._toRemove.push(i);
         continue;
@@ -1019,6 +1035,42 @@ export class ProjectileRenderer extends System {
     for (let i = this._toRemove.length - 1; i >= 0; i--) {
       this.activeProjectiles.splice(this._toRemove[i], 1);
     }
+
+    // Update impact particles: move, fade, billboard, cleanup
+    const cam = this.world.camera;
+    const camQuat = cam?.quaternion;
+    for (let i = this.activeImpactParticles.length - 1; i >= 0; i--) {
+      const p = this.activeImpactParticles[i];
+      p.life += dt;
+
+      if (p.life >= p.maxLife) {
+        (p.mesh.material as THREE.Material).dispose();
+        this.world.stage?.scene.remove(p.mesh);
+        this.activeImpactParticles.splice(i, 1);
+        continue;
+      }
+
+      // Move by velocity, apply gravity-like deceleration
+      const drag = 1 - dt * 3;
+      p.velocity.x *= drag;
+      p.velocity.z *= drag;
+      p.velocity.y -= dt * 3; // gravity pull
+      p.mesh.position.addScaledVector(p.velocity, dt);
+
+      // Fade out over lifetime
+      const t = p.life / p.maxLife;
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = (1 - t) * (mat.userData.baseOpacity ?? 0.9);
+
+      // Shrink slightly
+      const scale = (1 - t * 0.5) * p.mesh.scale.x;
+      p.mesh.scale.setScalar(scale);
+
+      // Billboard
+      if (camQuat) {
+        p.mesh.quaternion.copy(camQuat);
+      }
+    }
   }
 
   /**
@@ -1071,6 +1123,43 @@ export class ProjectileRenderer extends System {
   }
 
   /**
+   * Spawn a burst of impact particles at the projectile's current position.
+   * Particles fly outward in random XZ directions with upward drift, then fade.
+   */
+  private spawnImpactBurst(proj: ActiveProjectile): void {
+    if (proj.type !== "spell" || !this.world.stage?.scene) return;
+
+    const config = proj.visualConfig as SpellVisualConfig;
+    const palette = this.getSpellColorPalette(config);
+    const geom = ProjectileRenderer.getParticleGeometry();
+    const count = 4 + Math.floor(Math.random() * 3); // 4-6 particles
+
+    for (let i = 0; i < count; i++) {
+      const mat = this.createGlowMaterial(palette.mid, 2.5, 0.9);
+      const mesh = new THREE.Mesh(geom, mat);
+      const size = config.size * (0.2 + Math.random() * 0.3);
+      mesh.scale.set(size, size, size);
+      mesh.position.copy(proj.currentPos);
+      mesh.renderOrder = 1000;
+      mesh.frustumCulled = false;
+
+      // Random outward velocity in XZ + upward drift
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * speed,
+        1.0 + Math.random() * 1.5,
+        Math.sin(angle) * speed,
+      );
+
+      const maxLife = 0.3 + Math.random() * 0.2; // 0.3-0.5s
+
+      this.world.stage.scene.add(mesh);
+      this.activeImpactParticles.push({ mesh, velocity, life: 0, maxLife });
+    }
+  }
+
+  /**
    * Remove a projectile and its trail from the scene
    */
   private removeProjectile(proj: ActiveProjectile): void {
@@ -1109,6 +1198,13 @@ export class ProjectileRenderer extends System {
       this.removeProjectile(proj);
     }
     this.activeProjectiles = [];
+
+    // Clean up impact particles
+    for (const p of this.activeImpactParticles) {
+      (p.mesh.material as THREE.Material).dispose();
+      this.world.stage?.scene.remove(p.mesh);
+    }
+    this.activeImpactParticles = [];
 
     // Dispose and clear all texture caches
     for (const tex of this.arrowTextures.values()) {
