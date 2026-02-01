@@ -176,6 +176,10 @@ export class PendingGatherManager {
     // Look up resource using SERVER's authoritative data
     const resourceSystem = this.world.getSystem("resource") as {
       getResource?: (id: string) => ResourceData | null;
+      playerHasRequiredToolForResource?: (
+        playerId: string,
+        resourceId: string,
+      ) => boolean;
     } | null;
 
     if (!resourceSystem?.getResource) {
@@ -274,12 +278,19 @@ export class PendingGatherManager {
       const isRunning =
         runMode ?? this.tileMovementManager.getIsRunning(playerId);
 
-      // CRITICAL: Only set arrival emote if player meets level requirement
-      if (this.playerMeetsLevelRequirement(playerId, resource)) {
+      // CRITICAL: Only set arrival emote if player meets ALL requirements (level + tool)
+      // Without this, the fishing animation plays even when the player lacks the required tool
+      const meetsLevel = this.playerMeetsLevelRequirement(playerId, resource);
+      const hasTool =
+        resourceSystem?.playerHasRequiredToolForResource?.(
+          playerId,
+          resourceId,
+        ) !== false;
+      if (meetsLevel && hasTool) {
         this.tileMovementManager.setArrivalEmote(playerId, "fishing");
       } else {
         console.log(
-          `[PendingGather]   🎣 Player ${playerId} doesn't meet level ${resource.levelRequired} ${resource.skillRequired} - no fishing emote`,
+          `[PendingGather]   🎣 Player ${playerId} doesn't meet requirements (level: ${meetsLevel}, tool: ${hasTool}) - no fishing emote`,
         );
       }
 
@@ -349,7 +360,18 @@ export class PendingGatherManager {
 
     // CRITICAL: Set arrival emote BEFORE pathing (like fishing)
     // This bundles the emote with tileMovementEnd packet for atomic delivery
-    if (this.playerMeetsLevelRequirement(playerId, resource)) {
+    // Only set if player meets ALL requirements (level + tool) to prevent
+    // animation playing when gathering will fail validation
+    const meetsLevelNonFish = this.playerMeetsLevelRequirement(
+      playerId,
+      resource,
+    );
+    const hasToolNonFish =
+      resourceSystem?.playerHasRequiredToolForResource?.(
+        playerId,
+        resourceId,
+      ) !== false;
+    if (meetsLevelNonFish && hasToolNonFish) {
       // Map skill to emote name
       const skillToEmote: Record<string, string> = {
         woodcutting: "chopping",
@@ -364,7 +386,7 @@ export class PendingGatherManager {
       }
     } else {
       console.log(
-        `[PendingGather]   Player ${playerId} doesn't meet level ${resource.levelRequired} ${resource.skillRequired} - no gathering emote`,
+        `[PendingGather]   Player ${playerId} doesn't meet requirements (level: ${meetsLevelNonFish}, tool: ${hasToolNonFish}) - no gathering emote`,
       );
     }
 

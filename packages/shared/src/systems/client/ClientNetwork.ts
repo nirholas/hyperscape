@@ -1295,6 +1295,15 @@ export class ClientNetwork extends SystemBase {
       } else {
         entity.modify(changes);
       }
+
+      // Sync entity.data.emote from abbreviated 'e' key
+      // entity.modify() sets data.e via Object.assign, but the animation system
+      // reads data.emote (set explicitly in onTileMovementEnd). Without this sync,
+      // emote resets via entityModified (e.g., from failed gathering) are ignored
+      // by the animation system since it never sees the updated emote property.
+      if (typeof changes.e === "string") {
+        entity.data.emote = changes.e;
+      }
     }
 
     // Re-emit normalized change event so other systems can react

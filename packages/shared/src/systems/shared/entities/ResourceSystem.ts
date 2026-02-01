@@ -1386,6 +1386,7 @@ export class ResourceSystem extends SystemBase {
       resource.levelRequired !== undefined &&
       skillLevel < resource.levelRequired
     ) {
+      this.resetGatheringEmote(data.playerId);
       this.sendChat(
         data.playerId,
         `You need level ${resource.levelRequired} ${resource.skillRequired} to use this resource.`,
@@ -1404,6 +1405,7 @@ export class ResourceSystem extends SystemBase {
       const hasTool = this.playerHasToolCategory(data.playerId, toolCategory);
 
       if (!hasTool) {
+        this.resetGatheringEmote(data.playerId);
         const toolName = this.getToolDisplayName(toolCategory);
         this.sendChat(
           data.playerId,
@@ -1423,6 +1425,7 @@ export class ResourceSystem extends SystemBase {
         const cached = this.playerSkills.get(data.playerId);
         const currentSkillLevel = cached?.[resource.skillRequired]?.level ?? 1;
         if (currentSkillLevel < bestTool.levelRequired) {
+          this.resetGatheringEmote(data.playerId);
           const toolName = this.getToolDisplayName(toolCategory);
           this.emitTypedEvent(EventType.UI_MESSAGE, {
             playerId: data.playerId,
@@ -1442,6 +1445,7 @@ export class ResourceSystem extends SystemBase {
         resource.secondaryRequired,
       );
       if (!hasSecondary) {
+        this.resetGatheringEmote(data.playerId);
         const secondaryName = resource.secondaryRequired.replace(/_/g, " ");
         this.sendChat(data.playerId, `You need ${secondaryName} to fish here.`);
         this.emitTypedEvent(EventType.UI_MESSAGE, {
@@ -2898,6 +2902,20 @@ export class ResourceSystem extends SystemBase {
    */
   getResourcesByType(type: string): Resource[] {
     return this.getAllResources().filter((resource) => resource.type === type);
+  }
+
+  /**
+   * Check if a player has the required tool for a resource.
+   * Used by PendingGatherManager to decide whether to set arrival emotes.
+   */
+  playerHasRequiredToolForResource(
+    playerId: string,
+    resourceId: string,
+  ): boolean {
+    const resource = this.resources.get(createResourceID(resourceId));
+    if (!resource?.toolRequired) return true;
+    const category = this.getToolCategory(resource.toolRequired);
+    return this.playerHasToolCategory(playerId, category);
   }
 
   /**
