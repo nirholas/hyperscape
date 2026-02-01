@@ -131,6 +131,10 @@ export default [
         HTMLAnchorElement: "readonly",
         HTMLFormElement: "readonly",
         HTMLSelectElement: "readonly",
+        HTMLIFrameElement: "readonly",
+        alert: "readonly",
+        confirm: "readonly",
+        prompt: "readonly",
         ImageBitmap: "readonly",
         FileReader: "readonly",
         TexImageSource: "readonly",
@@ -229,6 +233,15 @@ export default [
       "no-undef": "off",
       "prefer-const": "off",
       "no-var": "off",
+    },
+  },
+  {
+    // TypeScript function overloads are valid but trigger no-redeclare
+    // DOM types in generics trigger no-undef in ESLint (TypeScript handles these)
+    files: ["**/useEventListener.ts"],
+    rules: {
+      "no-redeclare": "off",
+      "no-undef": "off",
     },
   },
 ];

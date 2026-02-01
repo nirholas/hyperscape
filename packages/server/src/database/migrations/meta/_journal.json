@@ -187,36 +187,43 @@
     {
       "idx": 26,
       "version": "7",
-      "when": 1769500000000,
-      "tag": "0026_add_magic_skill",
-      "breakpoints": true
-    },
-    {
-      "idx": 27,
-      "version": "7",
       "when": 1769660224747,
       "tag": "0027_messy_dorian_gray",
       "breakpoints": true
     },
     {
-      "idx": 28,
+      "idx": 27,
       "version": "7",
       "when": 1769723433000,
       "tag": "0028_add_inventory_quantity_constraint",
       "breakpoints": true
     },
     {
-      "idx": 29,
+      "idx": 28,
       "version": "7",
       "when": 1769810000000,
       "tag": "0029_add_crafting_skill",
       "breakpoints": true
     },
     {
-      "idx": 30,
+      "idx": 29,
       "version": "7",
       "when": 1769900000000,
       "tag": "0030_add_fletching_skill",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1769986400000,
+      "tag": "0031_add_operations_log_fk",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1769990000000,
+      "tag": "0032_add_runecrafting_skill",
       "breakpoints": true
     }
   ]

@@ -69,7 +69,7 @@ describe("InventoryActionDispatcher", () => {
   // ===========================================================================
 
   describe("eat action", () => {
-    it("emits ITEM_ACTION_SELECTED event", () => {
+    it("sends useItem network message", () => {
       const result = dispatchInventoryAction("eat", {
         world: asWorld(mockWorld),
         itemId: "shrimp",
@@ -77,20 +77,16 @@ describe("InventoryActionDispatcher", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockWorld.emit).toHaveBeenCalledWith(
-        EventType.ITEM_ACTION_SELECTED,
-        {
-          playerId: "player1",
-          actionId: "eat",
-          itemId: "shrimp",
-          slot: 0,
-        },
-      );
+      // eat/drink/bury all route through server's useItem handler
+      expect(mockWorld.network?.send).toHaveBeenCalledWith("useItem", {
+        itemId: "shrimp",
+        slot: 0,
+      });
     });
   });
 
   describe("drink action", () => {
-    it("emits ITEM_ACTION_SELECTED event", () => {
+    it("sends useItem network message", () => {
       const result = dispatchInventoryAction("drink", {
         world: asWorld(mockWorld),
         itemId: "strength_potion",
@@ -98,15 +94,11 @@ describe("InventoryActionDispatcher", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockWorld.emit).toHaveBeenCalledWith(
-        EventType.ITEM_ACTION_SELECTED,
-        {
-          playerId: "player1",
-          actionId: "drink",
-          itemId: "strength_potion",
-          slot: 5,
-        },
-      );
+      // eat/drink/bury all route through server's useItem handler
+      expect(mockWorld.network?.send).toHaveBeenCalledWith("useItem", {
+        itemId: "strength_potion",
+        slot: 5,
+      });
     });
   });
 
@@ -115,7 +107,7 @@ describe("InventoryActionDispatcher", () => {
   // ===========================================================================
 
   describe("bury action", () => {
-    it("sends buryBones network message", () => {
+    it("sends useItem network message", () => {
       const result = dispatchInventoryAction("bury", {
         world: asWorld(mockWorld),
         itemId: "bones",
@@ -123,7 +115,8 @@ describe("InventoryActionDispatcher", () => {
       });
 
       expect(result.success).toBe(true);
-      expect(mockWorld.network?.send).toHaveBeenCalledWith("buryBones", {
+      // bury also routes through server's useItem handler (which detects bones)
+      expect(mockWorld.network?.send).toHaveBeenCalledWith("useItem", {
         itemId: "bones",
         slot: 3,
       });

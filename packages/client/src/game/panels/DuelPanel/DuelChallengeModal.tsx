@@ -85,7 +85,7 @@ export function DuelChallengeModal({
   };
 
   // Combat level color based on OSRS conventions
-  const getLevelColor = (opponentLevel: number): string => {
+  const getLevelColor = (_opponentLevel: number): string => {
     // Since we don't know the local player's level here,
     // use a neutral gold color like OSRS's duel interface
     return "#ffd700";

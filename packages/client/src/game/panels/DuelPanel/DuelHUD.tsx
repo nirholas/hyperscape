@@ -74,7 +74,9 @@ export function DuelHUD({ state, onForfeit }: DuelHUDProps) {
   const theme = useThemeStore((s) => s.theme);
   const [forfeitHover, setForfeitHover] = useState(false);
   const [forfeitConfirm, setForfeitConfirm] = useState(false);
-  const forfeitTimerRef = useRef<ReturnType<typeof setTimeout>>();
+  const forfeitTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
 
   // Clean up forfeit timer on unmount
   useEffect(() => {
@@ -322,7 +324,7 @@ export function createDefaultDuelHUDState(): DuelHUDState {
       noFood: false,
       noMovement: false,
       noForfeit: false,
-      obstaclesEnabled: false,
+      funWeapons: false,
     },
     opponentDisconnected: false,
     disconnectCountdown: 0,

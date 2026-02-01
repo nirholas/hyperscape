@@ -12,6 +12,7 @@ import React, {
   useState,
   useCallback,
   useRef,
+  useEffect,
   type CSSProperties,
 } from "react";
 import { useTheme } from "../stores/themeStore";
@@ -126,6 +127,19 @@ export const Minimap = memo(function Minimap({
   const mapRef = useRef<HTMLDivElement>(null);
   const [_isResizing, setIsResizing] = useState(false);
 
+  // Track cleanup function for resize listeners to prevent memory leaks on unmount
+  const resizeCleanupRef = useRef<(() => void) | null>(null);
+
+  // Clean up resize listeners on unmount
+  useEffect(() => {
+    return () => {
+      if (resizeCleanupRef.current) {
+        resizeCleanupRef.current();
+        resizeCleanupRef.current = null;
+      }
+    };
+  }, []);
+
   // Handle minimap click
   const handleMinimapClick = useCallback(
     (e: React.MouseEvent) => {
@@ -184,6 +198,13 @@ export const Minimap = memo(function Minimap({
 
       const handleUp = () => {
         setIsResizing(false);
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+        resizeCleanupRef.current = null;
+      };
+
+      // Store cleanup function for unmount handling
+      resizeCleanupRef.current = () => {
         window.removeEventListener("mousemove", handleMove);
         window.removeEventListener("mouseup", handleUp);
       };

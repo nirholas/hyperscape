@@ -14,7 +14,12 @@
  * - Atomic transfer at duel completion prevents item loss
  */
 
-import { type World, getItem, isValidSlotNumber } from "@hyperscape/shared";
+import {
+  type World,
+  type ItemID,
+  getItem,
+  isValidSlotNumber,
+} from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import type { DatabaseConnection } from "../trade/types";
 import { AuditLogger } from "../../services";
@@ -90,7 +95,7 @@ export async function handleDuelAddStake(
     }
 
     const inventoryItem = itemResult.rows[0] as {
-      itemId: string;
+      itemId: ItemID;
       quantity: number;
     };
 

@@ -305,6 +305,9 @@ describe("CombatPanel", () => {
               cooking: { level: 1, xp: 0 },
               smithing: { level: 1, xp: 0 },
               agility: { level: 1, xp: 0 },
+              crafting: { level: 1, xp: 0 },
+              fletching: { level: 1, xp: 0 },
+              runecrafting: { level: 1, xp: 0 },
             },
           })}
           equipment={createEquipment()}

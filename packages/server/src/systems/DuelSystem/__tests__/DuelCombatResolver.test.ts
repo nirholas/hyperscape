@@ -9,7 +9,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { DuelCombatResolver } from "../DuelCombatResolver";
 import { createMockWorld, createDuelPlayers, type MockWorld } from "./mocks";
 import type { DuelSession } from "../DuelSessionManager";
-import { EventType } from "@hyperscape/shared";
+import { EventType, createSlotNumber, createItemID } from "@hyperscape/shared";
 import { LOBBY_SPAWN_WINNER, LOBBY_SPAWN_LOSER } from "../config";
 
 // Stable singleton mock so tests can verify calls
@@ -54,6 +54,7 @@ function createTestSession(overrides: Partial<DuelSession> = {}): DuelSession {
       noPrayer: false,
       noMovement: false,
       noForfeit: false,
+      funWeapons: false,
     },
     equipmentRestrictions: {
       head: false,
@@ -70,14 +71,19 @@ function createTestSession(overrides: Partial<DuelSession> = {}): DuelSession {
     },
     challengerStakes: [
       {
-        inventorySlot: 0,
-        itemId: "dragon_scimitar",
+        inventorySlot: createSlotNumber(0),
+        itemId: createItemID("dragon_scimitar"),
         quantity: 1,
         value: 100000,
       },
     ],
     targetStakes: [
-      { inventorySlot: 5, itemId: "coins", quantity: 100000, value: 100000 },
+      {
+        inventorySlot: createSlotNumber(5),
+        itemId: createItemID("coins"),
+        quantity: 100000,
+        value: 100000,
+      },
     ],
     challengerAccepted: true,
     targetAccepted: true,

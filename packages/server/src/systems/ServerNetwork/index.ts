@@ -60,6 +60,8 @@ import {
   DeathState,
   AttackType,
   WeaponType,
+  type DuelRules,
+  type DuelEquipmentSlot,
 } from "@hyperscape/shared";
 
 // PlayerDeathSystem type for tick processing (not exported from main index)
@@ -1676,10 +1678,15 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       };
       if (!payload.triggerType) return;
 
-      // Validate triggerType
-      if (!["needle", "chisel", "furnace"].includes(payload.triggerType)) {
+      // Validate triggerType - narrow to literal union
+      const validTriggerTypes = ["needle", "chisel", "furnace"] as const;
+      type CraftingTriggerType = (typeof validTriggerTypes)[number];
+      if (
+        !validTriggerTypes.includes(payload.triggerType as CraftingTriggerType)
+      ) {
         return;
       }
+      const triggerType = payload.triggerType as CraftingTriggerType;
 
       // Validate inputItemId if provided
       if (
@@ -1693,7 +1700,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // Emit event for CraftingSystem to handle
       this.world.emit(EventType.CRAFTING_INTERACT, {
         playerId: player.id,
-        triggerType: payload.triggerType,
+        triggerType,
         stationId: payload.stationId,
         inputItemId: payload.inputItemId,
       });
@@ -1761,10 +1768,17 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       };
       if (!payload.triggerType) return;
 
-      // Validate triggerType
-      if (!["knife", "item_on_item"].includes(payload.triggerType)) {
+      // Validate triggerType - narrow to literal union
+      const validFletchingTriggers = ["knife", "item_on_item"] as const;
+      type FletchingTriggerType = (typeof validFletchingTriggers)[number];
+      if (
+        !validFletchingTriggers.includes(
+          payload.triggerType as FletchingTriggerType,
+        )
+      ) {
         return;
       }
+      const triggerType = payload.triggerType as FletchingTriggerType;
 
       // Validate inputItemId (required)
       if (
@@ -1786,7 +1800,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       // Emit event for FletchingSystem to handle
       this.world.emit(EventType.FLETCHING_INTERACT, {
         playerId: player.id,
-        triggerType: payload.triggerType,
+        triggerType,
         inputItemId: payload.inputItemId,
         secondaryItemId: payload.secondaryItemId,
       });
@@ -2930,7 +2944,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["duel:toggle:rule"] = (socket, data) =>
       handleDuelToggleRule(
         socket,
-        data as { duelId: string; rule: string },
+        data as { duelId: string; rule: keyof DuelRules },
         this.world,
       );
     this.handlers["onDuel:toggle:rule"] = this.handlers["duel:toggle:rule"];
@@ -2938,7 +2952,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.handlers["duel:toggle:equipment"] = (socket, data) =>
       handleDuelToggleEquipment(
         socket,
-        data as { duelId: string; slot: string },
+        data as { duelId: string; slot: DuelEquipmentSlot },
         this.world,
       );
     this.handlers["onDuel:toggle:equipment"] =
@@ -3182,7 +3196,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const serverWorld = this.world as {
       pgPool?: import("pg").Pool;
       drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
-        typeof import("../../database/schema").default
+        typeof import("../../database/schema")
       >;
     };
 
@@ -3394,7 +3408,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const serverWorld = this.world as {
       pgPool?: import("pg").Pool;
       drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
-        typeof import("../../database/schema").default
+        typeof import("../../database/schema")
       >;
     };
 

@@ -7,7 +7,7 @@
  * - handleDuelAcceptRules: Accept current rules configuration
  */
 
-import type { World, DuelRules, EquipmentSlot } from "@hyperscape/shared";
+import type { World, DuelRules, DuelEquipmentSlot } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import {
   sendDuelError,
@@ -94,7 +94,7 @@ export function handleDuelToggleRule(
  */
 export function handleDuelToggleEquipment(
   socket: ServerSocket,
-  data: { duelId: string; slot: EquipmentSlot },
+  data: { duelId: string; slot: DuelEquipmentSlot },
   world: World,
 ): void {
   const auth = withDuelAuth(socket, world);
@@ -104,7 +104,7 @@ export function handleDuelToggleEquipment(
   const { duelId, slot } = data;
 
   // Validate slot is a valid equipment slot
-  const validSlots: EquipmentSlot[] = [
+  const validSlots: DuelEquipmentSlot[] = [
     "head",
     "cape",
     "amulet",
@@ -115,7 +115,6 @@ export function handleDuelToggleEquipment(
     "gloves",
     "boots",
     "ring",
-    "ammo",
   ];
 
   if (!validSlots.includes(slot)) {

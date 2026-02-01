@@ -41,6 +41,9 @@ const defaultSkills: Skills = {
   cooking: { level: 99, xp: 13034431 },
   smithing: { level: 99, xp: 13034431 },
   agility: { level: 99, xp: 13034431 },
+  crafting: { level: 99, xp: 13034431 },
+  fletching: { level: 99, xp: 13034431 },
+  runecrafting: { level: 99, xp: 13034431 },
 };
 
 function createPlayerStats(overrides: PlayerStatsOverrides = {}): PlayerStats {

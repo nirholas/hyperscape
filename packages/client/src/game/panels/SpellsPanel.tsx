@@ -30,7 +30,6 @@ const SPELL_ICON_SIZE = 40;
 const SPELL_GAP = 4;
 const PANEL_PADDING = 8;
 const GRID_PADDING = 6;
-const HEADER_HEIGHT = 48;
 
 // Mobile constants
 const MOBILE_SPELL_ICON_SIZE = 52;

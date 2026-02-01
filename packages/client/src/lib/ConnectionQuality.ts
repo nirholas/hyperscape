@@ -8,6 +8,7 @@
  */
 
 import EventEmitter from "eventemitter3";
+import { assertNever } from "@/utils";
 
 /**
  * Connection quality levels
@@ -307,6 +308,8 @@ export class ConnectionQuality extends EventEmitter<ConnectionQualityEvents> {
         return "Poor";
       case ConnectionQualityLevel.DISCONNECTED:
         return "Disconnected";
+      default:
+        return assertNever(this.currentQuality);
     }
   }
 
@@ -325,6 +328,8 @@ export class ConnectionQuality extends EventEmitter<ConnectionQualityEvents> {
         return "#f97316"; // Orange
       case ConnectionQualityLevel.DISCONNECTED:
         return "#ef4444"; // Red
+      default:
+        return assertNever(this.currentQuality);
     }
   }
 
@@ -343,6 +348,8 @@ export class ConnectionQuality extends EventEmitter<ConnectionQualityEvents> {
         return 1;
       case ConnectionQualityLevel.DISCONNECTED:
         return 0;
+      default:
+        return assertNever(this.currentQuality);
     }
   }
 }

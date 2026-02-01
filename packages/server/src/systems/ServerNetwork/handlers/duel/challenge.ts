@@ -186,6 +186,8 @@ export function handleDuelChallenge(
     const result = duelSystem.createChallenge(
       playerId,
       challengerName,
+      socket.id,
+      challengerLevel,
       targetPlayerId,
       targetName,
     );

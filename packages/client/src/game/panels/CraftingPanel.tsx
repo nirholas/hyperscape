@@ -30,6 +30,7 @@ interface CraftingPanelProps {
   availableRecipes: CraftingRecipe[];
   world: ClientWorld;
   onClose: () => void;
+  station?: string;
 }
 
 /**

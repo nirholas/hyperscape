@@ -17,6 +17,7 @@ import {
   type CharacterTemplate,
 } from "../utils/characterTemplate";
 import { ELIZAOS_API } from "@/lib/api-config";
+import { showErrorNotification } from "@/ui/stores/notificationStore";
 
 /**
  * Helper function to generate JWT with retry logic
@@ -111,11 +112,15 @@ export const CharacterEditorScreen: React.FC = () => {
       console.warn(
         "[CharacterEditor] No authentication found, redirecting to login",
       );
-      // eslint-disable-next-line no-undef
-      alert(
-        "You must be logged in to access the character editor. Please log in first.",
+      // Show error notification before redirect
+      showErrorNotification(
+        new Error("AUTH_FAILED"),
+        "accessing character editor",
       );
-      window.location.href = "/";
+      // Delay redirect slightly to allow notification to show
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1500);
       return;
     }
     console.log("[CharacterEditor] ✅ Authentication verified:", accountId);
@@ -133,16 +138,24 @@ export const CharacterEditorScreen: React.FC = () => {
     const avatar = params.get("avatar");
 
     if (!characterIdParam) {
-      // eslint-disable-next-line no-undef
-      alert("No character ID provided");
-      window.location.href = "/";
+      showErrorNotification(
+        new Error("No character ID provided"),
+        "loading character editor",
+      );
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1500);
       return;
     }
 
     if (!name) {
-      // eslint-disable-next-line no-undef
-      alert("No character name provided");
-      window.location.href = "/";
+      showErrorNotification(
+        new Error("No character name provided"),
+        "loading character editor",
+      );
+      setTimeout(() => {
+        window.location.href = "/";
+      }, 1500);
       return;
     }
 

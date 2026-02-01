@@ -321,8 +321,8 @@ test.describe("Equipment Panel", () => {
     const slotCount = await slots.count();
 
     // Should have at least some equipment slots (head, body, legs, weapon, etc.)
-    // Standard RPG has ~11 equipment slots
-    expect(slotCount).toBeGreaterThanOrEqual(0); // Flexible check
+    // Standard RPG has ~11 equipment slots, but at minimum we expect 1
+    expect(slotCount).toBeGreaterThanOrEqual(1);
 
     await takeGameScreenshot(page, "equipment-slots");
   });
@@ -367,8 +367,8 @@ test.describe("Combat Panel", () => {
     );
     const buttonCount = await buttons.count();
 
-    // Should have at least some combat options
-    expect(buttonCount).toBeGreaterThanOrEqual(0);
+    // Should have at least some combat options (attack styles)
+    expect(buttonCount).toBeGreaterThanOrEqual(1);
 
     await takeGameScreenshot(page, "combat-styles");
   });

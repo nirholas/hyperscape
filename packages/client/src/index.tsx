@@ -199,20 +199,17 @@ declare global {
   }
 }
 
-// Vite environment variables
-interface ImportMetaEnv {
-  readonly PUBLIC_PRIVY_APP_ID?: string;
-  readonly PUBLIC_WS_URL?: string;
-  readonly PUBLIC_CDN_URL?: string;
-  readonly PUBLIC_ENABLE_FARCASTER?: string;
-  readonly PUBLIC_APP_URL?: string;
-  readonly PUBLIC_API_URL?: string;
-  readonly PUBLIC_ELIZAOS_URL?: string;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-interface ImportMeta {
-  readonly env: ImportMetaEnv;
+// Vite environment variables - extend the built-in types
+declare global {
+  interface ImportMetaEnv {
+    readonly PUBLIC_PRIVY_APP_ID?: string;
+    readonly PUBLIC_WS_URL?: string;
+    readonly PUBLIC_CDN_URL?: string;
+    readonly PUBLIC_ENABLE_FARCASTER?: string;
+    readonly PUBLIC_APP_URL?: string;
+    readonly PUBLIC_API_URL?: string;
+    readonly PUBLIC_ELIZAOS_URL?: string;
+  }
 }
 
 // Install Three.js extensions

@@ -81,7 +81,7 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
     b.attackCrush !== undefined;
   const hasMagicBonuses =
     (b.attackMagic !== undefined && b.attackMagic !== 0) ||
-    (b.magicDefense !== undefined && b.magicDefense !== 0);
+    (b.defenseMagic !== undefined && b.defenseMagic !== 0);
   const hasRangedBonuses =
     (b.attackRanged !== undefined && b.attackRanged !== 0) ||
     (b.defenseRanged !== undefined && b.defenseRanged !== 0);
@@ -169,18 +169,18 @@ export const EquipmentTooltip = React.memo(function EquipmentTooltip({
                   {"         "}
                 </span>
                 {[
-                  b.magicDefense !== undefined && b.magicDefense !== 0 && (
+                  b.defenseMagic !== undefined && b.defenseMagic !== 0 && (
                     <span
                       key="mdef"
                       style={{
                         color:
-                          b.magicDefense < 0
+                          b.defenseMagic < 0
                             ? theme.colors.state.danger
                             : theme.colors.state.success,
                       }}
                     >
-                      {b.magicDefense >= 0 ? "+" : ""}
-                      {b.magicDefense} magic
+                      {b.defenseMagic >= 0 ? "+" : ""}
+                      {b.defenseMagic} magic
                     </span>
                   ),
                   b.defenseRanged !== undefined && (

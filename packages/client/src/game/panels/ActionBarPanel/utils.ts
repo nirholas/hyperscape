@@ -26,6 +26,7 @@ export const CONTROL_BUTTON_SIZE = parseTokenToNumber(
   CONTROL_BUTTON_SIZE_TOKEN,
 ); // 20
 export const CONTROL_BUTTON_GAP = 4; // Gap between control button and slots
+export const SLOTS_CONTAINER_BORDER = 2; // 1px border on each side of slots container
 
 // Default keyboard shortcuts for up to 12 slots (RS3-style: 1-9, 0, -, =)
 export const DEFAULT_KEYBOARD_SHORTCUTS = [
@@ -59,9 +60,12 @@ export function calcHorizontalDimensions(
 ): { width: number; height: number } {
   const { isEditMode = false, isLocked = false } = options;
 
-  // Slots grid width: slots + gaps + padding
+  // Slots grid width: slots + gaps + padding + border (1px each side)
   const slotsWidth =
-    slotCount * SLOT_SIZE + (slotCount - 1) * SLOT_GAP + PADDING * 2;
+    slotCount * SLOT_SIZE +
+    (slotCount - 1) * SLOT_GAP +
+    PADDING * 2 +
+    SLOTS_CONTAINER_BORDER;
 
   // Left side: - button only in edit mode
   const leftWidth = isEditMode ? CONTROL_BUTTON_SIZE + CONTROL_BUTTON_GAP : 0;
@@ -70,7 +74,9 @@ export function calcHorizontalDimensions(
   const rubbishWidth = !isLocked ? SLOT_SIZE + CONTROL_BUTTON_GAP : 0;
   const lockWidth = CONTROL_BUTTON_SIZE;
   const plusWidth = isEditMode ? CONTROL_BUTTON_GAP + CONTROL_BUTTON_SIZE : 0;
-  const rightWidth = rubbishWidth + lockWidth + plusWidth;
+  // Add trailing gap after the rightmost button to prevent clipping
+  const trailingGap = CONTROL_BUTTON_GAP;
+  const rightWidth = rubbishWidth + lockWidth + plusWidth + trailingGap;
 
   // Total width with gap between sections
   const totalGap =

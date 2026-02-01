@@ -190,7 +190,7 @@ export const SliderControl = memo(function SliderControl({
   const renderTicks = () => {
     if (!showTicks) return null;
     const tickCount = 5;
-    const ticks = [];
+    const ticks: React.ReactElement[] = [];
     for (let i = 0; i <= tickCount; i++) {
       const tickPercent = (i / tickCount) * 100;
       ticks.push(

@@ -109,12 +109,12 @@ export class DuelCombatResolver {
         loserStakes,
       );
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Stake transfer failed", {
-        duelId: session.duelId,
-        winnerId,
-        loserId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Stake transfer failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId, winnerId, loserId },
+      );
     }
 
     // Restore health — wrapped so a failure doesn't prevent teleportation
@@ -122,12 +122,12 @@ export class DuelCombatResolver {
       this.restorePlayerHealth(winnerId, LOBBY_SPAWN_WINNER);
       this.restorePlayerHealth(loserId, LOBBY_SPAWN_LOSER);
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Health restoration failed", {
-        duelId: session.duelId,
-        winnerId,
-        loserId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Health restoration failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId, winnerId, loserId },
+      );
     }
 
     // CRITICAL: Teleports must ALWAYS execute — this is the most visible
@@ -136,20 +136,22 @@ export class DuelCombatResolver {
     try {
       this.teleportToLobby(winnerId, true);
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Winner teleport failed", {
-        duelId: session.duelId,
-        winnerId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Winner teleport failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId, winnerId },
+      );
     }
     try {
       this.teleportToLobby(loserId, false);
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Loser teleport failed", {
-        duelId: session.duelId,
-        loserId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Loser teleport failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId, loserId },
+      );
     }
 
     // Emit duel completed event
@@ -179,10 +181,12 @@ export class DuelCombatResolver {
         },
       });
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Completion event failed", {
-        duelId: session.duelId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Completion event failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId },
+      );
     }
 
     // Audit log for economic tracking
@@ -197,10 +201,12 @@ export class DuelCombatResolver {
         reason,
       );
     } catch (err) {
-      Logger.error("DuelCombatResolver", "Audit logging failed", {
-        duelId: session.duelId,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      Logger.error(
+        "DuelCombatResolver",
+        "Audit logging failed",
+        err instanceof Error ? err : null,
+        { duelId: session.duelId },
+      );
     }
 
     return {
@@ -347,12 +353,8 @@ export class DuelCombatResolver {
         Logger.error(
           "DuelCombatResolver",
           "SECURITY: Staked item missing from memory",
-          {
-            duelId,
-            playerId,
-            slot: stake.inventorySlot,
-            itemId: stake.itemId,
-          },
+          null,
+          { duelId, playerId, slot: stake.inventorySlot, itemId: stake.itemId },
         );
         continue;
       }
@@ -361,6 +363,7 @@ export class DuelCombatResolver {
         Logger.error(
           "DuelCombatResolver",
           "SECURITY: Staked item ID mismatch in memory",
+          null,
           {
             duelId,
             playerId,
@@ -395,6 +398,7 @@ export class DuelCombatResolver {
       Logger.error(
         "DuelCombatResolver",
         "SECURITY: Pre-settlement verification filtered stakes",
+        null,
         {
           duelId,
           playerId,

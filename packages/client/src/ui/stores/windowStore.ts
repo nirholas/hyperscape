@@ -191,8 +191,9 @@ const STORAGE_KEY = "hyperscape-window-layout";
  * - 13: Add anchor property to windows for responsive viewport scaling
  * - 14: New flush layout with proportional scaling (Minimap→Quests→Skills→Inventory→Menubar right column, Chat left, Action bar bottom center)
  * - 15: Improved flush layout with proper height distribution - right column fills entire viewport height
+ * - 16: UI theme and layout improvements - taller chat, action bar bottom anchoring fix
  */
-const SCHEMA_VERSION = 15;
+const SCHEMA_VERSION = 16;
 
 /** Panel ID to icon mapping for tab display migration */
 const PANEL_ICONS: Record<string, string> = {
@@ -588,6 +589,14 @@ const migrations: Record<number, MigrationFn> = {
   15: () => {
     debugLog(
       "[WindowStore Migration v15] Clearing all windows for improved flush layout",
+    );
+    return new Map<string, WindowState>();
+  },
+
+  // v16: UI theme and layout improvements - taller chat, action bar bottom anchoring fix
+  16: () => {
+    debugLog(
+      "[WindowStore Migration v16] Clearing all windows - UI theme and layout improvements",
     );
     return new Map<string, WindowState>();
   },
@@ -1045,7 +1054,7 @@ export const useWindowStore = create<WindowStoreState>()(
         };
 
         // Detect mobile/desktop mode change between saved and current viewport
-        const MOBILE_BREAKPOINT = 768;
+        const MOBILE_BREAKPOINT = 640; // Aligned with breakpoints.md
         const savedWasMobile = savedViewport.width < MOBILE_BREAKPOINT;
         const currentIsMobile = currentViewport.width < MOBILE_BREAKPOINT;
         const isMobileToDesktopTransition = savedWasMobile && !currentIsMobile;

@@ -215,7 +215,7 @@ describe("ArenaPoolManager", () => {
   describe("arena grid layout", () => {
     it("arenas are arranged in 2x3 grid", () => {
       // Get centers of all arenas
-      const centers = [];
+      const centers: Array<{ x: number; z: number }> = [];
       for (let i = 1; i <= 6; i++) {
         centers.push(manager.getArenaCenter(i)!);
       }

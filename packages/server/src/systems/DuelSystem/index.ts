@@ -29,6 +29,10 @@ import {
   type DuelRules,
   type DuelState,
   type StakedItem,
+  type PlayerID,
+  createPlayerID,
+  createSlotNumber,
+  createItemID,
   validateRuleCombination,
   DuelErrorCode,
   DeathState,
@@ -286,6 +290,8 @@ export class DuelSystem {
   createChallenge(
     challengerId: string,
     challengerName: string,
+    challengerSocketId: string,
+    challengerCombatLevel: number,
     targetId: string,
     targetName: string,
   ): DuelOperationResult & { challengeId?: string } {
@@ -317,9 +323,11 @@ export class DuelSystem {
 
     // Create pending challenge
     const result = this.pendingDuels.createChallenge(
-      challengerId,
+      createPlayerID(challengerId),
       challengerName,
-      targetId,
+      challengerSocketId,
+      challengerCombatLevel,
+      createPlayerID(targetId),
       targetName,
     );
 
@@ -725,8 +733,8 @@ export class DuelSystem {
 
     // Add new stake
     stakes.push({
-      inventorySlot,
-      itemId,
+      inventorySlot: createSlotNumber(inventorySlot),
+      itemId: createItemID(itemId),
       quantity,
       value,
     });
@@ -1272,12 +1280,11 @@ export class DuelSystem {
     // Restore health to max
     playerEntity.setHealth(playerEntity.getMaxHealth());
 
-    // Restore stamina to max
-    const staminaData = (
-      playerEntity as { playerData?: { stamina?: { max: number } } }
-    ).playerData?.stamina;
-    if (staminaData) {
-      playerEntity.setStamina(staminaData.max);
+    // Restore stamina to max via the stamina component
+    const staminaComponent = playerEntity.getComponent("stamina");
+    const staminaMax = staminaComponent?.data?.max;
+    if (typeof staminaMax === "number") {
+      playerEntity.setStamina(staminaMax);
     }
 
     // Restore prayer points to max
@@ -1598,13 +1605,8 @@ export class DuelSystem {
       Logger.error(
         "DuelSystem",
         "Combat resolver failed during duel resolution",
-        {
-          duelId: session.duelId,
-          winnerId,
-          loserId,
-          reason,
-          error: err instanceof Error ? err.message : String(err),
-        },
+        err instanceof Error ? err : null,
+        { duelId: session.duelId, winnerId, loserId, reason },
       );
     }
 

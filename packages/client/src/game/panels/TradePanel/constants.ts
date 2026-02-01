@@ -4,6 +4,8 @@
  * Configuration constants for the trade panel UI.
  */
 
+import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
+
 // ============================================================================
 // Grid Layout
 // ============================================================================
@@ -14,8 +16,8 @@ export const TRADE_GRID_COLS = 4;
 /** Number of rows in trade grid */
 export const TRADE_GRID_ROWS = 7;
 
-/** Total number of trade slots (28, matches inventory) */
-export const TRADE_SLOTS = TRADE_GRID_COLS * TRADE_GRID_ROWS;
+/** Total number of trade slots (matches inventory from shared constants) */
+export const TRADE_SLOTS = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
 
 // ============================================================================
 // Timing

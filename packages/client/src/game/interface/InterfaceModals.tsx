@@ -799,7 +799,7 @@ export function InterfaceModalsRenderer({
           }}
           onClose={() => {
             setDialogueData(null);
-            world?.network?.send?.("dialogue_end", {
+            world?.network?.send?.("dialogueEnd", {
               npcId: dialogueData.npcId,
             });
           }}

@@ -131,7 +131,15 @@ export class EmbeddedHyperscapeService implements IEmbeddedHyperscapeService {
     }
 
     // Get saved player data (position, skills)
-    const savedData = await databaseSystem.getPlayerAsync(this.characterId);
+    // Cast to include magic/prayer skills which may not be in the older type definition
+    const savedData = (await databaseSystem.getPlayerAsync(this.characterId)) as
+      | (Awaited<ReturnType<typeof databaseSystem.getPlayerAsync>> & {
+          magicLevel?: number;
+          magicXp?: number;
+          prayerLevel?: number;
+          prayerXp?: number;
+        })
+      | null;
 
     // Determine spawn position
     let position: [number, number, number] = [0, 10, 0];

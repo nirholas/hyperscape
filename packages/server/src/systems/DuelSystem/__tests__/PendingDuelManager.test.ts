@@ -12,6 +12,26 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { PendingDuelManager } from "../PendingDuelManager";
 import { createMockWorld, createDuelPlayers, type MockWorld } from "./mocks";
+import { createPlayerID } from "@hyperscape/shared";
+
+// Helper to create a challenge with proper branded types
+function createTestChallenge(
+  manager: PendingDuelManager,
+  challengerId: string,
+  challengerName: string,
+  targetId: string,
+  targetName: string,
+  combatLevel: number = 100,
+) {
+  return manager.createChallenge(
+    createPlayerID(challengerId),
+    challengerName,
+    `socket-${challengerId}`, // challengerSocketId
+    combatLevel,
+    createPlayerID(targetId),
+    targetName,
+  );
+}
 
 describe("PendingDuelManager", () => {
   let world: MockWorld;
@@ -34,7 +54,8 @@ describe("PendingDuelManager", () => {
 
   describe("createChallenge", () => {
     it("creates a challenge between two players", () => {
-      const result = manager.createChallenge(
+      const result = createTestChallenge(
+        manager,
         "player1",
         "TestPlayer1",
         "player2",
@@ -49,7 +70,8 @@ describe("PendingDuelManager", () => {
     });
 
     it("stores challenge data correctly", () => {
-      const result = manager.createChallenge(
+      const result = createTestChallenge(
+        manager,
         "player1",
         "TestPlayer1",
         "player2",
@@ -68,10 +90,16 @@ describe("PendingDuelManager", () => {
     });
 
     it("rejects if challenger already has pending challenge", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
-      const result = manager.createChallenge("player1", "P1", "player3", "P3");
+      const result = createTestChallenge(
+        manager,
+        "player1",
+        "P1",
+        "player3",
+        "P3",
+      );
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -80,10 +108,16 @@ describe("PendingDuelManager", () => {
     });
 
     it("rejects if challenger is being challenged", () => {
-      manager.createChallenge("player2", "P2", "player1", "P1");
+      createTestChallenge(manager, "player2", "P2", "player1", "P1");
 
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
-      const result = manager.createChallenge("player1", "P1", "player3", "P3");
+      const result = createTestChallenge(
+        manager,
+        "player1",
+        "P1",
+        "player3",
+        "P3",
+      );
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -93,9 +127,15 @@ describe("PendingDuelManager", () => {
 
     it("rejects if target already has outgoing challenge", () => {
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
-      manager.createChallenge("player2", "P2", "player3", "P3");
+      createTestChallenge(manager, "player2", "P2", "player3", "P3");
 
-      const result = manager.createChallenge("player1", "P1", "player2", "P2");
+      const result = createTestChallenge(
+        manager,
+        "player1",
+        "P1",
+        "player2",
+        "P2",
+      );
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -105,9 +145,15 @@ describe("PendingDuelManager", () => {
 
     it("rejects if target is being challenged", () => {
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
-      manager.createChallenge("player3", "P3", "player2", "P2");
+      createTestChallenge(manager, "player3", "P3", "player2", "P2");
 
-      const result = manager.createChallenge("player1", "P1", "player2", "P2");
+      const result = createTestChallenge(
+        manager,
+        "player1",
+        "P1",
+        "player2",
+        "P2",
+      );
 
       expect(result.success).toBe(false);
       if (!result.success) {
@@ -118,7 +164,13 @@ describe("PendingDuelManager", () => {
 
   describe("getChallenge", () => {
     it("returns challenge by ID", () => {
-      const result = manager.createChallenge("player1", "P1", "player2", "P2");
+      const result = createTestChallenge(
+        manager,
+        "player1",
+        "P1",
+        "player2",
+        "P2",
+      );
       if (result.success) {
         const challenge = manager.getChallenge(result.challengeId);
         expect(challenge).toBeDefined();
@@ -134,7 +186,7 @@ describe("PendingDuelManager", () => {
 
   describe("getChallengeAsChallenger", () => {
     it("returns challenge where player is challenger", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const challenge = manager.getChallengeAsChallenger("player1");
       expect(challenge).toBeDefined();
@@ -142,7 +194,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("returns undefined if player is not challenger", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const challenge = manager.getChallengeAsChallenger("player2");
       expect(challenge).toBeUndefined();
@@ -151,7 +203,7 @@ describe("PendingDuelManager", () => {
 
   describe("getChallengeAsTarget", () => {
     it("returns challenge where player is target", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const challenge = manager.getChallengeAsTarget("player2");
       expect(challenge).toBeDefined();
@@ -159,7 +211,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("returns undefined if player is not target", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const challenge = manager.getChallengeAsTarget("player1");
       expect(challenge).toBeUndefined();
@@ -168,24 +220,25 @@ describe("PendingDuelManager", () => {
 
   describe("hasAnyChallenge", () => {
     it("returns true for challenger", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.hasAnyChallenge("player1")).toBe(true);
     });
 
     it("returns true for target", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.hasAnyChallenge("player2")).toBe(true);
     });
 
     it("returns false for uninvolved player", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.hasAnyChallenge("player3")).toBe(false);
     });
   });
 
   describe("acceptChallenge", () => {
     it("accepts and returns challenge when target accepts", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -204,7 +257,8 @@ describe("PendingDuelManager", () => {
     });
 
     it("removes challenge from pending after acceptance", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -220,7 +274,8 @@ describe("PendingDuelManager", () => {
     });
 
     it("rejects if non-target tries to accept", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -239,7 +294,8 @@ describe("PendingDuelManager", () => {
     });
 
     it("rejects if challenge is expired", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -266,7 +322,8 @@ describe("PendingDuelManager", () => {
 
   describe("declineChallenge", () => {
     it("removes challenge when target declines", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -284,7 +341,8 @@ describe("PendingDuelManager", () => {
     });
 
     it("returns undefined if non-target tries to decline", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -305,7 +363,8 @@ describe("PendingDuelManager", () => {
 
   describe("cancelChallenge", () => {
     it("cancels and returns challenge by ID", () => {
-      const createResult = manager.createChallenge(
+      const createResult = createTestChallenge(
+        manager,
         "player1",
         "P1",
         "player2",
@@ -328,7 +387,7 @@ describe("PendingDuelManager", () => {
 
   describe("cancelPlayerChallenges", () => {
     it("cancels challenge where player is challenger", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const cancelled = manager.cancelPlayerChallenges("player1");
 
@@ -338,7 +397,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("cancels challenge where player is target", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const cancelled = manager.cancelPlayerChallenges("player2");
 
@@ -348,7 +407,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("returns empty array for uninvolved player", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       const cancelled = manager.cancelPlayerChallenges("player3");
 
@@ -359,7 +418,7 @@ describe("PendingDuelManager", () => {
 
   describe("processTick - distance check", () => {
     it("cancels challenge when players are too far apart", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       // Move player2 far away (> 15 tiles)
       world.setPlayerPosition("player2", 100, 0, 100);
@@ -374,7 +433,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("keeps challenge when players are within range", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       // Move player2 but stay within 15 tiles
       world.setPlayerPosition("player2", 80, 0, 70);
@@ -385,7 +444,7 @@ describe("PendingDuelManager", () => {
     });
 
     it("cancels challenge when player disconnects", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
 
       // Remove player2 (disconnect)
       world.removePlayer("player2");
@@ -402,7 +461,7 @@ describe("PendingDuelManager", () => {
 
   describe("expiration cleanup", () => {
     it("removes expired challenges after cleanup interval", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.size).toBe(1);
 
       // Advance time past expiration (30 seconds) + cleanup interval (5 seconds)
@@ -428,17 +487,17 @@ describe("PendingDuelManager", () => {
       world.addPlayer({ id: "player3", position: { x: 70, y: 0, z: 70 } });
       world.addPlayer({ id: "player4", position: { x: 70, y: 0, z: 70 } });
 
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.size).toBe(1);
 
-      manager.createChallenge("player3", "P3", "player4", "P4");
+      createTestChallenge(manager, "player3", "P3", "player4", "P4");
       expect(manager.size).toBe(2);
     });
   });
 
   describe("destroy", () => {
     it("clears all challenges", () => {
-      manager.createChallenge("player1", "P1", "player2", "P2");
+      createTestChallenge(manager, "player1", "P1", "player2", "P2");
       expect(manager.size).toBe(1);
 
       manager.destroy();

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useWindowStore } from "../../stores/windowStore";
 import { useDragStore } from "../../stores/dragStore";
-import type { Point, WindowState, TabOperations } from "../../types";
+import type { Point, WindowState, TabOperations, TabState } from "../../types";
 
 /**
  * Hook for tab drag operations between windows
@@ -115,7 +115,7 @@ export function useTabDrag(): TabOperations & {
       // Find the source window
       const windows = useWindowStore.getState().getAllWindows();
       let sourceWindow: WindowState | null = null;
-      let tabToSplit = null;
+      let tabToSplit: TabState | null = null;
 
       for (const window of windows) {
         const tab = window.tabs.find((t) => t.id === tabId);

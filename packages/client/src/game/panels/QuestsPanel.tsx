@@ -12,7 +12,12 @@
 
 import React, { useState, useCallback, useMemo, useEffect } from "react";
 import { EventType } from "@hyperscape/shared";
-import { useWindowStore, useQuestSelectionStore, useMobileLayout } from "@/ui";
+import {
+  useWindowStore,
+  useQuestSelectionStore,
+  useMobileLayout,
+  useTheme,
+} from "@/ui";
 import { QuestLog } from "@/game/components/quest";
 import {
   type Quest,
@@ -25,7 +30,7 @@ import {
   calculateQuestProgress,
   CATEGORY_CONFIG,
 } from "@/game/systems";
-import { panelStyles, COLORS, spacing, typography } from "../../constants";
+import { COLORS, spacing, typography } from "../../constants";
 import { parseJSONWithDefault } from "../../utils/validation";
 import type { ClientWorld } from "../../types";
 
@@ -256,6 +261,7 @@ interface MobileQuestDetailProps {
   onTogglePin: (quest: Quest) => void;
   onAcceptQuest: (quest: Quest) => void;
   world: ClientWorld;
+  theme: ReturnType<typeof useTheme>;
 }
 
 /**
@@ -270,6 +276,7 @@ function MobileQuestDetail({
   onTogglePin,
   onAcceptQuest,
   world,
+  theme,
 }: MobileQuestDetailProps) {
   const progress = calculateQuestProgress(quest);
   const categoryConfig = CATEGORY_CONFIG[quest.category];
@@ -280,7 +287,7 @@ function MobileQuestDetail({
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: COLORS.BG_PRIMARY,
+    background: theme.colors.background.panelSecondary,
     overflow: "hidden",
   };
 
@@ -289,8 +296,8 @@ function MobileQuestDetail({
     alignItems: "center",
     gap: spacing.sm,
     padding: `${spacing.sm} ${spacing.sm}`,
-    borderBottom: `1px solid ${COLORS.BORDER_PRIMARY}`,
-    background: COLORS.BG_SECONDARY,
+    borderBottom: `1px solid ${theme.colors.border.default}`,
+    background: theme.colors.background.panelSecondary,
     minHeight: "48px",
   };
 
@@ -352,9 +359,9 @@ function MobileQuestDetail({
     gap: spacing.sm,
     marginBottom: spacing.sm,
     padding: spacing.sm,
-    background: COLORS.BG_TERTIARY,
+    background: theme.colors.background.tertiary,
     borderRadius: "6px",
-    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    border: `1px solid ${theme.colors.border.default}`,
     fontSize: typography.fontSize.base,
   };
 
@@ -408,8 +415,8 @@ function MobileQuestDetail({
     flexDirection: "column",
     gap: spacing.sm,
     padding: spacing.sm,
-    borderTop: `1px solid ${COLORS.BORDER_PRIMARY}`,
-    background: COLORS.BG_SECONDARY,
+    borderTop: `1px solid ${theme.colors.border.default}`,
+    background: theme.colors.background.panelSecondary,
   };
 
   const buttonBaseStyle: React.CSSProperties = {
@@ -622,7 +629,8 @@ function MobileQuestDetail({
  * Mobile: Shows quest details inline with a back button.
  */
 export function QuestsPanel({ world }: QuestsPanelProps) {
-  // Mobile detection
+  // Theme and mobile detection
+  const theme = useTheme();
   const { shouldUseMobileUI } = useMobileLayout();
 
   // Filter state
@@ -858,6 +866,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
   );
 
   // Get quest selection store and window store for opening quest detail
+  const selectedQuest = useQuestSelectionStore((s) => s.selectedQuest);
   const setSelectedQuest = useQuestSelectionStore((s) => s.setSelectedQuest);
   const createWindow = useWindowStore((s) => s.createWindow);
   const windows = useWindowStore((s) => s.windows);
@@ -931,10 +940,10 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
     // User can navigate back to the quest from the list
   }, []);
 
-  // Container style using COLORS constants for consistency
+  // Container style using theme colors for consistency
   const containerStyle: React.CSSProperties = {
     height: "100%",
-    background: panelStyles.container.background,
+    background: theme.colors.background.panelSecondary,
     display: "flex",
     flexDirection: "column",
   };
@@ -975,6 +984,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
           onTogglePin={handleTogglePin}
           onAcceptQuest={handleAcceptQuest}
           world={world}
+          theme={theme}
         />
       </div>
     );
@@ -995,6 +1005,7 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         onStateFilterChange={setStateFilter}
         categoryFilter={categoryFilter}
         onCategoryFilterChange={setCategoryFilter}
+        selectedQuestId={selectedQuest?.id ?? null}
         onTogglePin={handleTogglePin}
         onAcceptQuest={handleAcceptQuest}
         onTrackQuest={handleTrackQuest}
@@ -1010,7 +1021,6 @@ export function QuestsPanel({ world }: QuestsPanelProps) {
         style={{
           height: "100%",
           border: "none",
-          background: "transparent",
         }}
       />
     </div>

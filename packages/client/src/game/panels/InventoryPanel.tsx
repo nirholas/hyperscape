@@ -39,6 +39,7 @@ import {
   isNotedItem,
   getPrimaryAction,
   CONTEXT_MENU_COLORS,
+  INVENTORY_CONSTANTS,
   type PrimaryActionType,
 } from "@hyperscape/shared";
 import { ItemIcon } from "@/ui/components/ItemIcon";
@@ -49,9 +50,9 @@ import { CoinPouch } from "./inventory";
 
 /**
  * Maximum inventory slots (OSRS-style: 28 slots)
- * Matches INPUT_LIMITS.MAX_INVENTORY_SLOTS from shared constants
+ * Uses INVENTORY_CONSTANTS from shared package as single source of truth
  */
-const MAX_SLOTS = 28;
+const MAX_SLOTS = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -511,10 +512,10 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
         background: isOver
           ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
           : isEmpty
-            ? "rgba(16, 16, 18, 0.95)" // Aligned with theme BG_PRIMARY
+            ? "var(--color-slot-empty)" // Use theme slot.empty color
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
-              : "rgba(20, 20, 22, 0.95)", // Aligned with theme BG_SECONDARY
+              : "var(--color-slot-filled)", // Use theme slot.filled color
         // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item

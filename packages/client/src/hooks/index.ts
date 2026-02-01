@@ -35,6 +35,8 @@ export {
   type SmithingRecipe,
   type CraftingData,
   type CraftingRecipeData,
+  type FletchingData,
+  type FletchingRecipeData,
   type TanningData,
   type TanningRecipeData,
   type QuestStartData,

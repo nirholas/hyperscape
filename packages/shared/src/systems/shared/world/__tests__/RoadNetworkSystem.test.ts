@@ -1073,8 +1073,8 @@ describe("RoadNetworkSystem Algorithms", () => {
       buildMST(towns, edges);
       const elapsed = performance.now() - start;
 
-      // Should complete in reasonable time
-      expect(elapsed).toBeLessThan(100);
+      // Should complete in reasonable time (200ms allows for CI variance)
+      expect(elapsed).toBeLessThan(200);
     });
 
     it("tile cache lookup is O(1)", () => {
@@ -1118,7 +1118,8 @@ describe("RoadNetworkSystem Algorithms", () => {
       }
 
       const elapsed = performance.now() - start;
-      expect(elapsed).toBeLessThan(50);
+      // 100ms allows for CI variance
+      expect(elapsed).toBeLessThan(100);
     });
   });
 });

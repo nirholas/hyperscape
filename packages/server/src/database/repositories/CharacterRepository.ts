@@ -207,6 +207,7 @@ export class CharacterRepository extends BaseRepository {
     constitution: { level: number; xp: number };
     ranged: { level: number; xp: number };
     prayer: { level: number; xp: number };
+    magic: { level: number; xp: number };
     woodcutting: { level: number; xp: number };
     mining: { level: number; xp: number };
     fishing: { level: number; xp: number };
@@ -215,6 +216,8 @@ export class CharacterRepository extends BaseRepository {
     smithing: { level: number; xp: number };
     agility: { level: number; xp: number };
     crafting: { level: number; xp: number };
+    fletching: { level: number; xp: number };
+    runecrafting: { level: number; xp: number };
   } | null> {
     this.ensureDatabase();
 
@@ -226,6 +229,7 @@ export class CharacterRepository extends BaseRepository {
         constitutionLevel: schema.characters.constitutionLevel,
         rangedLevel: schema.characters.rangedLevel,
         prayerLevel: schema.characters.prayerLevel,
+        magicLevel: schema.characters.magicLevel,
         woodcuttingLevel: schema.characters.woodcuttingLevel,
         miningLevel: schema.characters.miningLevel,
         fishingLevel: schema.characters.fishingLevel,
@@ -242,6 +246,7 @@ export class CharacterRepository extends BaseRepository {
         constitutionXp: schema.characters.constitutionXp,
         rangedXp: schema.characters.rangedXp,
         prayerXp: schema.characters.prayerXp,
+        magicXp: schema.characters.magicXp,
         woodcuttingXp: schema.characters.woodcuttingXp,
         miningXp: schema.characters.miningXp,
         fishingXp: schema.characters.fishingXp,

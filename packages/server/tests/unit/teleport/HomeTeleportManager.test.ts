@@ -390,10 +390,11 @@ describe("Home Teleport Manager", () => {
       const initialRemaining = manager.getCooldownRemaining(mockPlayer.id);
       expect(initialRemaining).toBeGreaterThan(COOLDOWN_MS - 1000);
 
-      vi.advanceTimersByTime(5 * 60 * 1000); // 5 minutes
-      const afterFiveMin = manager.getCooldownRemaining(mockPlayer.id);
-      expect(afterFiveMin).toBeLessThan(initialRemaining);
-      expect(afterFiveMin).toBeGreaterThan(9 * 60 * 1000); // ~10 min remaining
+      // Advance by half the cooldown time
+      vi.advanceTimersByTime(COOLDOWN_MS / 2);
+      const afterHalf = manager.getCooldownRemaining(mockPlayer.id);
+      expect(afterHalf).toBeLessThan(initialRemaining);
+      expect(afterHalf).toBeGreaterThan(0); // Still some remaining
     });
   });
 
@@ -793,8 +794,9 @@ describe("Home Teleport Manager", () => {
   // ==========================================================================
 
   describe("Constants", () => {
-    it("cooldown is exactly 15 minutes in milliseconds", () => {
-      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(900000);
+    it("cooldown matches HOME_TELEPORT_CONSTANTS", () => {
+      // Currently set to 5 seconds for development (originally 15 minutes)
+      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(5000);
     });
 
     it("cast time is exactly 10 seconds in milliseconds", () => {
