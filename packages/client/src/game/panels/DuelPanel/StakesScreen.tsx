@@ -112,7 +112,7 @@ function useStakesScreenStyles(theme: Theme, myAccepted: boolean) {
     const valueStyle: CSSProperties = {
       textAlign: "center",
       fontSize: theme.typography.fontSize.sm,
-      color: theme.colors.accent.gold || "#ffd700",
+      color: theme.colors.accent.gold,
       marginTop: theme.spacing.xs,
       fontWeight: theme.typography.fontWeight.bold,
     };

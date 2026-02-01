@@ -103,7 +103,7 @@ function useConfirmScreenStyles(theme: Theme, myAccepted: boolean) {
     const totalStyle: CSSProperties = {
       fontSize: theme.typography.fontSize.sm,
       fontWeight: theme.typography.fontWeight.bold,
-      color: theme.colors.accent.gold || "#ffd700",
+      color: theme.colors.accent.gold,
       textAlign: "right",
       marginTop: theme.spacing.xs,
     };
