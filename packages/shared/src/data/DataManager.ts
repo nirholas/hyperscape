@@ -46,6 +46,7 @@ import {
   type CraftingManifest,
   type TanningManifest,
   type FletchingManifest,
+  type RunecraftingManifest,
 } from "./ProcessingDataProvider";
 import {
   stationDataProvider,
@@ -933,6 +934,20 @@ export class DataManager {
       );
     }
 
+    // Load runecrafting recipes
+    try {
+      const runecraftingRes = await fetch(
+        `${baseUrl}/recipes/runecrafting.json`,
+      );
+      const runecraftingManifest =
+        (await runecraftingRes.json()) as RunecraftingManifest;
+      processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
+      );
+    }
+
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
@@ -1066,6 +1081,20 @@ export class DataManager {
     } catch {
       console.warn(
         "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
+      );
+    }
+
+    // Load runecrafting recipes
+    try {
+      const runecraftingPath = path.join(recipesDir, "runecrafting.json");
+      const runecraftingData = await fs.readFile(runecraftingPath, "utf-8");
+      const runecraftingManifest = JSON.parse(
+        runecraftingData,
+      ) as RunecraftingManifest;
+      processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
       );
     }
 

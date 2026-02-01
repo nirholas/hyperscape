@@ -38,6 +38,7 @@ export enum EntityType {
   FURNACE = "furnace",
   ANVIL = "anvil",
   ALTAR = "altar",
+  RUNECRAFTING_ALTAR = "runecrafting_altar",
   STARTER_CHEST = "starter_chest",
 }
 
@@ -57,6 +58,7 @@ export enum InteractionType {
   SMELTING = "smelting",
   SMITHING = "smithing",
   ALTAR = "altar",
+  RUNECRAFTING = "runecrafting",
 }
 
 export enum PlayerCombatStyle {

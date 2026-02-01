@@ -153,11 +153,18 @@ export const SKILL_DEFINITIONS: readonly SkillDefinition[] = [
     category: "production",
     defaultLevel: 1,
   },
-  // Row 6: Fletching
+  // Row 6: Fletching, Runecrafting
   {
     key: "fletching",
     label: "Fletching",
     icon: "🏹",
+    category: "production",
+    defaultLevel: 1,
+  },
+  {
+    key: "runecrafting",
+    label: "Runecrafting",
+    icon: "🔮",
     category: "production",
     defaultLevel: 1,
   },

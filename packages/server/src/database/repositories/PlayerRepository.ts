@@ -136,6 +136,9 @@ export class PlayerRepository extends BaseRepository {
     if (data.fletchingLevel !== undefined) {
       updateData.fletchingLevel = data.fletchingLevel;
     }
+    if (data.runecraftingLevel !== undefined) {
+      updateData.runecraftingLevel = data.runecraftingLevel;
+    }
     // XP fields
     if (data.attackXp !== undefined) {
       updateData.attackXp = data.attackXp;
@@ -181,6 +184,9 @@ export class PlayerRepository extends BaseRepository {
     }
     if (data.fletchingXp !== undefined) {
       updateData.fletchingXp = data.fletchingXp;
+    }
+    if (data.runecraftingXp !== undefined) {
+      updateData.runecraftingXp = data.runecraftingXp;
     }
     if (data.health !== undefined) {
       updateData.health = data.health;

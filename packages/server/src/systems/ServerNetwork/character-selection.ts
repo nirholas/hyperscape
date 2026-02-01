@@ -690,6 +690,13 @@ export async function handleEnterWorld(
                 (savedData as { fletchingLevel?: number }).fletchingLevel || 1,
               xp: (savedData as { fletchingXp?: number }).fletchingXp || 0,
             },
+            runecrafting: {
+              level:
+                (savedData as { runecraftingLevel?: number })
+                  .runecraftingLevel || 1,
+              xp:
+                (savedData as { runecraftingXp?: number }).runecraftingXp || 0,
+            },
           };
           // Load auto-retaliate preference (1=ON, 0=OFF, default ON)
           savedAutoRetaliate =

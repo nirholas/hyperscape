@@ -61,6 +61,7 @@ export const Skill = {
   AGILITY: "agility" as keyof Skills,
   CRAFTING: "crafting" as keyof Skills,
   FLETCHING: "fletching" as keyof Skills,
+  RUNECRAFTING: "runecrafting" as keyof Skills,
 };
 
 import type {
@@ -381,6 +382,7 @@ export class SkillsSystem extends SystemBase {
       Skill.AGILITY,
       Skill.CRAFTING,
       Skill.FLETCHING,
+      Skill.RUNECRAFTING,
     ];
 
     for (const skill of skills) {
@@ -414,6 +416,7 @@ export class SkillsSystem extends SystemBase {
       Skill.AGILITY,
       Skill.CRAFTING,
       Skill.FLETCHING,
+      Skill.RUNECRAFTING,
     ];
 
     for (const skill of skills) {
@@ -894,6 +897,7 @@ export class SkillsSystem extends SystemBase {
       agility: stats.agility ?? { level: 1, xp: 0 },
       crafting: stats.crafting ?? { level: 1, xp: 0 },
       fletching: stats.fletching ?? { level: 1, xp: 0 },
+      runecrafting: stats.runecrafting ?? { level: 1, xp: 0 },
     };
 
     return skills;

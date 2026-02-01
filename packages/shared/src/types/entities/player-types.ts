@@ -187,6 +187,10 @@ export class PlayerMigration {
         agility: { level: old.agilityLevel || 1, xp: old.agilityXp || 0 },
         crafting: { level: old.craftingLevel || 1, xp: old.craftingXp || 0 },
         fletching: { level: old.fletchingLevel || 1, xp: old.fletchingXp || 0 },
+        runecrafting: {
+          level: old.runecraftingLevel || 1,
+          xp: old.runecraftingXp || 0,
+        },
       },
       equipment: {
         weapon: null,
@@ -296,6 +300,7 @@ export class PlayerMigration {
       agility: defaultSkill,
       crafting: defaultSkill,
       fletching: defaultSkill,
+      runecrafting: defaultSkill,
     };
   }
 

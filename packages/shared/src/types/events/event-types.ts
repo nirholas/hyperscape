@@ -480,6 +480,10 @@ export enum EventType {
   FLETCHING_COMPLETE = "fletching:complete",
   PROCESSING_FLETCHING_REQUEST = "processing:fletching:request",
 
+  // Runecrafting Events (instant altar conversion)
+  RUNECRAFTING_INTERACT = "runecrafting:interact",
+  RUNECRAFTING_COMPLETE = "runecrafting:complete",
+
   // Tanning Events (NPC tanner: hides → leather)
   TANNING_INTERACT = "tanning:interact",
   TANNING_INTERFACE_OPEN = "tanning:interface:open",

@@ -235,6 +235,7 @@ export class CharacterRepository extends BaseRepository {
         agilityLevel: schema.characters.agilityLevel,
         craftingLevel: schema.characters.craftingLevel,
         fletchingLevel: schema.characters.fletchingLevel,
+        runecraftingLevel: schema.characters.runecraftingLevel,
         attackXp: schema.characters.attackXp,
         strengthXp: schema.characters.strengthXp,
         defenseXp: schema.characters.defenseXp,
@@ -250,6 +251,7 @@ export class CharacterRepository extends BaseRepository {
         agilityXp: schema.characters.agilityXp,
         craftingXp: schema.characters.craftingXp,
         fletchingXp: schema.characters.fletchingXp,
+        runecraftingXp: schema.characters.runecraftingXp,
       })
       .from(schema.characters)
       .where(eq(schema.characters.id, characterId))
@@ -287,6 +289,10 @@ export class CharacterRepository extends BaseRepository {
       agility: { level: row.agilityLevel || 1, xp: row.agilityXp || 0 },
       crafting: { level: row.craftingLevel || 1, xp: row.craftingXp || 0 },
       fletching: { level: row.fletchingLevel || 1, xp: row.fletchingXp || 0 },
+      runecrafting: {
+        level: row.runecraftingLevel || 1,
+        xp: row.runecraftingXp || 0,
+      },
     };
   }
 

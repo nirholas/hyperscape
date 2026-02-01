@@ -126,6 +126,7 @@ export class PlayerEntity extends CombatantEntity {
         agility: { level: 1, xp: 0 },
         crafting: { level: 1, xp: 0 },
         fletching: { level: 1, xp: 0 },
+        runecrafting: { level: 1, xp: 0 },
       };
     }
 
@@ -214,6 +215,7 @@ export class PlayerEntity extends CombatantEntity {
           agility: playerData.skills.agility || { level: 1, xp: 0 },
           crafting: playerData.skills.crafting || { level: 1, xp: 0 },
           fletching: playerData.skills.fletching || { level: 1, xp: 0 },
+          runecrafting: playerData.skills.runecrafting || { level: 1, xp: 0 },
           // Placeholder for complex fields - will be initialized by systems
           activePrayers: [] as PrayerComponent,
           equipment: {} as EquipmentComponent,
@@ -364,6 +366,7 @@ export class PlayerEntity extends CombatantEntity {
         agility: defaultSkill,
         crafting: defaultSkill,
         fletching: defaultSkill,
+        runecrafting: defaultSkill,
       },
 
       // Equipment - initially empty
@@ -514,6 +517,7 @@ export class PlayerEntity extends CombatantEntity {
       agility: playerData.skills.agility || defaultSkill,
       crafting: playerData.skills.crafting || defaultSkill,
       fletching: playerData.skills.fletching || defaultSkill,
+      runecrafting: playerData.skills.runecrafting || defaultSkill,
       // Additional stats from StatsComponent interface
       combatLevel: 3, // Will be calculated by skills system
       totalLevel: 9, // Sum of all skill levels

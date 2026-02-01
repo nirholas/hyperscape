@@ -708,7 +708,8 @@ export interface XPDrop {
     | "smithing"
     | "agility"
     | "crafting"
-    | "fletching";
+    | "fletching"
+    | "runecrafting";
   amount: number;
   timestamp: number;
   playerId: string;

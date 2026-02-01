@@ -150,6 +150,8 @@ const names = [
   'processingTanning',      // Client -> Server: player selected hides to tan from UI
   'tanningInterfaceOpen',   // Server -> Client: show tanning interface with available hides
   'tanningClose',           // Server -> Client: close tanning interface
+  // Runecrafting packets (essence + altar → runes)
+  'runecraftingAltarInteract', // Client -> Server: player clicked runecrafting altar
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack

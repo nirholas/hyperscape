@@ -762,6 +762,32 @@ export interface FletchingCompletePayload {
 }
 
 // =========================================================================
+// RUNECRAFTING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player clicked on a runecrafting altar
+ */
+export interface RunecraftingInteractPayload {
+  playerId: string;
+  altarId: string;
+  runeType: string;
+}
+
+/**
+ * Runecrafting completed - runes crafted
+ */
+export interface RunecraftingCompletePayload {
+  playerId: string;
+  runeType: string;
+  runeItemId: string;
+  essenceConsumed: number;
+  runesProduced: number;
+  multiplier: number;
+  xpAwarded: number;
+}
+
+// =========================================================================
 // TANNING EVENT PAYLOADS
 // =========================================================================
 
@@ -1164,6 +1190,10 @@ export interface EventMap {
   [EventType.FLETCHING_START]: FletchingStartPayload;
   [EventType.FLETCHING_COMPLETE]: FletchingCompletePayload;
   [EventType.PROCESSING_FLETCHING_REQUEST]: ProcessingFletchingRequestPayload;
+
+  // Runecrafting Events (instant altar conversion)
+  [EventType.RUNECRAFTING_INTERACT]: RunecraftingInteractPayload;
+  [EventType.RUNECRAFTING_COMPLETE]: RunecraftingCompletePayload;
 
   // Tanning Events (NPC tanner: hides → leather)
   [EventType.TANNING_INTERACT]: TanningInteractPayload;

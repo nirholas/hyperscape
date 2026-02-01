@@ -89,6 +89,10 @@ import {
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
 import {
+  RunecraftingAltarEntity,
+  type RunecraftingAltarEntityConfig,
+} from "../../../entities/world/RunecraftingAltarEntity";
+import {
   RangeEntity,
   type RangeEntityConfig,
 } from "../../../entities/world/RangeEntity";
@@ -920,6 +924,39 @@ export class Entities extends SystemBase implements IEntities {
       this.items.set(entity.id, entity);
 
       // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "runecrafting_altar") {
+      // Build RunecraftingAltarEntity from network data
+      const positionArray = (data.position || [0, 40, 0]) as [
+        number,
+        number,
+        number,
+      ];
+      const runeType = (data.runeType as string) || "air";
+      const name =
+        data.name ||
+        `${runeType.charAt(0).toUpperCase()}${runeType.slice(1)} Altar`;
+
+      const rcAltarConfig: RunecraftingAltarEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+        runeType: (data.runeType as string) || "air",
+      };
+
+      const entity = new RunecraftingAltarEntity(this.world, rcAltarConfig);
+      this.items.set(entity.id, entity);
+
       if (entity.init) {
         (entity.init() as Promise<void>)?.catch((err) =>
           this.logger.error(`Entity ${entity.id} async init failed`, err),

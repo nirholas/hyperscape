@@ -26,6 +26,7 @@ export type InteractableEntityType =
   | "furnace"
   | "anvil"
   | "altar"
+  | "runecrafting_altar"
   | "starter_chest"
   | "forfeit_pillar";
 

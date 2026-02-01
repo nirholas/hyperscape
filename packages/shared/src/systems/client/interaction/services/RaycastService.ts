@@ -467,6 +467,8 @@ export class RaycastService {
         return "anvil";
       case "altar":
         return "altar";
+      case "runecrafting_altar":
+        return "runecrafting_altar";
       case "starter_chest":
         return "starter_chest";
       case "forfeit_pillar":

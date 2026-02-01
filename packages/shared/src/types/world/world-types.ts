@@ -259,7 +259,7 @@ export interface StationLocation {
   /** Unique instance ID for this station */
   id: string;
   /** Station type - must match type in stations.json */
-  type: "bank" | "furnace" | "anvil" | "altar" | "range";
+  type: "bank" | "furnace" | "anvil" | "altar" | "range" | "runecrafting_altar";
   /** World position (Y will be grounded to terrain) */
   position: WorldPosition;
   /** Optional rotation in degrees (Y-axis only, default: 0) */
