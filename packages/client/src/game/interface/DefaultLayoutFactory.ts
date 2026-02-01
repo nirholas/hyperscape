@@ -184,7 +184,7 @@ export function createDefaultWindows(): WindowConfig[] {
   const widthScale = Math.min(1.0, Math.max(0.7, viewport.width / 1920));
   const chatWidth = Math.max(380, Math.round(500 * widthScale)); // Wide chat panel
   const questsWidth = Math.round(chatWidth * 0.5); // Half of chat width
-  const chatHeight = Math.max(220, Math.round(280 * heightScale)); // Taller chat height
+  const chatHeight = Math.max(300, Math.round(380 * heightScale)); // Larger chat height for better visibility
   const questsHeight = Math.max(
     questsConfig.minSize.height * 0.7,
     Math.round(questsConfig.minSize.height * heightScale),
