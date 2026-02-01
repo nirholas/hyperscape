@@ -165,6 +165,14 @@ export interface Item {
   equippedModelPath?: string | null; // 3D model path for EQUIPPED items (hand-held weapons)
   iconPath: string; // UI icon path
 
+  // Ground item display overrides
+  /** Scale for 3D model when displayed as ground item (default: 0.3) */
+  modelScale?: number;
+  /** Ground item Y positioning. When <= 0, model bottom is bbox-snapped to terrain surface
+   *  with this value as additional offset (0 = exactly on ground). When > 0 or undefined,
+   *  item uses default floating animation at this height (default: 0.5) */
+  groundOffset?: number;
+
   // Consumable properties - only for food/consumables
   healAmount?: number; // Health restored when consumed
 

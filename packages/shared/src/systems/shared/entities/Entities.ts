@@ -409,6 +409,8 @@ export class Entities extends SystemBase implements IEntities {
       const weight = (networkData.weight as number) || 0;
       const rarity = (networkData.rarity as string) || "common";
       const modelPath = (networkData.model as string) || null;
+      const modelScale = networkData.modelScale as number | undefined;
+      const groundOffset = networkData.groundOffset as number | undefined;
 
       const itemConfig: ItemEntityConfig = {
         id: data.id,
@@ -447,6 +449,8 @@ export class Entities extends SystemBase implements IEntities {
         modelPath: modelPath || "",
         iconPath: "",
         healAmount: 0,
+        modelScale: modelScale,
+        groundOffset: groundOffset,
         properties: {
           movementComponent: null,
           combatComponent: null,

@@ -30,6 +30,7 @@ import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
 import { getTargetValidator } from "./TargetValidator";
 import { modelCache } from "../../../utils/rendering/ModelCache";
+import type { GroundItemSystem } from "../economy/GroundItemSystem";
 
 /**
  * Debug logging flag for processing system.
@@ -41,7 +42,7 @@ const DEBUG_PROCESSING = false;
 export class ProcessingSystem extends SystemBase {
   // Fire visual constants
   private static readonly FIRE_MODEL_SCALE = 0.35;
-  private static readonly FIRE_MODEL_Y_OFFSET = 0.063;
+
   private static readonly FIRE_PARTICLE_SPAWN_Y = 0.1;
   private static readonly FIRE_PLACEHOLDER_Y_OFFSET = 0.4;
 
@@ -1128,9 +1129,11 @@ export class ProcessingSystem extends SystemBase {
         model = result.scene;
         const s = ProcessingSystem.FIRE_MODEL_SCALE;
         model.scale.set(s, s, s);
+        // Bbox-snap: place model bottom on terrain
+        const bbox = new THREE.Box3().setFromObject(model);
         model.position.set(
           fire.position.x,
-          fire.position.y + ProcessingSystem.FIRE_MODEL_Y_OFFSET,
+          fire.position.y - bbox.min.y,
           fire.position.z,
         );
         this.world.stage.scene.add(model);
@@ -1187,11 +1190,9 @@ export class ProcessingSystem extends SystemBase {
       model.name = `FireLighting_${playerId}`;
       const s = ProcessingSystem.FIRE_MODEL_SCALE;
       model.scale.set(s, s, s);
-      model.position.set(
-        position.x,
-        position.y + ProcessingSystem.FIRE_MODEL_Y_OFFSET,
-        position.z,
-      );
+      // Bbox-snap: place model bottom on terrain
+      const bbox = new THREE.Box3().setFromObject(model);
+      model.position.set(position.x, position.y - bbox.min.y, position.z);
       model.userData = { type: "fireLighting", playerId };
       model.traverse((child: THREE.Object3D) => {
         if ((child as THREE.Mesh).isMesh) {
@@ -1434,6 +1435,17 @@ export class ProcessingSystem extends SystemBase {
 
       // Clear reference for GC
       fire.mesh = undefined;
+    }
+
+    // Spawn ashes at fire position (server-only, OSRS: fires leave ashes when they burn out)
+    if (this.world.isServer) {
+      const groundItems =
+        this.world.getSystem<GroundItemSystem>("ground-items");
+      if (groundItems) {
+        groundItems.spawnGroundItem("ashes", 1, fire.position, {
+          despawnTime: 120000, // 2 minutes
+        });
+      }
     }
 
     this.activeFires.delete(fireId);

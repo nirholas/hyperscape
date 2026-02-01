@@ -201,6 +201,9 @@ export interface ItemEntityConfig extends EntityConfig<ItemEntityProperties> {
   modelPath?: string;
   iconPath?: string;
   healAmount?: number;
+  // Ground item display overrides
+  modelScale?: number;
+  groundOffset?: number;
 }
 
 // Mob entity config

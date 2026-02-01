@@ -296,6 +296,8 @@ export class GroundItemSystem extends SystemBase {
       modelPath: item.modelPath || "",
       iconPath: item.iconPath || "",
       healAmount: item.healAmount || 0,
+      modelScale: item.modelScale,
+      groundOffset: item.groundOffset,
       properties: {
         movementComponent: null,
         combatComponent: null,
