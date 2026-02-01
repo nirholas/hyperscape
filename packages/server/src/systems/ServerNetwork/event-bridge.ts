@@ -1060,6 +1060,16 @@ export class EventBridge {
    */
   private setupFireEvents(): void {
     try {
+      // Broadcast fire lighting started to all clients (show model during 3s animation)
+      this.world.on(EventType.FIRE_LIGHTING_STARTED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          position: { x: number; y: number; z: number };
+        };
+
+        this.broadcast.sendToAll("fireLightingStarted", data);
+      });
+
       // Broadcast fire creation to all clients for visual rendering
       this.world.on(EventType.FIRE_CREATED, (payload: unknown) => {
         const data = payload as {

@@ -416,6 +416,7 @@ export enum EventType {
   CORPSE_EMPTY = "corpse:empty",
 
   // Fire System
+  FIRE_LIGHTING_STARTED = "fire:lighting:started",
   FIRE_EXTINGUISHED = "fire:extinguished",
   FIRE_CREATED = "fire:created",
 

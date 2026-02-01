@@ -145,6 +145,19 @@ export class FiremakingSystem extends ProcessingSystemBase {
     // OSRS: Player squats while lighting fire
     this.setProcessingEmote(playerId);
 
+    // Notify clients to show fire model during lighting animation
+    const player = this.world.getPlayer(playerId);
+    if (player?.node?.position) {
+      this.emitTypedEvent(EventType.FIRE_LIGHTING_STARTED, {
+        playerId,
+        position: {
+          x: player.node.position.x,
+          y: player.node.position.y,
+          z: player.node.position.z,
+        },
+      });
+    }
+
     // Complete after duration
     setTimeout(() => {
       // Re-fetch player at callback time - they may have disconnected

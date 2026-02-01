@@ -470,6 +470,14 @@ export interface PlayerSetEmotePayload {
 }
 
 /**
+ * Fire lighting started payload (model appears during 3s lighting animation)
+ */
+export interface FireLightingStartedPayload {
+  playerId: string;
+  position: Position3D;
+}
+
+/**
  * Fire created payload
  */
 export interface FireCreatedPayload {
@@ -1154,6 +1162,7 @@ export interface EventMap {
 
   // Processing Events (Firemaking & Cooking)
   [EventType.PLAYER_SET_EMOTE]: PlayerSetEmotePayload;
+  [EventType.FIRE_LIGHTING_STARTED]: FireLightingStartedPayload;
   [EventType.FIRE_CREATED]: FireCreatedPayload;
   [EventType.FIRE_EXTINGUISHED]: FireExtinguishedPayload;
   [EventType.COOKING_COMPLETED]: CookingCompletedPayload;

@@ -125,8 +125,9 @@ const names = [
   'firemakingRequest', // Client -> Server: request to light fire (tinderbox + logs)
   'cookingRequest',    // Client -> Server: request to cook food on fire/range
   'cookingSourceInteract', // Client -> Server: server-authoritative cooking (walk to fire first)
-  'fireCreated',       // Server -> Client: fire entity created
-  'fireExtinguished',  // Server -> Client: fire entity expired/removed
+  'fireCreated',          // Server -> Client: fire entity created
+  'fireExtinguished',     // Server -> Client: fire entity expired/removed
+  'fireLightingStarted',  // Server -> Client: fire lighting begun (show model)
   // Smelting/Smithing packets
   'smeltingSourceInteract', // Client -> Server: player clicked furnace to smelt
   'smithingSourceInteract', // Client -> Server: player clicked anvil to smith

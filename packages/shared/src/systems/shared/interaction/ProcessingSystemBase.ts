@@ -18,6 +18,8 @@ import type { World } from "../../../types/index";
 import type { Position3D } from "../../../types/core/base-types";
 import { getTargetValidator, type FireRegistry } from "./TargetValidator";
 import { worldToTile } from "../../shared/movement/TileSystem";
+import { Particles as ParticlesNode } from "../../../nodes/Particles";
+import { modelCache } from "../../../utils/rendering/ModelCache";
 
 /**
  * Extended fire registry interface - includes additional methods for cooking system.
@@ -39,6 +41,7 @@ export abstract class ProcessingSystemBase
   protected activeFires = new Map<string, Fire>();
   protected activeProcessing = new Map<string, ProcessingAction>();
   protected fireCleanupTimers = new Map<string, NodeJS.Timeout>();
+  protected pendingFireModels = new Map<string, THREE.Object3D>();
   protected playerSkills = new Map<
     string,
     Record<string, { level: number; xp: number }>
@@ -197,22 +200,35 @@ export abstract class ProcessingSystemBase
     const fireWithAnimation = fire as { cancelAnimation?: () => void };
     fireWithAnimation.cancelAnimation?.();
 
+    // Destroy particle emitter
+    const fireWithParticles = fire as { particleNode?: ParticlesNode };
+    if (fireWithParticles.particleNode) {
+      fireWithParticles.particleNode.unmount();
+      fireWithParticles.particleNode = undefined;
+    }
+
     // Remove visual and dispose THREE.js resources (only exists on client)
     if (fire.mesh && this.world.isClient) {
       this.world.stage.scene.remove(fire.mesh);
 
-      // Dispose THREE.js resources to prevent GPU memory leak
-      const mesh = fire.mesh as THREE.Mesh;
-      if (mesh.geometry) {
-        mesh.geometry.dispose();
-      }
-      if (mesh.material) {
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((mat) => mat.dispose());
-        } else {
-          (mesh.material as THREE.Material).dispose();
+      // Traverse and dispose all geometries and materials (GLB models have multiple children)
+      fire.mesh.traverse((child: THREE.Object3D) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh) {
+          if (mesh.geometry) mesh.geometry.dispose();
+          if (mesh.material) {
+            const materials = Array.isArray(mesh.material)
+              ? mesh.material
+              : [mesh.material];
+            for (const mat of materials) {
+              // Only dispose non-cached materials (ModelCache manages shared materials)
+              if (!modelCache.isManagedMaterial(mat as THREE.Material)) {
+                (mat as THREE.Material).dispose();
+              }
+            }
+          }
         }
-      }
+      });
 
       // Clear reference for GC
       fire.mesh = undefined;
@@ -231,17 +247,155 @@ export abstract class ProcessingSystemBase
   }
 
   /**
-   * Create fire visual mesh (client-only).
-   * Can be overridden by FireVisualManager if needed.
+   * Create fire visual (client-only).
+   * Loads GLB fire model and spawns particle fire effect.
    */
-  protected createFireVisual(fire: Fire): void {
+  protected async createFireVisual(fire: Fire): Promise<void> {
     // Only create visuals on client
     if (!this.world.isClient) return;
 
-    // Create fire mesh - orange glowing cube for now
+    let model: THREE.Object3D | null = null;
+
+    // Check if we already loaded the model during the lighting phase
+    const pending = this.pendingFireModels.get(fire.playerId);
+    if (pending) {
+      model = pending;
+      this.pendingFireModels.delete(fire.playerId);
+    } else {
+      // Load model fresh (late join / missed lighting event)
+      try {
+        const result = await modelCache.loadModel(
+          "asset://models/firemaking-fire/firemaking-fire.glb",
+          this.world,
+        );
+        model = result.scene;
+        model.scale.set(0.5, 0.5, 0.5);
+        model.position.set(
+          fire.position.x,
+          fire.position.y + 0.09,
+          fire.position.z,
+        );
+        this.world.stage.scene.add(model);
+      } catch (err) {
+        console.warn(
+          "[ProcessingSystemBase] Failed to load fire model, using placeholder:",
+          err,
+        );
+        this.createPlaceholderFireMesh(fire);
+        return;
+      }
+    }
+
+    // Guard: fire may have been extinguished during async model load
+    if (!fire.isActive) {
+      this.world.stage.scene.remove(model);
+      return;
+    }
+
+    model.name = `Fire_${fire.id}`;
+    model.userData = {
+      type: "fire",
+      entityId: fire.id,
+      fireId: fire.id,
+      playerId: fire.playerId,
+      name: "Fire",
+    };
+    model.traverse((child: THREE.Object3D) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.layers.set(1);
+      }
+    });
+
+    fire.mesh = model;
+
+    // Spawn particle fire effect rising from center of model
+    this.createFireParticles(fire);
+  }
+
+  /**
+   * Load fire GLB model during the 3s lighting animation (client-only).
+   * Model is stored in pendingFireModels and transferred on FIRE_CREATED.
+   */
+  private async loadFireModelForLighting(
+    playerId: string,
+    position: { x: number; y: number; z: number },
+  ): Promise<void> {
+    try {
+      const result = await modelCache.loadModel(
+        "asset://models/firemaking-fire/firemaking-fire.glb",
+        this.world,
+      );
+
+      const model = result.scene;
+      model.name = `FireLighting_${playerId}`;
+      model.scale.set(0.5, 0.5, 0.5);
+      model.position.set(position.x, position.y + 0.09, position.z);
+      model.userData = { type: "fireLighting", playerId };
+      model.traverse((child: THREE.Object3D) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.layers.set(1);
+        }
+      });
+
+      this.world.stage.scene.add(model);
+      this.pendingFireModels.set(playerId, model);
+    } catch (err) {
+      console.warn(
+        "[ProcessingSystemBase] Failed to load fire model for lighting:",
+        err,
+      );
+    }
+  }
+
+  /**
+   * Create particle fire effect on a lit fire (client-only).
+   */
+  private createFireParticles(fire: Fire): void {
+    if (!this.world.isClient || !fire.mesh) return;
+
+    const particles = new ParticlesNode({
+      image: "asset://particle.png",
+      shape: ["cone", 0.2, 0.05, 25],
+      rate: 30,
+      life: "0.6~1.2",
+      speed: "0.8~1.5",
+      size: "0.4~0.7",
+      color: "#ff6600",
+      alpha: "0.9",
+      blending: "additive",
+      emissive: "4",
+      lit: false,
+      force: [0, 0.3, 0],
+      velocityLinear: [0, 1.0, 0],
+      colorOverLife: "#ff4400 #ff8800 #ffcc00",
+      alphaOverLife: "0.9 0.7 0",
+      sizeOverLife: "0.6 1 0.2",
+      emissiveOverLife: "4 3 0",
+    });
+
+    // Position at fire center, slightly above the model
+    particles.position.set(
+      fire.position.x,
+      fire.position.y + 0.15,
+      fire.position.z,
+    );
+    particles.ctx = this.world;
+    // Compute matrixWorld for standalone node (not in scene graph)
+    particles.updateTransform();
+    particles.mounted = true;
+    particles.mount();
+
+    // Store reference for cleanup
+    (fire as { particleNode?: ParticlesNode }).particleNode = particles;
+  }
+
+  /**
+   * Fallback placeholder fire mesh (orange box) when GLB model fails to load.
+   */
+  private createPlaceholderFireMesh(fire: Fire): void {
     const fireGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.5);
     const fireMaterial = new THREE.MeshBasicMaterial({
-      color: 0xff4500, // Orange red
+      color: 0xff4500,
       transparent: true,
       opacity: 0.8,
     });
@@ -260,12 +414,10 @@ export abstract class ProcessingSystemBase
       playerId: fire.playerId,
       name: "Fire",
     };
-    // Set layer 1 for raycasting
     fireMesh.layers.set(1);
 
-    // Add flickering animation with proper cleanup (browser only)
+    // Add flickering animation with proper cleanup
     let animationFrameId: number | null = null;
-
     if (typeof requestAnimationFrame !== "undefined") {
       const animate = () => {
         if (fire.isActive && fire.mesh) {
@@ -278,7 +430,6 @@ export abstract class ProcessingSystemBase
       animate();
     }
 
-    // Store cancel function on fire object for cleanup
     (fire as { cancelAnimation?: () => void }).cancelAnimation = () => {
       if (animationFrameId !== null) {
         window.cancelAnimationFrame(animationFrameId);
@@ -300,6 +451,13 @@ export abstract class ProcessingSystemBase
     const action = this.activeProcessing.get(playerId);
     this.activeProcessing.delete(playerId);
     if (action) this.releaseAction(action);
+
+    // Remove pending fire model (cancelled during lighting)
+    const pendingModel = this.pendingFireModels.get(playerId);
+    if (pendingModel && this.world.isClient) {
+      this.world.stage.scene.remove(pendingModel);
+      this.pendingFireModels.delete(playerId);
+    }
 
     // Extinguish player's fires
     for (const [fireId, fire] of this.activeFires.entries()) {
@@ -482,14 +640,18 @@ export abstract class ProcessingSystemBase
       this.subscribe(
         EventType.FIRE_EXTINGUISHED,
         (data: { fireId: string }) => {
-          const fire = this.activeFires.get(data.fireId);
-          if (fire) {
-            fire.isActive = false;
-            if (fire.mesh) {
-              this.world.stage.scene.remove(fire.mesh);
-            }
-            this.activeFires.delete(data.fireId);
-          }
+          this.extinguishFire(data.fireId);
+        },
+      );
+
+      // Load fire model when lighting starts (before fire is officially created)
+      this.subscribe(
+        EventType.FIRE_LIGHTING_STARTED,
+        (data: {
+          playerId: string;
+          position: { x: number; y: number; z: number };
+        }) => {
+          this.loadFireModelForLighting(data.playerId, data.position);
         },
       );
     }
@@ -500,6 +662,14 @@ export abstract class ProcessingSystemBase
     for (const fireId of this.activeFires.keys()) {
       this.extinguishFire(fireId);
     }
+
+    // Clean up pending fire models
+    if (this.world.isClient) {
+      for (const model of this.pendingFireModels.values()) {
+        this.world.stage.scene.remove(model);
+      }
+    }
+    this.pendingFireModels.clear();
 
     // Clear timers
     this.fireCleanupTimers.forEach((timer) => clearTimeout(timer));
