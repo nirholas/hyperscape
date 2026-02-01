@@ -272,23 +272,24 @@ export class OctahedralImpostor {
     });
 
     // Calculate dimensions to match atlas cell proportions
-    // The atlas bakes using maxDimension as the reference, so we must match that
+    // The atlas bakes using boundingSphere.radius * 1.05 for scaling (see ImpostorBaker)
+    // So the plane must use the same effective diameter to match the atlas content
     let width: number;
     let height: number;
 
-    if (boundingBox) {
-      const boxSize = new THREE.Vector3();
-      boundingBox.getSize(boxSize);
-      // Atlas uses maxDimension for scaling, so plane must use same proportions
-      // This creates a square plane that matches the atlas cell
-      const maxDimension = Math.max(boxSize.x, boxSize.y, boxSize.z);
-      width = maxDimension * scale;
-      height = maxDimension * scale;
-    } else if (boundingSphere) {
-      // Fallback: use sphere diameter for both (square)
-      const diameter = boundingSphere.radius * 2 * scale;
-      width = diameter;
-      height = diameter;
+    if (boundingSphere) {
+      // CRITICAL: Match the baking scale exactly
+      // Baking uses scaleFactor = 0.5 / (radius * 1.05), capturing diameter = radius * 2 * 1.05
+      const effectiveDiameter = boundingSphere.radius * 2 * 1.05;
+      width = effectiveDiameter * scale;
+      height = effectiveDiameter * scale;
+    } else if (boundingBox) {
+      // Fallback: compute sphere from box if sphere not available
+      const tempSphere = new THREE.Sphere();
+      boundingBox.getBoundingSphere(tempSphere);
+      const effectiveDiameter = tempSphere.radius * 2 * 1.05;
+      width = effectiveDiameter * scale;
+      height = effectiveDiameter * scale;
     } else {
       // No bounds info, use scale directly
       width = scale;

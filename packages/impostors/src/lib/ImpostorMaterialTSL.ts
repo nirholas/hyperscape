@@ -172,7 +172,10 @@ export function createTSLImpostorMaterial(
   } = options;
 
   // Ensure render target textures work with TSL
-  const setupTexture = (tex: THREE_NAMESPACE.Texture | undefined) => {
+  const setupTexture = (
+    tex: THREE_NAMESPACE.Texture | undefined,
+    isLinear = false,
+  ) => {
     if (!tex) return;
     if (!tex.isRenderTargetTexture) {
       tex.needsUpdate = true;
@@ -183,11 +186,15 @@ export function createTSLImpostorMaterial(
     if (!tex.generateMipmaps) {
       tex.generateMipmaps = false;
     }
+    // Normal/depth/PBR textures must be in linear space to prevent gamma conversion
+    if (isLinear) {
+      tex.colorSpace = THREE_NAMESPACE.LinearSRGBColorSpace;
+    }
   };
-  setupTexture(atlasTexture);
-  setupTexture(normalAtlasTexture);
-  setupTexture(depthAtlasTexture);
-  setupTexture(pbrAtlasTexture);
+  setupTexture(atlasTexture); // Color atlas can be sRGB
+  setupTexture(normalAtlasTexture, true); // Normal atlas MUST be linear
+  setupTexture(depthAtlasTexture, true); // Depth atlas should be linear
+  setupTexture(pbrAtlasTexture, true); // PBR atlas should be linear
 
   // Create node material
   const material = new MeshBasicNodeMaterial();

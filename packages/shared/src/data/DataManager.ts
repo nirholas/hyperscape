@@ -70,12 +70,24 @@ const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
   TREASURE_LOCATIONS;
 
+/**
+ * NPC Model Archetypes - Uses GLB models for mobs/NPCs (not VRM)
+ *
+ * GLB advantages over VRM for mobs:
+ * - Simpler loading (no VRM humanoid system)
+ * - Embedded animations (walk/run clips included)
+ * - Faster rendering (no bone normalization)
+ * - Easy impostor pre-baking
+ * - No humanoid.update() T-pose issues
+ *
+ * VRM is only used for player avatars (custom avatar support + emote retargeting)
+ */
 const NPC_MODEL_ARCHETYPES: Record<NPCModelArchetype, string> = {
-  goblin: "asset://models/goblin/goblin.vrm",
-  human: "asset://avatars/avatar-male-01.vrm",
-  thug: "asset://avatars/avatar-male-01.vrm",
-  troll: "asset://avatars/avatar-male-01.vrm",
-  imp: "asset://models/goblin/goblin.vrm",
+  goblin: "asset://models/goblin/goblin_rigged.glb",
+  human: "asset://models/human/human_rigged.glb",
+  thug: "asset://models/thug/thug_rigged.glb",
+  troll: "asset://models/troll/troll_rigged.glb",
+  imp: "asset://models/imp/imp_rigged.glb",
 };
 
 import type {

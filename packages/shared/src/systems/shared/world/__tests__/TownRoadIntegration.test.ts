@@ -16,7 +16,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 const TOWN_COUNT = 25;
 const MIN_TOWN_SPACING = 800;
 const ROAD_WIDTH = 4;
-const WATER_THRESHOLD = 5.4;
+// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
+const WATER_THRESHOLD = 9.0;
 const TILE_SIZE = 100;
 
 type TownSize = "hamlet" | "village" | "town";

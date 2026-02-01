@@ -40,12 +40,21 @@ import type { World } from "../../../types";
 
 /**
  * Animated impostor configuration
+ *
+ * Uses minimal asymmetric grid (6x3 = 18 views) for maximum performance:
+ * - 6 horizontal views (enough for yaw rotation around horizon)
+ * - 3 vertical views (eye-level, slight up, slight down)
+ * - 18 views vs 144 (12x12) = 87% fewer sprites, much faster baking
  */
 export const ANIMATED_IMPOSTOR_CONFIG = {
   /** Atlas size per frame */
   ATLAS_SIZE: 512,
-  /** Sprites per side (hemisphere 12x12 = 144 views) */
-  SPRITES_PER_SIDE: 12,
+  /** Horizontal sprites (columns) - views around horizon */
+  SPRITES_X: 6,
+  /** Vertical sprites (rows) - minimal elevation variation */
+  SPRITES_Y: 3,
+  /** @deprecated Use SPRITES_X - backwards compatibility */
+  SPRITES_PER_SIDE: 6,
   /** Animation FPS (low for memory efficiency) */
   ANIMATION_FPS: 6,
   /** Use hemisphere mapping (ground-viewed mobs) */
@@ -341,7 +350,8 @@ export class AnimatedImpostorManager {
       modelId,
       {
         atlasSize: ANIMATED_IMPOSTOR_CONFIG.ATLAS_SIZE,
-        spritesPerSide: ANIMATED_IMPOSTOR_CONFIG.SPRITES_PER_SIDE,
+        spritesX: ANIMATED_IMPOSTOR_CONFIG.SPRITES_X,
+        spritesY: ANIMATED_IMPOSTOR_CONFIG.SPRITES_Y,
         animationFPS: ANIMATED_IMPOSTOR_CONFIG.ANIMATION_FPS,
         hemisphere: ANIMATED_IMPOSTOR_CONFIG.HEMISPHERE,
       },
@@ -352,7 +362,7 @@ export class AnimatedImpostorManager {
     this.stats.totalBaked++;
 
     console.log(
-      `[AnimatedImpostorManager] Baked ${modelId}: ${result.frameCount} frames`,
+      `[AnimatedImpostorManager] Baked ${modelId}: ${result.frameCount} frames (${ANIMATED_IMPOSTOR_CONFIG.SPRITES_X}x${ANIMATED_IMPOSTOR_CONFIG.SPRITES_Y} views)`,
     );
 
     return result;

@@ -842,8 +842,9 @@ export class ImpostorBaker {
 
     // Scale to fit in camera view: orthoSize is 0.5, camera captures 1.0x1.0
     // scaleFactor = 0.5 / radius makes diameter fill view
-    // Using 1.05 margin (5%) to prevent edge clipping
-    const radius = boundingSphere.radius * 1.05;
+    // Using 1.15 margin (15%) to prevent edge clipping on trees with foliage
+    // The 5% margin was too tight and clipped tree leaves
+    const radius = boundingSphere.radius * 1.15;
     const scaleFactor = 0.5 / radius;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
@@ -886,6 +887,8 @@ export class ImpostorBaker {
         generateMipmaps: false,
       },
     );
+    // CRITICAL: Configure color space for proper texture sampling in TSL material
+    this.configureAtlasRenderTarget(renderTarget, THREE.SRGBColorSpace);
 
     // Create cell-sized render target for individual views
     const cellRenderTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
@@ -895,6 +898,8 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure cell render target for sRGB color
+    this.configureAtlasRenderTarget(cellRenderTarget, THREE.SRGBColorSpace);
 
     console.log(
       `[ImpostorBaker] Starting WebGPU atlas: ${numCellsX}x${numCellsY} cells, cell render=${cellSize}px`,
@@ -1091,7 +1096,7 @@ export class ImpostorBaker {
     sourceCopy.position.set(-center.x, -center.y, -center.z);
 
     // Scale to fit in camera view (same as bake())
-    const radius = boundingSphere.radius * 1.05;
+    const radius = boundingSphere.radius * 1.15;
     const scaleFactor = 0.5 / radius;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
@@ -1129,6 +1134,9 @@ export class ImpostorBaker {
         generateMipmaps: false,
       },
     );
+    // CRITICAL: Configure color render target for sRGB color space
+    this.configureAtlasRenderTarget(colorRenderTarget, THREE.SRGBColorSpace);
+
     const normalRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
@@ -1140,6 +1148,11 @@ export class ImpostorBaker {
         generateMipmaps: false,
       },
     );
+    // Configure normal render target for linear color space (raw data, no gamma)
+    this.configureAtlasRenderTarget(
+      normalRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
 
     // Create cell-sized render targets for individual views
     const colorCellTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
@@ -1149,6 +1162,9 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure color cell target for sRGB
+    this.configureAtlasRenderTarget(colorCellTarget, THREE.SRGBColorSpace);
+
     const normalCellTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
@@ -1156,6 +1172,11 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure normal cell target for linear color space
+    this.configureAtlasRenderTarget(
+      normalCellTarget,
+      THREE.LinearSRGBColorSpace,
+    );
 
     const webgpuRenderer = this.renderer as THREE_WEBGPU.WebGPURenderer;
 
@@ -1656,10 +1677,10 @@ export class ImpostorBaker {
     this.renderScene.add(sourceCopy);
 
     // Center and scale - MUST match bake() scale exactly
-    // bake() uses: scaleFactor = 0.5 / (boundingSphere.radius * 1.05)
+    // bake() uses: scaleFactor = 0.5 / (boundingSphere.radius * 1.15)
     const center = colorResult.boundingSphere.center.clone();
     sourceCopy.position.set(-center.x, -center.y, -center.z);
-    const radius = colorResult.boundingSphere.radius * 1.05;
+    const radius = colorResult.boundingSphere.radius * 1.15;
     const scaleFactor = 0.5 / radius;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
@@ -1869,7 +1890,7 @@ export class ImpostorBaker {
     // Center and scale the cloned mesh (same as bake())
     const center = boundingSphere.center.clone();
     sourceCopy.position.set(-center.x, -center.y, -center.z);
-    const radius = boundingSphere.radius * 1.05;
+    const radius = boundingSphere.radius * 1.15;
     const scaleFactor = 0.5 / radius;
     sourceCopy.scale.setScalar(scaleFactor);
     sourceCopy.position.multiplyScalar(scaleFactor);
@@ -1907,6 +1928,9 @@ export class ImpostorBaker {
         generateMipmaps: false,
       },
     );
+    // CRITICAL: Configure color render target for sRGB color space
+    this.configureAtlasRenderTarget(colorRenderTarget, THREE.SRGBColorSpace);
+
     const normalRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
@@ -1918,6 +1942,12 @@ export class ImpostorBaker {
         generateMipmaps: false,
       },
     );
+    // Configure normal render target for linear color space (raw data, no gamma)
+    this.configureAtlasRenderTarget(
+      normalRenderTarget,
+      THREE.LinearSRGBColorSpace,
+    );
+
     const depthRenderTarget = new THREE_WEBGPU.RenderTarget(
       atlasWidth,
       atlasHeight,
@@ -1928,6 +1958,11 @@ export class ImpostorBaker {
         magFilter: THREE.LinearFilter,
         generateMipmaps: false,
       },
+    );
+    // Configure depth render target for linear color space (raw depth values)
+    this.configureAtlasRenderTarget(
+      depthRenderTarget,
+      THREE.LinearSRGBColorSpace,
     );
 
     // PBR atlas - only create if COMPLETE mode
@@ -1940,6 +1975,11 @@ export class ImpostorBaker {
         magFilter: THREE.LinearFilter,
         generateMipmaps: false,
       });
+      // Configure PBR render target for linear color space
+      this.configureAtlasRenderTarget(
+        pbrRenderTarget,
+        THREE.LinearSRGBColorSpace,
+      );
     }
 
     // Create cell-sized render targets for individual views
@@ -1950,6 +1990,9 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure color cell target for sRGB
+    this.configureAtlasRenderTarget(colorCellTarget, THREE.SRGBColorSpace);
+
     const normalCellTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
@@ -1957,6 +2000,12 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure normal cell target for linear color space
+    this.configureAtlasRenderTarget(
+      normalCellTarget,
+      THREE.LinearSRGBColorSpace,
+    );
+
     const depthCellTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
@@ -1964,6 +2013,12 @@ export class ImpostorBaker {
       magFilter: THREE.LinearFilter,
       generateMipmaps: false,
     });
+    // Configure depth cell target for linear color space
+    this.configureAtlasRenderTarget(
+      depthCellTarget,
+      THREE.LinearSRGBColorSpace,
+    );
+
     let pbrCellTarget: THREE_WEBGPU.RenderTarget | undefined;
     if (pbrMode === PBRBakeMode.COMPLETE) {
       pbrCellTarget = new THREE_WEBGPU.RenderTarget(cellSize, cellSize, {
@@ -1973,6 +2028,11 @@ export class ImpostorBaker {
         magFilter: THREE.LinearFilter,
         generateMipmaps: false,
       });
+      // Configure PBR cell target for linear color space
+      this.configureAtlasRenderTarget(
+        pbrCellTarget,
+        THREE.LinearSRGBColorSpace,
+      );
     }
 
     const webgpuRenderer = this.renderer as THREE_WEBGPU.WebGPURenderer;

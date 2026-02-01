@@ -73,10 +73,12 @@ export class AnimatedOctahedralImpostor extends THREE.Mesh<
     // Create plane geometry for billboard
     const geometry = new THREE.PlaneGeometry(1, 1);
 
-    // Create animated material
+    // Create animated material (supports asymmetric grids)
     const material = createAnimatedImpostorMaterial(bakeResult.atlasArray, {
       atlasArray: bakeResult.atlasArray,
       spritesPerSide: bakeResult.spritesPerSide,
+      spritesX: bakeResult.spritesX ?? bakeResult.spritesPerSide,
+      spritesY: bakeResult.spritesY ?? bakeResult.spritesPerSide,
       hemisphere: bakeResult.hemisphere,
       frameCount: bakeResult.frameCount,
       transparent: true,

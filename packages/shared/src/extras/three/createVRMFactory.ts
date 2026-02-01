@@ -84,6 +84,17 @@ export function createVRMFactory(
   glb: GLBData,
   setupMaterial?: (material: THREE.Material) => void,
 ) {
+  // Debug: Check VRM data at factory creation time
+  const inputVrmData = glb.userData?.vrm;
+  console.log("[createVRMFactory] Input GLB userData:", {
+    hasUserData: !!glb.userData,
+    hasVRM: !!inputVrmData,
+    hasHumanoid: !!inputVrmData?.humanoid,
+    humanoidType: inputVrmData?.humanoid?.constructor?.name,
+    hasUpdateMethod: typeof inputVrmData?.humanoid?.update,
+    hasCloneMethod: typeof inputVrmData?.humanoid?.clone,
+  });
+
   // we'll update matrix ourselves
   glb.scene.matrixAutoUpdate = false;
   glb.scene.matrixWorldAutoUpdate = false;
@@ -304,6 +315,14 @@ export function createVRMFactory(
     const vrm = cloneGLB(glb);
     const _tvrm = vrm.userData?.vrm;
 
+    // Debug: Log what we got from cloning
+    console.log("[VRMFactory.create] Cloned VRM userData:", {
+      hasVrm: !!_tvrm,
+      hasHumanoid: !!_tvrm?.humanoid,
+      humanoidType: _tvrm?.humanoid?.constructor?.name,
+      hasUpdate: typeof _tvrm?.humanoid?.update,
+    });
+
     const skinnedMeshes = getSkinnedMeshes(vrm.scene as THREE.Scene);
     const skeleton = skinnedMeshes[0].skeleton;
     const rootBone = skeleton.bones[0];
@@ -508,11 +527,46 @@ export function createVRMFactory(
       // Without this, normalized bone changes never reach the visible skeleton
       if (_tvrm?.humanoid?.update) {
         _tvrm.humanoid.update(delta);
-      } else if (!hasLoggedUpdatePipeline) {
-        hasLoggedUpdatePipeline = true;
-        console.warn(
-          `[VRM] ⚠️ humanoid.update NOT available - animations may not propagate to visible skeleton!`,
-        );
+      } else {
+        // FALLBACK: Manually propagate normalized bones to raw bones
+        // This mimics what humanoid.update() does internally
+        const humanoid = _tvrm?.humanoid;
+        if (humanoid) {
+          const normalizedBones = humanoid._normalizedHumanBones?.humanBones;
+          const rawBones = humanoid._rawHumanBones?.humanBones;
+          if (normalizedBones && rawBones) {
+            // Copy transforms from normalized to raw bones
+            for (const [boneName, rawBoneData] of Object.entries(rawBones)) {
+              const normalizedBoneData = normalizedBones[boneName];
+              const rawBoneNode = (rawBoneData as { node?: THREE.Object3D })
+                ?.node;
+              const normalizedBoneNode = (
+                normalizedBoneData as { node?: THREE.Object3D }
+              )?.node;
+              if (rawBoneNode && normalizedBoneNode) {
+                // Copy local transforms from normalized to raw bone
+                rawBoneNode.quaternion.copy(normalizedBoneNode.quaternion);
+                rawBoneNode.position.copy(normalizedBoneNode.position);
+              }
+            }
+          }
+        }
+        if (!hasLoggedUpdatePipeline) {
+          hasLoggedUpdatePipeline = true;
+          console.warn(
+            `[VRM] ⚠️ humanoid.update NOT available - using manual bone propagation fallback`,
+            {
+              _tvrm: !!_tvrm,
+              humanoid: !!_tvrm?.humanoid,
+              humanoidType: _tvrm?.humanoid?.constructor?.name,
+              updateMethod: typeof _tvrm?.humanoid?.update,
+              vrmUserData: vrm.userData,
+              hasNormalizedBones:
+                !!_tvrm?.humanoid?._normalizedHumanBones?.humanBones,
+              hasRawBones: !!_tvrm?.humanoid?._rawHumanBones?.humanBones,
+            },
+          );
+        }
       }
 
       // Step 3: Update skeleton matrices for skinning
@@ -1079,28 +1133,79 @@ function cloneGLB(glb: GLBData): GLBData {
 
   const originalVRM = glb.userData?.vrm;
 
-  // If no VRM or no humanoid, just return cloned scene
-  if (!originalVRM?.humanoid?.clone) {
+  // If no VRM, just return cloned scene
+  if (!originalVRM) {
+    console.warn("[cloneGLB] No VRM data in userData - not a VRM file?");
     return { ...glb, scene: clonedScene };
   }
 
-  // Clone the VRM humanoid
-  const clonedHumanoid = originalVRM.humanoid.clone();
+  // Debug: Log what we have in the original VRM
+  console.log("[cloneGLB] Original VRM:", {
+    hasHumanoid: !!originalVRM.humanoid,
+    humanoidType: originalVRM.humanoid?.constructor?.name,
+    hasCloneMethod: typeof originalVRM.humanoid?.clone,
+    hasUpdateMethod: typeof originalVRM.humanoid?.update,
+    humanoidKeys: originalVRM.humanoid ? Object.keys(originalVRM.humanoid) : [],
+  });
 
-  // CRITICAL: Remap humanoid bone references to cloned scene
-  remapHumanoidBonesToClonedScene(clonedHumanoid, clonedScene);
+  // If humanoid.clone() is available, use proper cloning
+  if (originalVRM.humanoid?.clone) {
+    // Clone the VRM humanoid
+    const clonedHumanoid = originalVRM.humanoid.clone();
+    console.log("[cloneGLB] Cloned humanoid:", {
+      clonedType: clonedHumanoid?.constructor?.name,
+      hasUpdate: typeof clonedHumanoid?.update,
+      clonedPrototype: Object.getPrototypeOf(clonedHumanoid)?.constructor?.name,
+      clonedKeys: clonedHumanoid ? Object.keys(clonedHumanoid) : [],
+    });
 
-  // Create cloned VRM with remapped humanoid
-  const clonedVRM = {
-    ...originalVRM,
-    scene: clonedScene,
-    humanoid: clonedHumanoid,
-  };
+    // CRITICAL: Remap humanoid bone references to cloned scene
+    remapHumanoidBonesToClonedScene(clonedHumanoid, clonedScene);
 
+    console.log(
+      "[cloneGLB] After remapping, humanoid update:",
+      typeof clonedHumanoid?.update,
+    );
+
+    // Create cloned VRM with remapped humanoid
+    const clonedVRM = {
+      ...originalVRM,
+      scene: clonedScene,
+      humanoid: clonedHumanoid,
+    };
+
+    console.log(
+      "[cloneGLB] Final clonedVRM.humanoid.update:",
+      typeof clonedVRM.humanoid?.update,
+    );
+
+    const result = {
+      ...glb,
+      scene: clonedScene,
+      userData: { vrm: clonedVRM },
+    };
+
+    console.log(
+      "[cloneGLB] Return value userData.vrm.humanoid.update:",
+      typeof result.userData?.vrm?.humanoid?.update,
+    );
+
+    return result;
+  }
+
+  // FALLBACK: If humanoid.clone() is not available, still pass VRM reference
+  // This allows humanoid.update() to work (shared across instances, but better than nothing)
+  // The humanoid will point to original bones, but at least animations will propagate
+  console.warn(
+    "[cloneGLB] VRM humanoid.clone() not available - using shared humanoid reference. " +
+      "Animations may be shared across instances.",
+  );
+
+  // Pass the original VRM with its humanoid - animations will be shared but at least work
   return {
     ...glb,
     scene: clonedScene,
-    userData: { vrm: clonedVRM },
+    userData: { vrm: originalVRM },
   };
 }
 

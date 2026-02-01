@@ -20,7 +20,9 @@ export const DEFAULT_WORLD_SIZE = 10000;
 export const DEFAULT_MIN_TOWN_SPACING = 800;
 export const DEFAULT_FLATNESS_SAMPLE_RADIUS = 40;
 export const DEFAULT_FLATNESS_SAMPLE_COUNT = 16;
-export const DEFAULT_WATER_THRESHOLD = 5.4;
+// IMPORTANT: Water threshold must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
+// This ensures town candidates are placed on actual land, not underwater areas
+export const DEFAULT_WATER_THRESHOLD = 9.0;
 export const DEFAULT_OPTIMAL_WATER_DISTANCE_MIN = 30;
 export const DEFAULT_OPTIMAL_WATER_DISTANCE_MAX = 150;
 

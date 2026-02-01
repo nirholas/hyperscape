@@ -153,11 +153,22 @@ function parseGlb(buffer: Buffer): GltfJson | null {
   return null;
 }
 
+// glTF component types
+const COMPONENT_TYPE_FLOAT = 5126;
+
+// Maximum reasonable dimension for a model in meters
+// Values larger than this indicate quantized integer data being misinterpreted as floats
+const MAX_REASONABLE_DIMENSION = 100;
+
 /**
  * Extract bounding box from glTF accessors
  *
  * The position accessor (POSITION attribute) contains min/max arrays
  * that define the bounding box of the mesh vertices.
+ *
+ * Note: Some models use KHR_mesh_quantization which stores positions as
+ * INT16/UINT16. In those cases, the min/max values are raw integers and
+ * would need dequantization. We skip those accessors and only use FLOAT data.
  */
 function extractBounds(gltf: GltfJson): BoundingBox | null {
   if (!gltf.accessors || !gltf.meshes) {
@@ -178,6 +189,15 @@ function extractBounds(gltf: GltfJson): BoundingBox | null {
       const accessor = gltf.accessors[positionIndex];
       if (!accessor || accessor.type !== "VEC3") continue;
 
+      // Skip non-FLOAT accessors (quantized positions from KHR_mesh_quantization)
+      // These would give us raw integer values instead of world-space coordinates
+      if (accessor.componentType !== COMPONENT_TYPE_FLOAT) {
+        console.warn(
+          `  ⚠️  Skipping quantized POSITION accessor (componentType=${accessor.componentType})`,
+        );
+        continue;
+      }
+
       // Use accessor min/max if available (most efficient)
       if (
         accessor.min &&
@@ -185,6 +205,23 @@ function extractBounds(gltf: GltfJson): BoundingBox | null {
         accessor.min.length >= 3 &&
         accessor.max.length >= 3
       ) {
+        // Additional sanity check: skip values that look like raw integers
+        // (e.g., 32767 from INT16 max, or dimensions > 100m)
+        const dimX = accessor.max[0] - accessor.min[0];
+        const dimY = accessor.max[1] - accessor.min[1];
+        const dimZ = accessor.max[2] - accessor.min[2];
+
+        if (
+          dimX > MAX_REASONABLE_DIMENSION ||
+          dimY > MAX_REASONABLE_DIMENSION ||
+          dimZ > MAX_REASONABLE_DIMENSION
+        ) {
+          console.warn(
+            `  ⚠️  Skipping accessor with unreasonable dimensions: ${dimX.toFixed(1)}x${dimY.toFixed(1)}x${dimZ.toFixed(1)}m`,
+          );
+          continue;
+        }
+
         foundAny = true;
         globalMin.x = Math.min(globalMin.x, accessor.min[0]);
         globalMin.y = Math.min(globalMin.y, accessor.min[1]);

@@ -56,6 +56,7 @@ import {
 } from "./GPUVegetation";
 import { csmLevels } from "./Environment";
 import type { RoadNetworkSystem } from "./RoadNetworkSystem";
+import { updateTreeInstances } from "./ProcgenTreeCache";
 import {
   isGPUComputeAvailable,
   getGlobalCullingManager,
@@ -2790,8 +2791,7 @@ export class VegetationSystem extends System {
 
       // Update procgen tree instances (LOD transitions, wind animation)
       // Pass delta time for wind animation and cross-fade transitions
-      // TEMPORARILY DISABLED - debugging grass/ground rendering
-      // updateTreeInstances(cameraPos, _delta);
+      updateTreeInstances(cameraPos, _delta);
 
       // Update ClientLoader with player position for priority-based loading
       // This allows distant tiles to be loaded with lower priority

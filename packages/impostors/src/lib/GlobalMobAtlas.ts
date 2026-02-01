@@ -26,7 +26,8 @@ export class GlobalMobAtlasBuilder {
   private bakeResults: AnimatedBakeResult[] = [];
 
   /** Shared configuration */
-  private spritesPerSide = 12;
+  private spritesX = 6; // Horizontal views (enough for yaw rotation)
+  private spritesY = 3; // Vertical views (minimal elevation variation)
   private atlasSize = 512;
   private hemisphere = true;
   private animationFPS = 6;
@@ -35,7 +36,7 @@ export class GlobalMobAtlasBuilder {
    * Add a mob variant to the atlas
    *
    * All variants must have the same:
-   * - spritesPerSide
+   * - spritesX and spritesY (grid dimensions)
    * - atlasSize
    * - hemisphere mode
    *
@@ -46,13 +47,23 @@ export class GlobalMobAtlasBuilder {
     // Infer atlas size from texture dimensions
     const incomingAtlasSize = bakeResult.atlasArray.image.width;
 
+    // Get asymmetric grid dimensions (with backwards compatibility)
+    const incomingSpritesX = bakeResult.spritesX ?? bakeResult.spritesPerSide;
+    const incomingSpritesY = bakeResult.spritesY ?? bakeResult.spritesPerSide;
+
     // Validate configuration matches
     if (this.bakeResults.length > 0) {
       const first = this.bakeResults[0];
-      if (bakeResult.spritesPerSide !== first.spritesPerSide) {
+      const firstSpritesX = first.spritesX ?? first.spritesPerSide;
+      const firstSpritesY = first.spritesY ?? first.spritesPerSide;
+
+      if (
+        incomingSpritesX !== firstSpritesX ||
+        incomingSpritesY !== firstSpritesY
+      ) {
         throw new Error(
-          `[GlobalMobAtlasBuilder] Sprites per side mismatch for ${bakeResult.modelId}: ` +
-            `expected ${first.spritesPerSide}, got ${bakeResult.spritesPerSide}`,
+          `[GlobalMobAtlasBuilder] Sprite grid mismatch for ${bakeResult.modelId}: ` +
+            `expected ${firstSpritesX}x${firstSpritesY}, got ${incomingSpritesX}x${incomingSpritesY}`,
         );
       }
       if (bakeResult.hemisphere !== first.hemisphere) {
@@ -61,7 +72,7 @@ export class GlobalMobAtlasBuilder {
             `expected ${first.hemisphere}, got ${bakeResult.hemisphere}`,
         );
       }
-      // CRITICAL: Validate atlas size matches (was missing!)
+      // CRITICAL: Validate atlas size matches
       if (incomingAtlasSize !== this.atlasSize) {
         throw new Error(
           `[GlobalMobAtlasBuilder] Atlas size mismatch for ${bakeResult.modelId}: ` +
@@ -79,7 +90,8 @@ export class GlobalMobAtlasBuilder {
       }
     } else {
       // First variant sets the configuration
-      this.spritesPerSide = bakeResult.spritesPerSide;
+      this.spritesX = incomingSpritesX;
+      this.spritesY = incomingSpritesY;
       this.hemisphere = bakeResult.hemisphere;
       this.animationFPS = bakeResult.animationFPS;
       this.atlasSize = incomingAtlasSize;
@@ -160,14 +172,16 @@ export class GlobalMobAtlasBuilder {
     atlasArray.needsUpdate = true;
 
     console.log(
-      `[GlobalMobAtlas] Created merged atlas: ${this.atlasSize}x${this.atlasSize}x${totalFrames}`,
+      `[GlobalMobAtlas] Created merged atlas: ${this.atlasSize}x${this.atlasSize}x${totalFrames} (${this.spritesX}x${this.spritesY} views = ${this.spritesX * this.spritesY} total)`,
     );
 
     return {
       atlasArray,
       totalFrames,
       variants,
-      spritesPerSide: this.spritesPerSide,
+      spritesPerSide: this.spritesX, // Backwards compatible
+      spritesX: this.spritesX,
+      spritesY: this.spritesY,
       hemisphere: this.hemisphere,
       animationFPS: this.animationFPS,
     };

@@ -42,3 +42,9 @@ export {
   cleanupEntityAnimatedHLOD,
   type AnimatedHLODState,
 } from "./AnimatedImpostorManager";
+
+// Mob impostor preloading (pre-bakes all mob types at load time)
+export {
+  prewarmMobImpostors,
+  getMobImpostorStats,
+} from "./MobImpostorPreloader";

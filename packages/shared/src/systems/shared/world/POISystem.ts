@@ -366,8 +366,9 @@ export class POISystem extends System {
     const towns = this.townSystem?.getTowns() ?? [];
     const waterThreshold = TERRAIN_CONSTANTS.WATER_THRESHOLD; // 9.0 - no fallback, use actual constant
     const maxAttempts = targetCount * 50; // More attempts needed for water edge finding
-    const searchRadius = 200; // Search radius for water from random point
-    const searchStepSize = 10; // Step size when searching for water edge
+    const searchRadius = 300; // Increased search radius for better water finding
+    const searchStepSize = 8; // Smaller steps for more precise edge detection
+    const searchDirections = 8; // Search in 8 cardinal/diagonal directions per attempt
 
     this.resetRandom(this.seed + 99999); // Unique seed offset for fishing spots
 
@@ -392,16 +393,20 @@ export class POISystem extends System {
         continue;
       }
 
-      // Search in a random direction for water edge
-      const searchAngle = this.random() * Math.PI * 2;
-      const waterEdge = this.findWaterEdge(
-        startX,
-        startZ,
-        searchAngle,
-        searchRadius,
-        searchStepSize,
-        waterThreshold,
-      );
+      // Search in multiple directions from each starting point to maximize chance of finding water
+      let waterEdge: { x: number; z: number } | null = null;
+      const baseAngle = this.random() * Math.PI * 2; // Random offset for variety
+      for (let dir = 0; dir < searchDirections && !waterEdge; dir++) {
+        const searchAngle = baseAngle + (dir / searchDirections) * Math.PI * 2;
+        waterEdge = this.findWaterEdge(
+          startX,
+          startZ,
+          searchAngle,
+          searchRadius,
+          searchStepSize,
+          waterThreshold,
+        );
+      }
 
       if (!waterEdge) continue;
 
@@ -418,12 +423,14 @@ export class POISystem extends System {
         continue;
       }
 
-      // Check distance from existing POIs and fishing spots
-      const minSpacing = this.config.minPOISpacing * 1.5; // Fishing spots need more spacing
-      const isTooCloseToOtherPOI = [...this.pois, ...pois].some(
-        (p) => dist2D(x, z, p.position.x, p.position.z) < minSpacing,
+      // Check distance from other fishing spots only
+      // Fishing spots are tied to water edges (natural features), so they only need
+      // spacing from each other, not from unrelated POIs like shrines or dungeons
+      const minFishingSpotSpacing = this.config.minPOISpacing * 0.75; // 150m between fishing spots
+      const isTooCloseToOtherFishingSpot = pois.some(
+        (p) => dist2D(x, z, p.position.x, p.position.z) < minFishingSpotSpacing,
       );
-      if (isTooCloseToOtherPOI) {
+      if (isTooCloseToOtherFishingSpot) {
         tooCloseToOtherPOI++;
         continue;
       }

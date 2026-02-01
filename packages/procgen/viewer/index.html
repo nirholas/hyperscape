@@ -300,6 +300,49 @@
             <span>Forest Trees:</span>
             <span id="forestTreeCount">0</span>
           </div>
+
+          <div class="section-divider"></div>
+
+          <h2>Leaf Clusters</h2>
+          <div class="checkbox-group">
+            <input type="checkbox" id="showClusters" />
+            <label for="showClusters">Show Clusters (LOD2)</label>
+          </div>
+
+          <div class="checkbox-group">
+            <input type="checkbox" id="showOctreeCells" />
+            <label for="showOctreeCells">Show Octree Cells</label>
+          </div>
+
+          <div class="checkbox-group">
+            <input type="checkbox" id="enableViewCulling" checked />
+            <label for="enableViewCulling">View-Dependent Culling</label>
+          </div>
+
+          <div class="checkbox-group">
+            <input type="checkbox" id="enableFrustumCulling" checked />
+            <label for="enableFrustumCulling">Frustum Culling</label>
+          </div>
+
+          <div class="control-group">
+            <label for="clusterDensity">Cluster Density (0-100%)</label>
+            <input type="range" id="clusterDensity" min="0" max="100" value="100" />
+            <span id="clusterDensityValue">100%</span>
+          </div>
+
+          <div class="control-group">
+            <label for="cullThreshold">View Cull Threshold (-1 to 0)</label>
+            <input type="range" id="cullThreshold" min="-100" max="0" value="-30" />
+            <span id="cullThresholdValue">-0.30</span>
+          </div>
+
+          <div class="stats-panel" style="margin-top: 8px;">
+            <p><span class="stat-label">Total Clusters</span> <span id="clusterCount">-</span></p>
+            <p><span class="stat-label">Visible</span> <span id="visibleClusters">-</span></p>
+            <p><span class="stat-label">Frustum Culled</span> <span id="frustumCulled">-</span></p>
+            <p><span class="stat-label">View Culled</span> <span id="viewCulled">-</span></p>
+            <p><span class="stat-label">Density Culled</span> <span id="densityCulled">-</span></p>
+          </div>
         </div>
 
         <div id="navigation-controls" style="display: none;">

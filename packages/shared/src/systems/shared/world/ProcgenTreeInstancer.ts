@@ -24,6 +24,7 @@ import THREE, {
   float,
   vec2,
   vec3,
+  vec4,
   add,
   sub,
   mul,
@@ -36,7 +37,13 @@ import THREE, {
   smoothstep,
   mix,
   atan,
+  mod,
+  max,
+  min,
+  step,
+  abs,
   positionLocal,
+  positionWorld,
   screenUV,
   viewportSize,
   uv,
@@ -45,6 +52,8 @@ import THREE, {
   MeshStandardNodeMaterial,
   Discard,
   If,
+  INFINITY,
+  EPSILON,
 } from "../../../extras/three/three";
 import type { World } from "../../../core/World";
 import {
@@ -69,12 +78,67 @@ const LOD_UPDATES_PER_FRAME = 50;
 const IMPOSTOR_SIZE = 1024;
 const HYSTERESIS_SQ = 25; // 5m buffer
 
-const LOD_DIST = { lod1: 30, lod2: 60, impostor: 120, cull: 200 };
+/**
+ * Tree LOD configuration - mobile-optimized defaults.
+ * Can be modified via setTreeLODConfig() before initialization.
+ *
+ * LOD levels:
+ * - LOD0 (0-25m): Trunk + first branches, full leaf clusters
+ * - LOD1 (25-50m): Trunk only, 50% leaf clusters
+ * - LOD2 (50-100m): Trunk only, 20% leaf clusters (80% culled)
+ * - Impostor (100-150m): Octahedral billboard
+ * - Culled (150m+): Not rendered
+ */
+export interface TreeLODConfig {
+  lod1: number; // Distance where LOD1 starts
+  lod2: number; // Distance where LOD2 starts
+  impostor: number; // Distance where impostor starts
+  cull: number; // Distance where trees are culled
+}
+
+// Default mobile-optimized LOD distances
+const DEFAULT_LOD_CONFIG: TreeLODConfig = {
+  lod1: 25,
+  lod2: 50,
+  impostor: 100,
+  cull: 150,
+};
+
+// Current LOD configuration (mutable)
+let LOD_CONFIG = { ...DEFAULT_LOD_CONFIG };
+
+/**
+ * Set custom LOD distances for tree rendering.
+ * Call this before game initialization to customize thresholds.
+ *
+ * @param config - Partial config to override defaults
+ */
+export function setTreeLODConfig(config: Partial<TreeLODConfig>): void {
+  LOD_CONFIG = { ...LOD_CONFIG, ...config };
+  // Recompute squared distances
+  LOD_DIST_SQ.lod1 = LOD_CONFIG.lod1 ** 2;
+  LOD_DIST_SQ.lod2 = LOD_CONFIG.lod2 ** 2;
+  LOD_DIST_SQ.impostor = LOD_CONFIG.impostor ** 2;
+  LOD_DIST_SQ.cull = LOD_CONFIG.cull ** 2;
+  console.log(`[TreeInstancer] LOD config updated:`, LOD_CONFIG);
+}
+
+/**
+ * Get current LOD configuration.
+ */
+export function getTreeLODConfig(): TreeLODConfig {
+  return { ...LOD_CONFIG };
+}
+
+// Legacy alias for backwards compatibility
+const LOD_DIST = LOD_CONFIG;
+
+// Pre-computed squared distances for fast comparisons
 const LOD_DIST_SQ = {
-  lod1: LOD_DIST.lod1 ** 2,
-  lod2: LOD_DIST.lod2 ** 2,
-  impostor: LOD_DIST.impostor ** 2,
-  cull: LOD_DIST.cull ** 2,
+  lod1: LOD_CONFIG.lod1 ** 2,
+  lod2: LOD_CONFIG.lod2 ** 2,
+  impostor: LOD_CONFIG.impostor ** 2,
+  cull: LOD_CONFIG.cull ** 2,
 };
 
 const WIND = {
@@ -84,6 +148,46 @@ const WIND = {
   spatialFreq: 0.08,
   gustSpeed: 0.4,
 };
+
+/**
+ * Leaf cluster density per LOD level.
+ * Using clusters everywhere for mobile performance:
+ * - LOD0: Full density (100%) - close-up view
+ * - LOD1: Half density (50%) - medium distance
+ * - LOD2: Sparse density (20%) - far distance
+ * - LOD3+: No clusters (impostors have baked leaves)
+ */
+export interface ClusterDensityConfig {
+  lod0: number; // 0-1 (1.0 = 100%)
+  lod1: number;
+  lod2: number;
+}
+
+const DEFAULT_CLUSTER_DENSITY: ClusterDensityConfig = {
+  lod0: 1.0, // 100% - full clusters at close range
+  lod1: 0.5, // 50% - half clusters at medium range
+  lod2: 0.2, // 20% - sparse clusters at far range
+};
+
+let CLUSTER_DENSITY = { ...DEFAULT_CLUSTER_DENSITY };
+
+/**
+ * Set custom cluster density per LOD level.
+ * @param config - Partial config to override defaults
+ */
+export function setClusterDensityConfig(
+  config: Partial<ClusterDensityConfig>,
+): void {
+  CLUSTER_DENSITY = { ...CLUSTER_DENSITY, ...config };
+  console.log(`[TreeInstancer] Cluster density config:`, CLUSTER_DENSITY);
+}
+
+/**
+ * Get current cluster density configuration.
+ */
+export function getClusterDensityConfig(): ClusterDensityConfig {
+  return { ...CLUSTER_DENSITY };
+}
 
 // ============================================================================
 // TYPES
@@ -98,8 +202,8 @@ interface TreeInstance {
   lodIndices: [number, number, number, number]; // [lod0, lod1, lod2, impostor] mesh indices
   transition: { from: number; to: number; start: number } | null;
   radius: number;
-  hasGlobalLeaves: boolean; // Whether individual leaves are in global buffer
-  hasGlobalClusters: boolean; // Whether leaf clusters are in global buffer (LOD2)
+  clusterLOD: number; // Current cluster LOD level (-1 = no clusters)
+  clusterDensity: number; // Current cluster density (0-1)
 }
 
 interface MeshData {
@@ -537,10 +641,14 @@ interface PresetClusterData {
   densities: number[];
   /** Leaf count per cluster (for size scaling) */
   leafCounts: number[];
+  /** Octree cell ID for each cluster (0-63 for 4x4x4 grid) */
+  octreeCellIds: number[];
   /** Average leaf color */
   color: THREE.Color;
   /** Total leaf count for stats */
   totalLeaves: number;
+  /** Bounding box used for octree cell assignment */
+  bounds: THREE.Box3;
 }
 
 /**
@@ -568,6 +676,7 @@ type ClusterNodeMaterial = THREE.MeshStandardNodeMaterial & {
     windStrength: { value: number };
     windDirection: { value: THREE.Vector3 };
     cameraPosition: { value: THREE.Vector3 };
+    cameraMatrix: { value: THREE.Matrix4 }; // MVP matrix for frustum culling
     alphaTest: { value: number };
   };
 };
@@ -581,9 +690,13 @@ class GlobalLeafClusterInstancer {
   private colors: Float32Array;
   private fades: Float32Array;
   private densities: Float32Array; // Alpha multiplier per cluster
+  private treeCenters: Float32Array; // Tree center position for view culling (x, y, z)
+  private cellIds: Float32Array; // Octree cell ID for visibility culling
   private colorAttr: THREE.InstancedBufferAttribute;
   private fadeAttr: THREE.InstancedBufferAttribute;
   private densityAttr: THREE.InstancedBufferAttribute;
+  private treeCenterAttr: THREE.InstancedBufferAttribute;
+  private cellIdAttr: THREE.InstancedBufferAttribute;
 
   // Bookkeeping
   private clusterMap: Map<string, number[]> = new Map();
@@ -598,6 +711,7 @@ class GlobalLeafClusterInstancer {
   private windStrength = 1;
   private windDir = new THREE.Vector3(1, 0, 0);
   private cameraPosition = new THREE.Vector3();
+  private mvpMatrix = new THREE.Matrix4(); // For frustum culling
 
   constructor(scene: THREE.Scene) {
     this.geometry = this.createClusterCardGeometry();
@@ -621,6 +735,8 @@ class GlobalLeafClusterInstancer {
     this.colors = new Float32Array(MAX_CLUSTER_INSTANCES * 3);
     this.fades = new Float32Array(MAX_CLUSTER_INSTANCES).fill(1);
     this.densities = new Float32Array(MAX_CLUSTER_INSTANCES).fill(1);
+    this.treeCenters = new Float32Array(MAX_CLUSTER_INSTANCES * 3); // x, y, z per cluster
+    this.cellIds = new Float32Array(MAX_CLUSTER_INSTANCES); // 0-63 cell ID
 
     this.colorAttr = new THREE.InstancedBufferAttribute(this.colors, 3);
     this.colorAttr.setUsage(THREE.DynamicDrawUsage);
@@ -633,6 +749,17 @@ class GlobalLeafClusterInstancer {
     this.densityAttr = new THREE.InstancedBufferAttribute(this.densities, 1);
     this.densityAttr.setUsage(THREE.DynamicDrawUsage);
     this.geometry.setAttribute("instanceDensity", this.densityAttr);
+
+    this.treeCenterAttr = new THREE.InstancedBufferAttribute(
+      this.treeCenters,
+      3,
+    );
+    this.treeCenterAttr.setUsage(THREE.DynamicDrawUsage);
+    this.geometry.setAttribute("instanceTreeCenter", this.treeCenterAttr);
+
+    this.cellIdAttr = new THREE.InstancedBufferAttribute(this.cellIds, 1);
+    this.cellIdAttr.setUsage(THREE.DynamicDrawUsage);
+    this.geometry.setAttribute("instanceCellId", this.cellIdAttr);
   }
 
   private createClusterCardGeometry(): THREE.BufferGeometry {
@@ -672,11 +799,12 @@ class GlobalLeafClusterInstancer {
     // TSL-based cluster material for WebGPU compatibility
     const material = new MeshStandardNodeMaterial() as ClusterNodeMaterial;
 
-    // Create uniforms for wind animation and rendering
+    // Create uniforms for wind animation, frustum culling, and rendering
     const uTime = uniform(0);
     const uWindStrength = uniform(1);
     const uWindDirection = uniform(new THREE.Vector3(1, 0, 0));
     const uCameraPosition = uniform(new THREE.Vector3());
+    const uCameraMatrix = uniform(new THREE.Matrix4()); // MVP matrix for frustum culling
     const uAlphaTest = uniform(0.15);
 
     // Store uniforms for external access
@@ -685,6 +813,7 @@ class GlobalLeafClusterInstancer {
       windStrength: uWindStrength,
       windDirection: uWindDirection,
       cameraPosition: uCameraPosition,
+      cameraMatrix: uCameraMatrix,
       alphaTest: uAlphaTest,
     };
 
@@ -692,6 +821,8 @@ class GlobalLeafClusterInstancer {
     const instanceColor = attribute("instanceColor", "vec3");
     const instanceFade = attribute("instanceFade", "float");
     const instanceDensity = attribute("instanceDensity", "float");
+    const instanceTreeCenter = attribute("instanceTreeCenter", "vec3");
+    const instanceCellId = attribute("instanceCellId", "float");
 
     // TSL hash function for variation
     const hash = Fn(([n]: [ReturnType<typeof float>]) => {
@@ -730,7 +861,9 @@ class GlobalLeafClusterInstancer {
       return add(octave1, octave2);
     });
 
-    // Position node with billboard and wind animation
+    // Position node with wind animation
+    // NOTE: Frustum and view-dependent culling temporarily disabled for debugging
+    // TODO: Re-enable once basic cluster rendering is confirmed working
     const positionNode = Fn(() => {
       const pos = positionLocal;
 
@@ -738,9 +871,16 @@ class GlobalLeafClusterInstancer {
       const idx = float(instanceIndex);
       const windPhase = mul(hash(idx), 6.28318);
 
+      // === CULLING DISABLED FOR DEBUGGING ===
+      // All clusters are visible - no frustum or view-dependent culling
+      const finalVisibility = float(1.0);
+
       // Height factor for wind (0 at bottom, 1 at top)
       const heightFactor = pos.y;
-      const windAmount = mul(mul(uWindStrength, heightFactor), 0.2);
+      const windAmount = mul(
+        mul(mul(uWindStrength, heightFactor), finalVisibility),
+        0.2,
+      );
 
       // Multi-frequency wind for natural look
       const wave1 = sin(add(mul(uTime, 2.0), windPhase));
@@ -756,7 +896,19 @@ class GlobalLeafClusterInstancer {
         0.1,
       );
 
-      return vec3(add(pos.x, windX), add(pos.y, windY), add(pos.z, windZ));
+      // Wind position with optional culling
+      const windPos = vec3(
+        add(pos.x, windX),
+        add(pos.y, windY),
+        add(pos.z, windZ),
+      );
+
+      // INFINITY offset culling (disabled for debugging - all clusters visible)
+      // When re-enabled: culled clusters get offset to infinity for early GPU clipping
+      const isCulled = step(finalVisibility, 0.01); // 1 if culled, 0 if visible
+      const offscreenOffset = mul(vec3(INFINITY, INFINITY, INFINITY), isCulled);
+
+      return add(windPos, offscreenOffset);
     })();
 
     material.positionNode = positionNode;
@@ -864,8 +1016,10 @@ class GlobalLeafClusterInstancer {
         sizes: [],
         densities: [],
         leafCounts: [],
+        octreeCellIds: [],
         color: leafColor.clone(),
         totalLeaves: 0,
+        bounds: new THREE.Box3(),
       });
       return;
     }
@@ -886,13 +1040,15 @@ class GlobalLeafClusterInstancer {
       sizes: clusterResult.sizes,
       densities: clusterResult.densities,
       leafCounts: clusterResult.leafCounts,
+      octreeCellIds: clusterResult.octreeCellIds,
       color: leafColor.clone(),
       totalLeaves: positions.length,
+      bounds: clusterResult.bounds,
     });
 
     console.log(
       `[LeafClusters] ${presetName}: ${positions.length} leaves → ${clusterResult.centers.length} clusters ` +
-        `(${(positions.length / clusterResult.centers.length).toFixed(1)} leaves/cluster avg)`,
+        `(${(positions.length / clusterResult.centers.length).toFixed(1)} leaves/cluster avg, 4x4x4 octree)`,
     );
   }
 
@@ -907,6 +1063,8 @@ class GlobalLeafClusterInstancer {
     sizes: Array<{ width: number; height: number }>;
     densities: number[];
     leafCounts: number[];
+    octreeCellIds: number[];
+    bounds: THREE.Box3;
   } {
     // Calculate bounds
     const bounds = new THREE.Box3();
@@ -1015,7 +1173,37 @@ class GlobalLeafClusterInstancer {
     const densityRange = Math.max(0.001, maxDensity - minDensity);
     const densities = rawDensities.map((d) => (d - minDensity) / densityRange);
 
-    return { centers, sizes, densities, leafCounts };
+    // Compute octree cell IDs for each cluster (4x4x4 = 64 cells)
+    const octreeCellIds = centers.map((center) =>
+      this.computeOctreeCellId(center, bounds),
+    );
+
+    return { centers, sizes, densities, leafCounts, octreeCellIds, bounds };
+  }
+
+  /**
+   * Compute octree cell ID for a position within bounds.
+   * Uses 4x4x4 grid = 64 cells (fits in 6 bits).
+   */
+  private computeOctreeCellId(
+    position: THREE.Vector3,
+    bounds: THREE.Box3,
+  ): number {
+    const size = new THREE.Vector3();
+    bounds.getSize(size);
+
+    // Normalize position to 0-1 range within bounds
+    const nx = size.x > 0 ? (position.x - bounds.min.x) / size.x : 0.5;
+    const ny = size.y > 0 ? (position.y - bounds.min.y) / size.y : 0.5;
+    const nz = size.z > 0 ? (position.z - bounds.min.z) / size.z : 0.5;
+
+    // Convert to cell indices (0-3)
+    const cx = Math.min(3, Math.floor(nx * 4));
+    const cy = Math.min(3, Math.floor(ny * 4));
+    const cz = Math.min(3, Math.floor(nz * 4));
+
+    // Pack into single number (0-63)
+    return cx + cy * 4 + cz * 16;
   }
 
   private addClusterFromIndices(
@@ -1060,7 +1248,15 @@ class GlobalLeafClusterInstancer {
   }
 
   /**
-   * Add clusters for a tree instance (called when entering LOD2).
+   * Add clusters for a tree instance with density-based culling.
+   *
+   * @param treeId - Unique tree identifier
+   * @param presetName - Tree preset name
+   * @param position - World position
+   * @param rotation - Y rotation in radians
+   * @param scale - Uniform scale
+   * @param density - Cluster density (0-1), defaults to 1.0 (all clusters)
+   * @param seed - Random seed for deterministic culling (defaults to hash of treeId)
    */
   addTree(
     treeId: string,
@@ -1068,6 +1264,8 @@ class GlobalLeafClusterInstancer {
     position: THREE.Vector3,
     rotation: number,
     scale: number,
+    density: number = 1.0,
+    seed?: number,
   ): void {
     const preset = this.presetClusters.get(presetName);
     if (!preset || preset.centers.length === 0) return;
@@ -1083,7 +1281,21 @@ class GlobalLeafClusterInstancer {
     );
     const tempScale = new THREE.Vector3();
 
+    // Deterministic seed from tree ID for consistent culling
+    const cullSeed = seed ?? this.hashString(treeId);
+
     for (let i = 0; i < preset.centers.length; i++) {
+      // Density-based stochastic culling using deterministic hash
+      // Each cluster has a consistent visibility threshold based on its index + tree seed
+      if (density < 1.0) {
+        const clusterHash = this.pcgHash(cullSeed + i * 12345);
+        const threshold = clusterHash / 0xffffffff; // Normalize to 0-1
+        if (threshold > density) {
+          // Skip this cluster (culled)
+          continue;
+        }
+      }
+
       const idx = this.allocateIndex();
       if (idx < 0) {
         console.warn("[LeafClusters] Max instances reached");
@@ -1120,6 +1332,14 @@ class GlobalLeafClusterInstancer {
 
       // Set fade to visible
       this.fades[idx] = 1;
+
+      // Set tree center for view-dependent culling
+      this.treeCenters[idx * 3] = position.x;
+      this.treeCenters[idx * 3 + 1] = position.y;
+      this.treeCenters[idx * 3 + 2] = position.z;
+
+      // Set octree cell ID for visibility culling
+      this.cellIds[idx] = preset.octreeCellIds[i] ?? 0;
 
       indices.push(idx);
     }
@@ -1161,6 +1381,27 @@ class GlobalLeafClusterInstancer {
     return this.nextIndex++;
   }
 
+  /**
+   * Simple string hash for deterministic culling.
+   */
+  private hashString(str: string): number {
+    let hash = 0;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash + str.charCodeAt(i)) | 0;
+    }
+    return hash >>> 0; // Ensure unsigned
+  }
+
+  /**
+   * PCG hash for deterministic random numbers.
+   */
+  private pcgHash(seed: number): number {
+    let state = seed >>> 0;
+    state = Math.imul(state ^ (state >>> 16), 0x85ebca6b);
+    state = Math.imul(state ^ (state >>> 13), 0xc2b2ae35);
+    return (state ^ (state >>> 16)) >>> 0;
+  }
+
   update(wind: Wind | null, dt: number, camera?: THREE.Camera): void {
     this.windTime += dt;
     if (wind) {
@@ -1168,10 +1409,21 @@ class GlobalLeafClusterInstancer {
       this.windStrength = wind.uniforms.windStrength.value;
     }
 
-    // Update camera position for billboarding
+    // Update camera position and matrix for frustum culling
     if (camera) {
       camera.getWorldPosition(this.cameraPosition);
       this.material.uniforms.cameraPosition.value.copy(this.cameraPosition);
+
+      // Compute MVP matrix for frustum culling (projection * view)
+      if ((camera as THREE.PerspectiveCamera).isPerspectiveCamera) {
+        const perspCam = camera as THREE.PerspectiveCamera;
+        perspCam.updateMatrixWorld();
+        this.mvpMatrix.multiplyMatrices(
+          perspCam.projectionMatrix,
+          perspCam.matrixWorldInverse,
+        );
+        this.material.uniforms.cameraMatrix.value.copy(this.mvpMatrix);
+      }
     }
 
     this.material.uniforms.time.value = this.windTime;
@@ -1183,6 +1435,8 @@ class GlobalLeafClusterInstancer {
       this.colorAttr.needsUpdate = true;
       this.fadeAttr.needsUpdate = true;
       this.densityAttr.needsUpdate = true;
+      this.treeCenterAttr.needsUpdate = true;
+      this.cellIdAttr.needsUpdate = true;
       this.mesh.count = this.count;
       this.dirty = false;
     }
@@ -1494,6 +1748,15 @@ function mergeGeometries(geos: THREE.BufferGeometry[]): THREE.BufferGeometry {
 export class ProcgenTreeInstancer {
   private static inst: ProcgenTreeInstancer | null = null;
 
+  /**
+   * Debug flag to show floating impostors above all trees.
+   * When enabled, creates a debug impostor 5m above each tree that is ALWAYS visible
+   * (no LOD, no distance culling) to help debug impostor texture issues.
+   *
+   * Toggle at runtime: ProcgenTreeInstancer.DEBUG_IMPOSTORS = true;
+   */
+  static DEBUG_IMPOSTORS = false;
+
   private world: World;
   private scene: THREE.Scene;
   private meshes = new Map<string, Map<LODKey, MeshData>>();
@@ -1517,6 +1780,15 @@ export class ProcgenTreeInstancer {
 
   // Track pending impostor bakes - trees will use LOD2/LOD1 fallback until ready
   private pendingImpostors = new Set<string>();
+
+  // Debug impostor meshes - separate from regular impostors, always visible
+  private debugImpostors = new Map<string, ImpostorMeshData>();
+  private debugImpostorCreated = new Set<string>(); // Track which presets have debug impostors
+  // Store bake results for runtime debug impostor creation
+  private impostorBakeResults = new Map<
+    string,
+    { atlasTexture: THREE.Texture; gridSizeX: number; gridSizeY: number }
+  >();
 
   private dummy = new THREE.Object3D();
   private zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -1622,7 +1894,8 @@ export class ProcgenTreeInstancer {
     // Use FULL bake mode to get normals + depth atlas for AAA quality:
     // - Normal atlas: dynamic lighting
     // - Depth atlas: depth-based frame blending (reduces ghosting/artifacts)
-    const result = await mgr.getOrCreate(`procgen_tree_${name}_v5`, src, {
+    // v6: Increased baking margin from 5% to 15% to prevent tree clipping
+    const result = await mgr.getOrCreate(`procgen_tree_${name}_v6`, src, {
       atlasSize: IMPOSTOR_SIZE,
       hemisphere: true,
       priority: BakePriority.NORMAL,
@@ -1633,6 +1906,13 @@ export class ProcgenTreeInstancer {
     });
 
     if (!result.atlasTexture) return;
+
+    // Store bake result for debug impostor creation
+    this.impostorBakeResults.set(name, {
+      atlasTexture: result.atlasTexture,
+      gridSizeX: result.gridSizeX,
+      gridSizeY: result.gridSizeY,
+    });
 
     const box = new THREE.Box3().setFromObject(src);
     const size = box.getSize(new THREE.Vector3());
@@ -1672,6 +1952,149 @@ export class ProcgenTreeInstancer {
       width: w,
       height: h,
     });
+
+    // If debug mode is enabled, also create a debug impostor
+    if (ProcgenTreeInstancer.DEBUG_IMPOSTORS) {
+      this.createDebugImpostor(name, result, w, h);
+    }
+  }
+
+  /**
+   * Create a debug impostor mesh that floats 5m above trees.
+   * Debug impostors are ALWAYS visible (no LOD, no distance culling).
+   * Uses debug mode 0 (normal rendering) to show actual texture content.
+   */
+  private createDebugImpostor(
+    name: string,
+    result: {
+      atlasTexture: THREE.Texture;
+      gridSizeX: number;
+      gridSizeY: number;
+    },
+    width: number,
+    height: number,
+  ): void {
+    if (this.debugImpostorCreated.has(name)) return;
+    this.debugImpostorCreated.add(name);
+
+    const geo = new THREE.PlaneGeometry(1, 1);
+
+    // Create debug material - use debugMode 0 for normal rendering
+    // This helps verify if the texture has content
+    const mat = createTSLImpostorMaterial({
+      atlasTexture: result.atlasTexture,
+      gridSizeX: result.gridSizeX,
+      gridSizeY: result.gridSizeY,
+      transparent: true,
+      depthWrite: true,
+      debugMode: 0, // Normal rendering to see actual texture
+    });
+    mat.side = THREE.DoubleSide;
+
+    const mesh = new THREE.InstancedMesh(geo, mat, MAX_INSTANCES);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    mesh.count = 0;
+    mesh.frustumCulled = false;
+    mesh.layers.set(1);
+    mesh.name = `Tree_${name}_debug_impostor`;
+    this.scene?.add(mesh);
+
+    this.debugImpostors.set(name, {
+      geometry: geo,
+      material: mat,
+      mesh,
+      idxToId: new Map(),
+      nextIdx: 0,
+      count: 0,
+      dirty: false,
+      width: width,
+      height: height,
+    });
+
+    console.log(
+      `[TreeInstancer] Created debug impostor for ${name}: ` +
+        `size=${width.toFixed(1)}x${height.toFixed(1)}, grid=${result.gridSizeX}x${result.gridSizeY}`,
+    );
+  }
+
+  /**
+   * Add a tree instance to the debug impostor mesh (floats 5m above tree).
+   */
+  private addToDebugImpostor(preset: string, inst: TreeInstance): void {
+    const data = this.debugImpostors.get(preset);
+    if (!data) return;
+
+    const idx = data.nextIdx++;
+    if (data.nextIdx >= MAX_INSTANCES) data.nextIdx = 0;
+
+    // Position 5m above the tree
+    this.dummy.position.copy(inst.position);
+    this.dummy.position.y += data.height * inst.scale * 0.5 + 5; // 5m above normal impostor position
+    this.dummy.rotation.set(0, 0, 0);
+    this.dummy.scale.set(data.width * inst.scale, data.height * inst.scale, 1);
+    this.dummy.updateMatrix();
+
+    data.mesh.setMatrixAt(idx, this.dummy.matrix);
+    data.idxToId.set(idx, inst.id);
+    data.count = Math.max(data.count, idx + 1);
+    data.mesh.count = data.count;
+    data.dirty = true;
+  }
+
+  /**
+   * Update debug impostors when DEBUG_IMPOSTORS flag is toggled on.
+   * Creates debug impostors for any presets that have regular impostors but no debug version.
+   */
+  private updateDebugImpostors(): void {
+    if (!ProcgenTreeInstancer.DEBUG_IMPOSTORS) {
+      // Hide debug impostors when disabled
+      for (const data of this.debugImpostors.values()) {
+        data.mesh.visible = false;
+      }
+      return;
+    }
+
+    // Show debug impostors when enabled
+    for (const data of this.debugImpostors.values()) {
+      data.mesh.visible = true;
+    }
+
+    // Check if we need to create debug impostors for any new presets
+    for (const [preset, impData] of this.impostors.entries()) {
+      if (!this.debugImpostorCreated.has(preset)) {
+        // Get stored bake result for this preset
+        const bakeResult = this.impostorBakeResults.get(preset);
+        if (!bakeResult) {
+          console.warn(
+            `[TreeInstancer] No bake result stored for ${preset}, cannot create debug impostor`,
+          );
+          continue;
+        }
+
+        // Create debug impostor from the stored bake result
+        this.createDebugImpostor(
+          preset,
+          bakeResult,
+          impData.width,
+          impData.height,
+        );
+
+        // Add all existing instances to the debug impostor
+        for (const { preset: p, inst } of this.instances.values()) {
+          if (p === preset) {
+            this.addToDebugImpostor(preset, inst);
+          }
+        }
+      }
+    }
+
+    // Update dirty debug impostor matrices
+    for (const data of this.debugImpostors.values()) {
+      if (data.dirty) {
+        data.mesh.instanceMatrix.needsUpdate = true;
+        data.dirty = false;
+      }
+    }
   }
 
   private createMeshData(
@@ -1870,91 +2293,74 @@ export class ProcgenTreeInstancer {
       lodIndices: [-1, -1, -1, -1],
       transition: null,
       radius: d ? Math.max(d.width, d.height) * scale * 0.5 : 5,
-      hasGlobalLeaves: false,
-      hasGlobalClusters: false,
+      clusterLOD: -1,
+      clusterDensity: 0,
     };
 
     this.instances.set(id, { preset, inst });
     this.updateLOD(preset, inst);
+
+    // If debug mode is enabled, also add to debug impostor
+    if (
+      ProcgenTreeInstancer.DEBUG_IMPOSTORS &&
+      this.debugImpostors.has(preset)
+    ) {
+      this.addToDebugImpostor(preset, inst);
+    }
+
     return true;
   }
 
+  // NOTE: Individual leaf handling removed - all LODs now use clusters for performance
+  // The GlobalLeafInstancer is kept for potential future use but not active
+  // See GlobalLeafClusterInstancer for current leaf rendering
+
   /**
-   * Add leaves for a tree to the global buffer.
-   * Transforms leaf positions to world space based on tree transform.
+   * Add leaf clusters for a tree with specified density.
+   * @param preset - Tree preset name
+   * @param inst - Tree instance
+   * @param density - Cluster density (0-1), defaults to 1.0
    */
-  private addTreeLeavesToGlobal(preset: string, inst: TreeInstance): void {
-    if (!this.globalLeaves || inst.hasGlobalLeaves) return;
+  private addTreeClustersToGlobal(
+    preset: string,
+    inst: TreeInstance,
+    density: number = 1.0,
+  ): void {
+    if (!this.globalClusters) return;
 
-    const leafData = this.presetLeafData.get(preset);
-    if (!leafData || leafData.transforms.length === 0) return;
-
-    // Build tree transform using compose for correct matrix construction
-    const treeMatrix = new THREE.Matrix4();
-    const quat = new THREE.Quaternion().setFromAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      inst.rotation,
-    );
-    const scaleVec = new THREE.Vector3(inst.scale, inst.scale, inst.scale);
-    treeMatrix.compose(inst.position, quat, scaleVec);
-
-    // Transform each leaf to world space
-    const worldTransforms: THREE.Matrix4[] = [];
-    for (const localTransform of leafData.transforms) {
-      const worldTransform = new THREE.Matrix4()
-        .copy(localTransform)
-        .premultiply(treeMatrix);
-      worldTransforms.push(worldTransform);
+    // Remove existing clusters first if present
+    if (inst.clusterLOD >= 0) {
+      this.globalClusters.removeTree(inst.id);
     }
 
-    // Add to global buffer
-    this.globalLeaves.addTreeLeaves(inst.id, worldTransforms, leafData.color);
-    inst.hasGlobalLeaves = true;
-  }
-
-  /**
-   * Remove leaves for a tree from the global buffer.
-   */
-  private removeTreeLeavesFromGlobal(inst: TreeInstance): void {
-    if (!this.globalLeaves || !inst.hasGlobalLeaves) return;
-
-    this.globalLeaves.removeTreeLeaves(inst.id);
-    inst.hasGlobalLeaves = false;
-  }
-
-  /**
-   * Add leaf clusters for a tree (LOD2).
-   */
-  private addTreeClustersToGlobal(preset: string, inst: TreeInstance): void {
-    if (!this.globalClusters || inst.hasGlobalClusters) return;
-
     // Clusters are pre-computed during preset registration
+    // Pass density for LOD-based stochastic culling
     this.globalClusters.addTree(
       inst.id,
       preset,
       inst.position,
       inst.rotation,
       inst.scale,
+      density,
     );
-    inst.hasGlobalClusters = true;
   }
 
   /**
    * Remove leaf clusters for a tree.
    */
   private removeTreeClustersFromGlobal(inst: TreeInstance): void {
-    if (!this.globalClusters || !inst.hasGlobalClusters) return;
+    if (!this.globalClusters || inst.clusterLOD < 0) return;
 
     this.globalClusters.removeTree(inst.id);
-    inst.hasGlobalClusters = false;
+    inst.clusterLOD = -1;
+    inst.clusterDensity = 0;
   }
 
   removeInstance(preset: string, id: string, _lodLevel = 0): void {
     const tracked = this.instances.get(id);
     if (!tracked) return;
 
-    // Remove leaves and clusters from global buffers
-    this.removeTreeLeavesFromGlobal(tracked.inst);
+    // Remove clusters from global buffer
     this.removeTreeClustersFromGlobal(tracked.inst);
 
     this.transitions.delete(id);
@@ -2014,31 +2420,44 @@ export class ProcgenTreeInstancer {
 
     if (target === cur) return;
 
-    // Handle global leaves and clusters visibility
-    // LOD0/LOD1: Individual leaves (high detail)
-    // LOD2: Leaf clusters (medium detail - bridges gap before impostor)
-    // LOD3+: Impostors or culled (no leaves/clusters)
-    const showIndividualLeaves = target === 0 || target === 1;
-    const hadIndividualLeaves = cur === 0 || cur === 1;
-    const showClusters = target === 2;
-    const hadClusters = cur === 2;
+    // Handle leaf clusters visibility (clusters used for ALL mesh LODs)
+    // LOD0: 100% cluster density
+    // LOD1: 50% cluster density
+    // LOD2: 20% cluster density
+    // LOD3+: No clusters (impostors have baked leaves)
+    const showClusters = target >= 0 && target <= 2;
+    const hadClusters = cur >= 0 && cur <= 2;
 
-    // Individual leaves transitions
-    if (showIndividualLeaves && !hadIndividualLeaves) {
-      // Transitioning to LOD with individual leaves - add them
-      this.addTreeLeavesToGlobal(preset, inst);
-    } else if (!showIndividualLeaves && hadIndividualLeaves) {
-      // Transitioning away from individual leaves - remove them
-      this.removeTreeLeavesFromGlobal(inst);
-    }
+    // Determine cluster density for target LOD
+    const targetDensity =
+      target === 0
+        ? CLUSTER_DENSITY.lod0
+        : target === 1
+          ? CLUSTER_DENSITY.lod1
+          : target === 2
+            ? CLUSTER_DENSITY.lod2
+            : 0;
 
-    // Cluster transitions (LOD2)
-    if (showClusters && !hadClusters) {
-      // Transitioning to LOD2 - add clusters
-      this.addTreeClustersToGlobal(preset, inst);
-    } else if (!showClusters && hadClusters) {
-      // Transitioning away from LOD2 - remove clusters
+    // Cluster transitions
+    if (showClusters) {
+      if (!hadClusters) {
+        // Entering mesh LODs - add clusters with target density
+        this.addTreeClustersToGlobal(preset, inst, targetDensity);
+        inst.clusterLOD = target;
+        inst.clusterDensity = targetDensity;
+      } else if (inst.clusterDensity !== targetDensity) {
+        // Changing LOD within mesh range - update cluster density
+        // For now, remove and re-add with new density (could optimize later)
+        this.removeTreeClustersFromGlobal(inst);
+        this.addTreeClustersToGlobal(preset, inst, targetDensity);
+        inst.clusterLOD = target;
+        inst.clusterDensity = targetDensity;
+      }
+    } else if (hadClusters) {
+      // Transitioning to impostor/culled - remove clusters
       this.removeTreeClustersFromGlobal(inst);
+      inst.clusterLOD = -1;
+      inst.clusterDensity = 0;
     }
 
     // Cross-fade only for LOD0 <-> LOD1 (both must be available)
@@ -2080,14 +2499,9 @@ export class ProcgenTreeInstancer {
       }
     }
 
-    // Handle cluster fades (LOD2)
-    if (lod === 2 && this.globalClusters && inst.hasGlobalClusters) {
+    // Handle cluster fades (all mesh LODs use clusters now)
+    if (lod <= 2 && this.globalClusters && inst.clusterLOD >= 0) {
       this.globalClusters.setFade(inst.id, fade);
-    }
-
-    // Handle global leaf fades (LOD0, LOD1)
-    if ((lod === 0 || lod === 1) && this.globalLeaves && inst.hasGlobalLeaves) {
-      this.globalLeaves.setTreeFade(inst.id, fade);
     }
   }
 
@@ -2224,6 +2638,9 @@ export class ProcgenTreeInstancer {
         d.dirty = false;
       }
     }
+
+    // Update debug impostors (when DEBUG_IMPOSTORS flag is enabled)
+    this.updateDebugImpostors();
 
     // Sync impostor lighting with scene sun light
     this.syncImpostorLighting();
@@ -2445,8 +2862,8 @@ export class ProcgenTreeInstancer {
     currentLOD: number;
     lodName: string;
     distance: number;
-    hasLeaves: boolean;
     hasClusters: boolean;
+    clusterDensity: number;
     position: THREE.Vector3;
     transition: { from: number; to: number; progress: number } | null;
   } | null {
@@ -2479,8 +2896,8 @@ export class ProcgenTreeInstancer {
       currentLOD: inst.currentLOD,
       lodName: lodNames[inst.currentLOD] ?? "Unknown",
       distance: dist,
-      hasLeaves: inst.hasGlobalLeaves,
-      hasClusters: inst.hasGlobalClusters,
+      hasClusters: inst.clusterLOD >= 0,
+      clusterDensity: inst.clusterDensity,
       position: inst.position.clone(),
       transition,
     };

@@ -1,10 +1,18 @@
+// @ts-nocheck - TSL functions use dynamic array destructuring that TypeScript doesn't support
 /**
- * ProceduralGrass.ts - GPU Grass with Heightmap Texture Sampling
+ * ProceduralGrass.ts - GPU Grass System (Revo Realms Parity)
  *
- * Architecture:
- * 1. TerrainSystem provides heightmap texture (baked from noise)
- * 2. Compute shader samples heightmap for grass Y positions
- * 3. Grass rendered as instanced billboards with wind animation
+ * EXACT port from Revo Realms GrassField.ts with heightmap integration.
+ *
+ * Key architecture (matching Revo Realms):
+ * - SpriteNodeMaterial for billboard grass
+ * - Two-buffer SSBO (vec4 + float) with bit-packed data
+ * - Visibility NOT used for opacity/scale (only for offscreen culling)
+ * - Wind stored as vec2 displacement
+ *
+ * Hyperscape additions:
+ * - Heightmap Y offset (Revo uses flat Y=0 terrain)
+ * - Integration with terrain system
  *
  * @module ProceduralGrass
  */
@@ -12,259 +20,586 @@
 import THREE, {
   uniform,
   Fn,
-  If,
-  MeshStandardNodeMaterial,
   float,
   vec3,
   vec4,
   vec2,
   sin,
-  cos,
-  mul,
-  add,
-  sub,
-  div,
-  max,
-  sqrt,
-  smoothstep,
   mix,
   uv,
-  abs,
   floor,
-  fract,
   instanceIndex,
-  atan,
+  hash,
+  smoothstep,
+  clamp,
+  PI2,
+  remap,
+  instancedArray,
+  texture,
+  fract,
+  time,
 } from "../../../extras/three/three";
+import { SpriteNodeMaterial } from "three/webgpu";
 import { System } from "../infrastructure/System";
 import type { World } from "../../../types";
-import { EventType } from "../../../types/events";
-import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
-import {
-  TERRAIN_CONSTANTS as TERRAIN_SHADER_CONSTANTS,
-  generateNoiseTexture,
-  sampleNoiseAtPosition,
-} from "./TerrainShader";
-import type { FlatZone } from "../../../types/world/terrain";
-
-const { storage } = THREE.TSL;
+import { tslUtils } from "../../../utils/TSLUtils";
+import { windManager } from "./Wind";
 
 // ============================================================================
-// INTERFACES
+// CONFIGURATION - Matches Revo Realms exactly
 // ============================================================================
 
-interface TerrainSystemInterface {
-  getHeightAt?(worldX: number, worldZ: number): number;
-  getHeightmapTexture?(): THREE.DataTexture | null;
-  getSlopeAt?(worldX: number, worldZ: number): number;
-  isInFlatZone?(worldX: number, worldZ: number): boolean;
-  getFlatZoneAt?(worldX: number, worldZ: number): FlatZone | null;
-}
+const getConfig = () => {
+  const BLADE_WIDTH = 0.1;
+  const BLADE_HEIGHT = 1.45;
+  const TILE_SIZE = 50;
+  const BLADES_PER_SIDE = 512;
 
-interface RoadNetworkSystemInterface {
-  getDistanceToNearestRoad?(worldX: number, worldZ: number): number;
-  config?: { roadWidth: number };
-}
+  return {
+    BLADE_WIDTH,
+    BLADE_HEIGHT,
+    BLADE_BOUNDING_SPHERE_RADIUS: BLADE_HEIGHT,
+    TILE_SIZE,
+    TILE_HALF_SIZE: TILE_SIZE / 2,
+    BLADES_PER_SIDE,
+    COUNT: BLADES_PER_SIDE * BLADES_PER_SIDE, // 262,144
+    SPACING: TILE_SIZE / BLADES_PER_SIDE,
+    WORKGROUP_SIZE: 256,
+    SEGMENTS: 5, // Geometry segments
+  };
+};
 
-interface BuildingCollisionService {
-  queryCollision: (
-    tileX: number,
-    tileZ: number,
-    floorIndex: number,
-  ) => { isInsideBuilding: boolean };
-}
-
-// ============================================================================
-// CONFIGURATION
-// ============================================================================
+const config = getConfig();
 
 // ============================================================================
-// GRASS CONFIGURATION - Dense near, extends to 150m
-// ============================================================================
-// Smaller cells for denser near-camera coverage
-const SUB_CELLS_PER_AXIS = 8; // 8×8 = 64 blades per cell
-const SUB_CELLS_TOTAL = SUB_CELLS_PER_AXIS * SUB_CELLS_PER_AXIS; // 64
-const MAX_INSTANCES = 3000000; // 3M instances
-const GRID_CELLS = Math.floor(Math.sqrt(MAX_INSTANCES / SUB_CELLS_TOTAL)); // ~216 cells
-const CELL_SIZE = 0.7; // 0.7m cells = tighter packing near camera
-// Coverage: 216 * 0.7 = ~151m total, ~75m radius
-const GRID_RADIUS = (GRID_CELLS * CELL_SIZE) / 2;
-
-// Jitter amount: 200% of cell size for natural overlap
-const JITTER_AMOUNT = 2.0;
-
-// Moderate falloff - very dense near, gradual thin at distance
-// At 0.08: 100% at 0m, 45% at 10m, 20% at 20m, 4% at 40m
-const DENSITY_FALLOFF_RATE = 0.08;
-
-const GRASS_CONFIG = {
-  MAX_INSTANCES: GRID_CELLS * GRID_CELLS * SUB_CELLS_TOTAL,
-  GRID_CELLS,
-  GRID_RADIUS,
-  CELL_SIZE,
-  SUB_CELLS_PER_AXIS,
-  SUB_CELLS_TOTAL,
-  DENSITY_FALLOFF_RATE,
-  BLADE_HEIGHT: 0.6,
-  BLADE_WIDTH: 0.15,
-  FADE_START: 50,
-  FADE_END: 150,
-  WATER_LEVEL: TERRAIN_CONSTANTS.WATER_CUTOFF,
-  COMPUTE_UPDATE_THRESHOLD: 2,
-  HEIGHTMAP_SIZE: 1024,
-  HEIGHTMAP_WORLD_SIZE: 800,
-  MAX_HEIGHT: 50,
-  WIND_SPEED: 0.3,
-  WIND_STRENGTH: 0.15,
-  WIND_FREQUENCY: 0.06,
-  GUST_SPEED: 0.08,
-  FLUTTER_INTENSITY: 0.04,
-  MAX_DISPLACERS: 8,
-  ROAD_FADE_WIDTH: 2.0, // Grass fade distance beyond road edge (meters)
-} as const;
-
-// ============================================================================
-// GRASS BLADE GEOMETRY
+// UNIFORMS - Matches Revo Realms exactly
 // ============================================================================
 
-function createGrassTuftGeometry(): THREE.BufferGeometry {
-  const geometry = new THREE.BufferGeometry();
-  const segments = 4; // More segments for smooth curve
+const uniforms = {
+  uPlayerPosition: uniform(new THREE.Vector3(0, 0, 0)),
+  uCameraMatrix: uniform(new THREE.Matrix4()),
+  uPlayerDeltaXZ: uniform(new THREE.Vector2(0, 0)),
+  uCameraForward: uniform(new THREE.Vector3(0, 0, 0)),
+  // Scale
+  uBladeMinScale: uniform(0.75),
+  uBladeMaxScale: uniform(1.5),
+  // Trail
+  uTrailGrowthRate: uniform(0.04),
+  uTrailMinScale: uniform(0.5),
+  uTrailRadius: uniform(1),
+  uTrailRadiusSquared: uniform(1),
+  uKDown: uniform(0.8),
+  // Wind
+  uWindStrength: uniform(1.25),
+  uWindSpeed: uniform(0.25),
+  uvWindScale: uniform(1.75),
+  // Color
+  uBaseColor: uniform(new THREE.Color().setRGB(0.07, 0.07, 0)),
+  uTipColor: uniform(new THREE.Color().setRGB(0.23, 0.11, 0.05)),
+  uAoScale: uniform(1.5),
+  uAoRimSmoothness: uniform(5),
+  uAoRadius: uniform(20),
+  uAoRadiusSquared: uniform(20 * 20),
+  uColorMixFactor: uniform(1),
+  uColorVariationStrength: uniform(1.6),
+  uWindColorStrength: uniform(0.6),
+  uBaseWindShade: uniform(0.4),
+  uBaseShadeHeight: uniform(1.25),
+  // Stochastic keep
+  uR0: uniform(45),
+  uR1: uniform(75),
+  uPMin: uniform(0.1),
+  // Rotation
+  uBaseBending: uniform(1.25),
+};
 
-  // Single blade: (segments + 1) * 2 vertices
-  const verticesPerBlade = (segments + 1) * 2;
-  const trianglesPerBlade = segments * 2;
+// Noise texture for wind and position variation
+let noiseAtlasTexture: THREE.Texture | null = null;
 
-  const positions = new Float32Array(verticesPerBlade * 3);
-  const uvs = new Float32Array(verticesPerBlade * 2);
-  const normals = new Float32Array(verticesPerBlade * 3);
-  const indices = new Uint16Array(trianglesPerBlade * 3);
+// Heightmap texture for terrain Y offset
+let heightmapTexture: THREE.Texture | null = null;
+let heightmapMax = 100;
 
-  // Generate single blade vertices (tapered from base to tip)
-  // Blade lies flat in XY plane - shader rotates it to face camera
-  for (let i = 0; i <= segments; i++) {
-    const t = i / segments; // 0 at base, 1 at tip
-    const y = t;
+// ============================================================================
+// GRASS SSBO - Two-buffer bit-packed data structure (Revo Realms exact)
+// ============================================================================
+// Buffer1 (vec4):
+//   x -> offsetX
+//   y -> offsetZ
+//   z -> 0/12 windX - 12/12 windZ
+//   w -> 0/8 current scale - 8/8 original scale - 16/1 shadow - 17/1 visibility - 18/6 wind noise factor
+//
+// Buffer2 (float):
+//   0/4 position based noise
 
-    // Blade tapers toward tip - organic quadratic taper
-    const taper = 1.0 - t * t; // Quadratic taper for natural look
-    const width = taper * 0.5;
+type InstancedArrayBuffer = ReturnType<typeof instancedArray>;
 
-    // Left vertex (negative X)
-    const leftIdx = i * 2;
-    positions[leftIdx * 3 + 0] = -width; // x
-    positions[leftIdx * 3 + 1] = y; // y (height)
-    positions[leftIdx * 3 + 2] = 0; // z
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call */
+// @ts-nocheck - TSL functions use dynamic typing that TypeScript can't understand
+class GrassSsbo {
+  private buffer1: InstancedArrayBuffer;
+  private buffer2: InstancedArrayBuffer;
 
-    uvs[leftIdx * 2 + 0] = 0; // u = 0 at left edge
-    uvs[leftIdx * 2 + 1] = t; // v = height
-
-    normals[leftIdx * 3 + 0] = 0;
-    normals[leftIdx * 3 + 1] = 0;
-    normals[leftIdx * 3 + 2] = 1; // Face forward (will be rotated by shader)
-
-    // Right vertex (positive X)
-    const rightIdx = i * 2 + 1;
-    positions[rightIdx * 3 + 0] = width; // x
-    positions[rightIdx * 3 + 1] = y; // y (height)
-    positions[rightIdx * 3 + 2] = 0; // z
-
-    uvs[rightIdx * 2 + 0] = 1; // u = 1 at right edge
-    uvs[rightIdx * 2 + 1] = t;
-
-    normals[rightIdx * 3 + 0] = 0;
-    normals[rightIdx * 3 + 1] = 0;
-    normals[rightIdx * 3 + 2] = 1;
+  constructor() {
+    this.buffer1 = instancedArray(config.COUNT, "vec4");
+    this.buffer2 = instancedArray(config.COUNT, "float");
+    this.computeUpdate.onInit(({ renderer }) => {
+      renderer.computeAsync(this.computeInit);
+    });
   }
 
-  // Generate indices
-  let idx = 0;
-  for (let i = 0; i < segments; i++) {
-    const base = i * 2;
-    // First triangle (CCW)
-    indices[idx++] = base;
-    indices[idx++] = base + 2;
-    indices[idx++] = base + 1;
-    // Second triangle (CCW)
-    indices[idx++] = base + 1;
-    indices[idx++] = base + 2;
-    indices[idx++] = base + 3;
+  get computeBuffer1(): InstancedArrayBuffer {
+    return this.buffer1;
   }
 
-  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
-  geometry.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeBoundingSphere();
+  get computeBuffer2(): InstancedArrayBuffer {
+    return this.buffer2;
+  }
 
-  return geometry;
+  // Unpacking functions (Revo Realms exact)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getWind: any = Fn(
+    // @ts-expect-error TSL array destructuring
+    ([data = vec4(0)]) => {
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      const x = tslUtils.unpackUnits(data.z, 0, 12, -2, 2);
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      const z = tslUtils.unpackUnits(data.z, 12, 12, -2, 2);
+      return vec2(x, z);
+    },
+  );
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getScale: any = Fn(([data = vec4(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.unpackUnits(
+      data.w,
+      0,
+      8,
+      uniforms.uTrailMinScale,
+      uniforms.uBladeMaxScale,
+    );
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getOriginalScale: any = Fn(([data = vec4(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.unpackUnits(
+      data.w,
+      8,
+      8,
+      uniforms.uBladeMinScale,
+      uniforms.uBladeMaxScale,
+    );
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getVisibility: any = Fn(([data = vec4(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.unpackFlag(data.w, 17);
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getWindNoise: any = Fn(([data = vec4(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.unpackUnit(data.w, 18, 6);
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getPositionNoise: any = Fn(([data = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.unpackUnit(data, 0, 4);
+  });
+
+  // Packing functions (Revo Realms exact)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setWind: any = Fn(([data = vec4(0), value = vec2(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.z = tslUtils.packUnits(data.z, 0, 12, value.x, -2, 2);
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.z = tslUtils.packUnits(data.z, 12, 12, value.y, -2, 2);
+    return data;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setScale: any = Fn(([data = vec4(0), value = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.w = tslUtils.packUnits(
+      data.w,
+      0,
+      8,
+      value,
+      uniforms.uTrailMinScale,
+      uniforms.uBladeMaxScale,
+    );
+    return data;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setOriginalScale: any = Fn(([data = vec4(0), value = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.w = tslUtils.packUnits(
+      data.w,
+      8,
+      8,
+      value,
+      uniforms.uBladeMinScale,
+      uniforms.uBladeMaxScale,
+    );
+    return data;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setVisibility: any = Fn(([data = vec4(0), value = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.w = tslUtils.packFlag(data.w, 17, value);
+    return data;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setWindNoise: any = Fn(([data = vec4(0), value = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    data.w = tslUtils.packUnit(data.w, 18, 6, value);
+    return data;
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private setPositionNoise: any = Fn(([data = float(0), value = float(0)]) => {
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+    return tslUtils.packUnit(data, 0, 4, value);
+  });
+
+  // Compute Init - Revo Realms exact
+  computeInit = Fn(() => {
+    const data1 = this.buffer1.element(instanceIndex);
+    const data2 = this.buffer2.element(instanceIndex);
+
+    // Position XZ in grid
+    const row = floor(float(instanceIndex).div(config.BLADES_PER_SIDE));
+    const col = float(instanceIndex).mod(config.BLADES_PER_SIDE);
+    const randX = hash(instanceIndex.add(4321));
+    const randZ = hash(instanceIndex.add(1234));
+    const offsetX = col
+      .mul(config.SPACING)
+      .sub(config.TILE_HALF_SIZE)
+      .add(randX.mul(config.SPACING * 0.5));
+    const offsetZ = row
+      .mul(config.SPACING)
+      .sub(config.TILE_HALF_SIZE)
+      .add(randZ.mul(config.SPACING * 0.5));
+
+    // UV for noise texture sampling
+    const _uv = vec3(offsetX, 0, offsetZ)
+      .xz.add(config.TILE_HALF_SIZE)
+      .div(config.TILE_SIZE)
+      .abs()
+      .fract();
+
+    // Sample noise texture for position jitter (or use hash fallback)
+    let noiseR: ReturnType<typeof float>;
+    let noiseB: ReturnType<typeof float>;
+
+    if (noiseAtlasTexture) {
+      const noise = texture(noiseAtlasTexture, _uv);
+      noiseR = noise.r;
+      noiseB = noise.b;
+    } else {
+      noiseR = hash(instanceIndex.mul(0.73));
+      noiseB = hash(instanceIndex.mul(0.91));
+    }
+
+    const noiseX = noiseR.sub(0.5).mul(17).fract();
+    const noiseZ = noiseB.sub(0.5).mul(13).fract();
+    data1.x = offsetX.add(noiseX);
+    data1.y = offsetZ.add(noiseZ);
+
+    data2.assign(this.setPositionNoise(data2, noiseR));
+
+    // Scale - random within range (shaped distribution)
+    const n = noiseB;
+    const shaped = n.mul(n);
+    const randomScale = remap(
+      shaped,
+      0,
+      1,
+      uniforms.uBladeMinScale,
+      uniforms.uBladeMaxScale,
+    );
+    data1.assign(this.setScale(data1, randomScale));
+    data1.assign(this.setOriginalScale(data1, randomScale));
+
+    // Set visibility to 1 initially (visible)
+    data1.assign(this.setVisibility(data1, float(1)));
+  })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
+
+  // Compute Wind - Revo Realms exact
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private computeWind: any = Fn(
+    ([prevWindXZ = vec2(0), worldPos = vec3(0), positionNoise = float(0)]) => {
+      const intensity = smoothstep(0.2, 0.5, windManager.uIntensity);
+      const dir = windManager.uDirection.negate();
+      const strength = uniforms.uWindStrength.add(intensity);
+
+      // Gentle per-instance speed jitter (±10%)
+      const speed = uniforms.uWindSpeed.mul(
+        positionNoise.remap(0, 1, 0.95, 2.05),
+      );
+
+      // Base UV + scroll
+      const uvBase = worldPos.xz.mul(0.01).mul(uniforms.uvWindScale);
+      const scroll = dir.mul(speed).mul(time);
+
+      // Sample noise textures for wind
+      const uvA = uvBase.add(scroll);
+      const uvB = uvBase.mul(1.37).add(scroll.mul(1.11));
+
+      // Use texture if available, otherwise hash fallback
+      const sampleNoise = (uvCoord: ReturnType<typeof vec2>) => {
+        if (noiseAtlasTexture) {
+          return texture(noiseAtlasTexture, uvCoord).mul(2.0).sub(1.0);
+        }
+        return vec3(hash(uvCoord.x.add(uvCoord.y.mul(100))))
+          .mul(2.0)
+          .sub(1.0);
+      };
+
+      const nA = sampleNoise(uvA);
+      const nB = sampleNoise(uvB);
+
+      // Mix noises
+      const mixRand = fract(sin(positionNoise.mul(12.9898)).mul(78.233));
+      const mixTime = sin(time.mul(0.4).add(positionNoise.mul(0.1))).mul(0.25);
+      const w = clamp(mixRand.add(mixTime), 0.2, 0.8);
+      const n = mix(nA, nB, w);
+
+      const baseMag = n.x.mul(strength);
+      const gustMag = n.y.mul(strength).mul(0.35);
+      const windFactor = baseMag.add(gustMag);
+
+      const target = dir.mul(windFactor);
+      const k = mix(0.08, 0.25, n.z.abs());
+      const newWind = prevWindXZ.add(target.sub(prevWindXZ).mul(k));
+
+      return vec3(newWind, windFactor);
+    },
+  );
+
+  // Compute Trail Scale - Revo Realms exact
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private computeTrailScale: any = Fn(
+    ([
+      originalScale = float(0),
+      currentScale = float(0),
+      isStepped = float(0),
+    ]) => {
+      const up = currentScale.add(
+        originalScale.sub(currentScale).mul(uniforms.uTrailGrowthRate),
+      );
+      const down = currentScale.add(
+        uniforms.uTrailMinScale.sub(currentScale).mul(uniforms.uKDown),
+      );
+      const blended = mix(up, down, isStepped);
+      return clamp(blended, uniforms.uTrailMinScale, originalScale);
+    },
+  );
+
+  // Compute Update - Revo Realms exact (no visibility computation)
+  computeUpdate = Fn(() => {
+    const data1 = this.buffer1.element(instanceIndex);
+
+    // Position
+    const pos = vec3(data1.x, 0, data1.y);
+    const worldPos = pos.add(uniforms.uPlayerPosition);
+
+    const data2 = this.buffer2.element(instanceIndex);
+
+    // Compute distance to player
+    const diff = worldPos.xz.sub(uniforms.uPlayerPosition.xz);
+    const distSq = diff.dot(diff);
+
+    // Check if player is on ground
+    const isPlayerGrounded = clamp(
+      float(1).sub(uniforms.uPlayerPosition.y.sub(worldPos.y).abs().div(2)),
+      0,
+      1,
+    );
+
+    const inner = uniforms.uTrailRadiusSquared.mul(0.35);
+    const outer = uniforms.uTrailRadiusSquared;
+    const contact = float(1.0)
+      .sub(smoothstep(inner, outer, distSq))
+      .mul(isPlayerGrounded);
+
+    // Trail scale
+    const currentScale = this.getScale(data1);
+    const originalScale = this.getOriginalScale(data1);
+    const newScale = this.computeTrailScale(
+      originalScale,
+      currentScale,
+      contact,
+    );
+    data1.assign(this.setScale(data1, newScale));
+
+    // Wind
+    const positionNoise = this.getPositionNoise(data2);
+    const prevWind = this.getWind(data1);
+    const newWind = this.computeWind(prevWind, worldPos, positionNoise);
+    data1.assign(this.setWind(data1, newWind.xy));
+    data1.assign(this.setWindNoise(data1, newWind.z));
+  })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
 }
 
 // ============================================================================
-// GPU GRASS SYSTEM
+// GRASS MATERIAL - SpriteNodeMaterial (Revo Realms exact + heightmap)
 // ============================================================================
 
-// Storage buffer type from TSL
-type TSLStorageBuffer = ReturnType<typeof storage>;
-type TSLTextureNode = ReturnType<typeof THREE.TSL.texture>;
+class GrassMaterial extends SpriteNodeMaterial {
+  private ssbo: GrassSsbo;
+
+  constructor(ssbo: GrassSsbo) {
+    super();
+    this.ssbo = ssbo;
+    this.createGrassMaterial();
+  }
+
+  private createGrassMaterial(): void {
+    // Revo Realms exact settings
+    this.precision = "lowp";
+    this.transparent = false;
+    this.alphaTest = 0.9;
+
+    // Get data from SSBO
+    const data1 = this.ssbo.computeBuffer1.element(instanceIndex);
+    const data2 = this.ssbo.computeBuffer2.element(instanceIndex);
+    const offsetX = data1.x;
+    const offsetZ = data1.y;
+    const windXZ = this.ssbo.getWind(data1);
+    const scaleY = this.ssbo.getScale(data1);
+    const isVisible = this.ssbo.getVisibility(data1);
+    const windNoiseFactor = this.ssbo.getWindNoise(data1);
+    const positionNoise = this.ssbo.getPositionNoise(data2);
+
+    // OPACITY - NOT SET (Revo Realms has this commented out)
+    // this.opacityNode = isVisible;
+
+    // SCALE - NO visibility multiplication (Revo Realms exact)
+    const scaleX = positionNoise.add(0.25);
+    const bladeScale = vec3(scaleX, scaleY, 1);
+    this.scaleNode = bladeScale;
+
+    // ROTATION - Revo Realms exact
+    const h = uv().y;
+    const bendProfile = h.mul(h).mul(uniforms.uBaseBending);
+    const instanceNoise = hash(instanceIndex.add(196.4356)).sub(0.5).mul(0.25);
+    const baseBending = positionNoise
+      .sub(0.5)
+      .mul(0.25)
+      .add(instanceNoise)
+      .mul(bendProfile);
+    this.rotationNode = vec3(baseBending, 0, 0);
+
+    // POSITION
+    // Offscreen culling using 1e6 (Revo Realms exact)
+    const offscreenOffset = uniforms.uCameraForward
+      .mul(1e6)
+      .mul(float(1).sub(isVisible));
+
+    // Get Y offset from heightmap (HYPERSCAPE ADDITION)
+    let offsetY: ReturnType<typeof float>;
+    if (heightmapTexture) {
+      // Sample heightmap at world position
+      const worldX = offsetX.add(uniforms.uPlayerPosition.x);
+      const worldZ = offsetZ.add(uniforms.uPlayerPosition.z);
+      const hmapUv = tslUtils.computeMapUvByPosition(vec2(worldX, worldZ));
+      const fixedUv = vec2(hmapUv.x, float(1).sub(hmapUv.y));
+      offsetY = texture(heightmapTexture, fixedUv).r.mul(heightmapMax);
+    } else {
+      // No heightmap - use player Y as base
+      offsetY = uniforms.uPlayerPosition.y;
+    }
+
+    // Base offset with heightmap Y
+    const bladePosition = vec3(
+      offsetX,
+      offsetY.sub(uniforms.uPlayerPosition.y),
+      offsetZ,
+    );
+
+    // Sway effect - Revo Realms exact (uses time instead of gameTime)
+    const randomPhase = positionNoise.mul(PI2);
+    const swayAmount = sin(time.mul(5).add(randomPhase)).mul(0.15);
+    const swayFactor = uv().y.mul(windNoiseFactor);
+    const swayOffset = swayAmount.mul(swayFactor);
+
+    // Flutter offset - Revo Realms exact
+    const dirXZ = windManager.uDirection;
+    const perp = vec2(dirXZ.y.negate(), dirXZ.x);
+    const phase = hash(instanceIndex).mul(PI2);
+    const flutter = sin(
+      time.mul(uniforms.uWindSpeed.mul(1.7)).add(phase.mul(1.3)),
+    )
+      .mul(0.06)
+      .mul(bendProfile);
+    const flutterOffset = vec3(perp.x, 0.0, perp.y).mul(flutter);
+
+    // Wind offset - Revo Realms exact
+    const windOffset = vec3(windXZ.x, 0.0, windXZ.y).mul(bendProfile);
+
+    const pos = bladePosition
+      .add(offscreenOffset)
+      .add(swayOffset)
+      .add(flutterOffset)
+      .add(windOffset);
+    this.positionNode = pos;
+
+    // COLOR + AO - Revo Realms exact
+    const r2 = offsetX.mul(offsetX).add(offsetZ.mul(offsetZ));
+    const near = float(1).sub(smoothstep(0, uniforms.uAoRadiusSquared, r2));
+    const x = uv().x;
+    const edge = x.mul(2.0).sub(1.0).abs();
+    const rim = smoothstep(
+      uniforms.uAoRimSmoothness.negate(),
+      uniforms.uAoRimSmoothness,
+      edge,
+    );
+    const hWeight = float(1).sub(smoothstep(0.1, 0.85, h));
+    const aoStrength = uniforms.uAoScale.mul(0.25);
+    const ao = float(1).sub(aoStrength.mul(near.mul(rim).mul(hWeight)));
+
+    // Diffuse color - Revo Realms exact
+    const colorProfile = h.mul(uniforms.uColorMixFactor).clamp();
+    const jitter = positionNoise.mul(uniforms.uColorVariationStrength);
+    const baseColorJittered = uniforms.uBaseColor.mul(jitter);
+    const baseToTip = mix(baseColorJittered, uniforms.uTipColor, colorProfile);
+    const baseMask = float(1).sub(
+      smoothstep(0.0, uniforms.uBaseShadeHeight, h),
+    );
+    const windAo = mix(
+      1.0,
+      float(1).sub(uniforms.uBaseWindShade),
+      baseMask.mul(smoothstep(0.0, 1.0, swayFactor)),
+    );
+    this.colorNode = baseToTip.mul(windAo).mul(ao);
+  }
+}
+
+// ============================================================================
+// MAIN GRASS SYSTEM
+// ============================================================================
 
 export class ProceduralGrassSystem extends System {
   private mesh: THREE.InstancedMesh | null = null;
+  private ssbo: GrassSsbo | null = null;
   private renderer: THREE.WebGPURenderer | null = null;
-
-  // GPU storage buffers
-  private positionsBuffer: TSLStorageBuffer | null = null;
-  private variationsBuffer: TSLStorageBuffer | null = null;
-
-  // Textures
-  private heightmapTexture: THREE.DataTexture | null = null;
-  private heightmapTextureNode: TSLTextureNode | null = null;
-  private noiseTexture: THREE.DataTexture | null = null;
-  private noiseTextureNode: TSLTextureNode | null = null;
-
-  private computeNode: THREE.ComputeNode | null = null;
-
-  // Core uniforms
-  private uCameraPos = uniform(new THREE.Vector3());
-  private uTime = uniform(0);
-  private uGridOrigin = uniform(new THREE.Vector2());
-
-  // Controllable uniforms
-  private uWindStrength = uniform(GRASS_CONFIG.WIND_STRENGTH as number);
-  private uWindSpeed = uniform(GRASS_CONFIG.WIND_SPEED as number);
-  private uBladeHeight = uniform(GRASS_CONFIG.BLADE_HEIGHT as number);
-  private uBladeWidth = uniform(GRASS_CONFIG.BLADE_WIDTH as number);
-  private uFadeStart = uniform(GRASS_CONFIG.FADE_START as number);
-  private uFadeEnd = uniform(GRASS_CONFIG.FADE_END as number);
-
-  // Frustum culling - camera forward direction for skipping grass behind camera
-  private uCameraForward = uniform(new THREE.Vector3(0, 0, -1));
-  private uFrustumCullAngle = uniform(0.3); // cos(~72°) - cull grass more than 72° from view center
-
-  // Displacer uniforms (grass bends away from players/entities)
-  private readonly displacerUniforms = Array.from(
-    { length: GRASS_CONFIG.MAX_DISPLACERS },
-    () => uniform(new THREE.Vector3(99999, 0, 99999)),
-  );
-  private uDisplacerRadius = uniform(0.6);
-  private uDisplacerStrength = uniform(0.7);
-
-  // State
-  private lastUpdatePos = new THREE.Vector3(Infinity, 0, Infinity);
   private grassInitialized = false;
-  private windEnabled = true;
-  private heightmapRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  // External systems
-  private terrainSystem: TerrainSystemInterface | null = null;
-  private roadNetworkSystem: RoadNetworkSystemInterface | null = null;
-  private buildingCollisionService: BuildingCollisionService | null = null;
+  private noiseTexture: THREE.Texture | null = null;
 
   constructor(world: World) {
     super(world);
   }
 
   getDependencies() {
-    return { required: ["terrain"], optional: ["roads", "graphics"] };
+    return { required: [], optional: ["graphics", "terrain"] };
   }
 
   async start(): Promise<void> {
@@ -277,29 +612,6 @@ export class ProceduralGrassSystem extends System {
         } | null
       )?.renderer ?? null;
 
-    this.terrainSystem = this.world.getSystem(
-      "terrain",
-    ) as TerrainSystemInterface | null;
-    this.roadNetworkSystem = this.world.getSystem(
-      "roads",
-    ) as RoadNetworkSystemInterface | null;
-    this.tryAcquireBuildingCollisionService();
-
-    this.world.on(
-      EventType.TERRAIN_TILE_REGENERATED,
-      (payload: { reason: "flat_zone" | "road" | "other" }) => {
-        if (payload.reason === "flat_zone") this.scheduleHeightmapRefresh();
-      },
-    );
-
-    // Refresh grass heightmap when roads are generated to exclude grass on roads
-    this.world.on(EventType.ROADS_GENERATED, () => {
-      this.roadNetworkSystem = this.world.getSystem(
-        "roads",
-      ) as RoadNetworkSystemInterface | null;
-      this.scheduleHeightmapRefresh();
-    });
-
     const stage = this.world.stage as { scene?: THREE.Scene } | null;
     if (!stage?.scene) {
       setTimeout(() => this.initializeGrass(), 100);
@@ -307,6 +619,48 @@ export class ProceduralGrassSystem extends System {
     }
 
     await this.initializeGrass();
+  }
+
+  private async loadTextures(): Promise<void> {
+    // Try to get terrain textures
+    const terrainSystem = this.world.getSystem("terrain") as {
+      heightmapTexture?: THREE.Texture;
+      heightmapMax?: number;
+    } | null;
+
+    if (terrainSystem?.heightmapTexture) {
+      heightmapTexture = terrainSystem.heightmapTexture;
+      heightmapMax = terrainSystem.heightmapMax ?? 100;
+      console.log(
+        "[ProceduralGrass] Using terrain heightmap, max:",
+        heightmapMax,
+      );
+    } else {
+      console.log(
+        "[ProceduralGrass] No heightmap - grass will be at player Y level",
+      );
+    }
+
+    // Load noise texture (optional)
+    const loader = new THREE.TextureLoader();
+    try {
+      const noise = await new Promise<THREE.Texture>((resolve, reject) => {
+        loader.load(
+          "/textures/noise.png",
+          (tex) => {
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            resolve(tex);
+          },
+          undefined,
+          reject,
+        );
+      });
+      this.noiseTexture = noise;
+      noiseAtlasTexture = noise;
+      console.log("[ProceduralGrass] Loaded noise texture");
+    } catch {
+      console.log("[ProceduralGrass] Using hash fallback for noise");
+    }
   }
 
   private async initializeGrass(): Promise<void> {
@@ -330,1402 +684,156 @@ export class ProceduralGrassSystem extends System {
       return;
     }
 
-    await this.setupHeightmapTexture();
-    if (!this.heightmapTexture) {
-      setTimeout(() => this.initializeGrass(), 500);
-      return;
-    }
+    try {
+      await this.loadTextures();
 
-    // Create GPU storage buffers
-    const posAttr = new THREE.StorageInstancedBufferAttribute(
-      new Float32Array(GRASS_CONFIG.MAX_INSTANCES * 4),
-      4,
-    );
-    const varAttr = new THREE.StorageInstancedBufferAttribute(
-      new Float32Array(GRASS_CONFIG.MAX_INSTANCES * 4),
-      4,
-    );
-    this.positionsBuffer = storage(posAttr, "vec4", GRASS_CONFIG.MAX_INSTANCES);
-    this.variationsBuffer = storage(
-      varAttr,
-      "vec4",
-      GRASS_CONFIG.MAX_INSTANCES,
-    );
+      // Create SSBO
+      this.ssbo = new GrassSsbo();
 
-    this.createComputeShader();
+      // Create geometry (Revo Realms exact)
+      const geometry = this.createGeometry(config.SEGMENTS);
 
-    const geometry = createGrassTuftGeometry();
-    const material = this.createGrassMaterial();
-    this.mesh = new THREE.InstancedMesh(
-      geometry,
-      material,
-      GRASS_CONFIG.MAX_INSTANCES,
-    );
-    this.mesh.frustumCulled = false;
-    this.mesh.name = "ProceduralGrass_GPU";
+      // Create material (Revo Realms exact + heightmap)
+      const material = new GrassMaterial(this.ssbo);
 
-    // Shadow configuration:
-    // - Don't cast shadows: grass shadows are too noisy and expensive
-    // - Do receive shadows: grass should be shaded by trees, buildings, etc.
-    this.mesh.castShadow = false;
-    this.mesh.receiveShadow = true;
+      // Create instanced mesh
+      this.mesh = new THREE.InstancedMesh(geometry, material, config.COUNT);
+      this.mesh.frustumCulled = false;
+      this.mesh.name = "ProceduralGrass_GPU";
 
-    // Initialize identity matrices
-    const matrixArray = this.mesh.instanceMatrix.array as Float32Array;
-    for (let i = 0; i < GRASS_CONFIG.MAX_INSTANCES; i++) {
-      const offset = i * 16;
-      matrixArray[offset] = 1;
-      matrixArray[offset + 5] = 1;
-      matrixArray[offset + 10] = 1;
-      matrixArray[offset + 15] = 1;
-    }
-    this.mesh.instanceMatrix.needsUpdate = true;
-    this.mesh.matrixAutoUpdate = false;
-    this.mesh.geometry.boundingSphere = new THREE.Sphere(
-      new THREE.Vector3(),
-      10000,
-    );
+      stage.scene.add(this.mesh);
+      this.grassInitialized = true;
 
-    stage.scene.add(this.mesh);
-    this.grassInitialized = true;
-
-    const camera = this.world.camera;
-    if (camera) {
-      this.runCompute();
-      this.lastUpdatePos.copy(camera.position);
+      console.log(
+        `[ProceduralGrass] Initialized with ${config.COUNT.toLocaleString()} blades`,
+      );
+    } catch (error) {
+      console.error("[ProceduralGrass] ERROR:", error);
     }
   }
 
-  /** Setup heightmap texture - get from TerrainSystem or generate */
-  private async setupHeightmapTexture(): Promise<void> {
-    this.noiseTexture = generateNoiseTexture();
-    this.noiseTextureNode = THREE.TSL.texture(this.noiseTexture);
+  private createGeometry(nSegments: number): THREE.BufferGeometry {
+    // Revo Realms exact geometry
+    const segments = Math.max(1, Math.floor(nSegments));
+    const height = config.BLADE_HEIGHT;
+    const halfWidthBase = config.BLADE_WIDTH * 0.5;
+
+    const rowCount = segments;
+    const vertexCount = rowCount * 2 + 1;
+    const quadCount = Math.max(0, rowCount - 1);
+    const indexCount = quadCount * 6 + 3;
+
+    const positions = new Float32Array(vertexCount * 3);
+    const uvs = new Float32Array(vertexCount * 2);
+    const indices = new Uint8Array(indexCount);
+
+    const taper = (t: number) => halfWidthBase * (1.0 - 0.7 * t);
 
-    // Try TerrainSystem first
-    const terrainHeightmap = this.terrainSystem?.getHeightmapTexture?.();
-    if (terrainHeightmap) {
-      this.heightmapTexture = terrainHeightmap;
-      this.heightmapTextureNode = THREE.TSL.texture(this.heightmapTexture);
-      return;
-    }
-
-    // Generate our own heightmap
-    await this.generateHeightmapTexture();
-  }
-
-  /**
-   * Generate heightmap texture by sampling terrain
-   * R = normalized height, G = grassiness (0-1), B = slope, A = 1
-   *
-   * Grassiness matches TerrainShader exactly:
-   * - No grass on dirt patches (noise > DIRT_THRESHOLD)
-   * - No grass on steep slopes (rock)
-   * - No grass near water (sand/mud)
-   * - No grass at high elevation (snow)
-   * - No grass on roads, flat zones, inside buildings
-   */
-  private async generateHeightmapTexture(): Promise<void> {
-    if (!this.terrainSystem) {
-      console.warn(
-        "[ProceduralGrass] No terrain system for heightmap generation",
-      );
-      return;
-    }
-
-    // Check if getHeightAt exists
-    if (typeof this.terrainSystem.getHeightAt !== "function") {
-      console.warn("[ProceduralGrass] TerrainSystem.getHeightAt not available");
-      return;
-    }
-
-    const size = GRASS_CONFIG.HEIGHTMAP_SIZE;
-    const worldSize = GRASS_CONFIG.HEIGHTMAP_WORLD_SIZE;
-    const maxHeight = GRASS_CONFIG.MAX_HEIGHT;
-    const halfWorld = worldSize / 2;
-
-    // Sample terrain heights, grassiness into RGBA float texture
-    const rgbaHeightData = new Float32Array(size * size * 4);
-
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        // Convert texture coords to world coords (centered at origin)
-        const worldX = (x / size) * worldSize - halfWorld;
-        const worldZ = (y / size) * worldSize - halfWorld;
-
-        // Get height from terrain system (we verified getHeightAt exists above)
-        const height = this.terrainSystem.getHeightAt(worldX, worldZ);
-
-        // Estimate slope from neighboring heights
-        let slope: number;
-        if (typeof this.terrainSystem.getSlopeAt === "function") {
-          slope = this.terrainSystem.getSlopeAt(worldX, worldZ);
-        } else {
-          // Approximate slope from height differences
-          const h1 = this.terrainSystem.getHeightAt(worldX + 1, worldZ);
-          const h2 = this.terrainSystem.getHeightAt(worldX, worldZ + 1);
-          const dx = h1 - height;
-          const dz = h2 - height;
-          slope = Math.sqrt(dx * dx + dz * dz) / 2;
-        }
-
-        // Calculate grassiness (0 = no grass, 1 = full grass)
-        // Matches TerrainShader.ts logic EXACTLY
-        let grassiness = 1.0;
-
-        // Sample noise at this position (same as terrain shader)
-        const noiseValue = sampleNoiseAtPosition(worldX, worldZ);
-
-        // === DIRT PATCHES (noise-based) ===
-        // TerrainShader shows dirt where noise > DIRT_THRESHOLD
-        // Grass should NOT grow on brown dirt patches
-        const dirtThreshold = TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD; // 0.5
-        if (noiseValue > dirtThreshold - 0.05) {
-          const dirtPatchFactor = smoothstepJS(
-            dirtThreshold - 0.05,
-            dirtThreshold + 0.15,
-            noiseValue,
-          );
-          // Only apply dirt on relatively flat ground (same as terrain shader)
-          const flatnessFactor = smoothstepJS(0.3, 0.05, slope);
-          grassiness -= dirtPatchFactor * flatnessFactor * 0.9;
-        }
-
-        // Smooth grass-to-road transition with fade at edges
-        if (
-          grassiness > 0 &&
-          this.roadNetworkSystem?.getDistanceToNearestRoad
-        ) {
-          const distance = this.roadNetworkSystem.getDistanceToNearestRoad(
-            worldX,
-            worldZ,
-          );
-          const halfWidth = (this.roadNetworkSystem.config?.roadWidth ?? 4) / 2;
-          const fadeWidth = GRASS_CONFIG.ROAD_FADE_WIDTH;
-
-          if (distance <= halfWidth) {
-            grassiness = 0;
-          } else if (distance < halfWidth + fadeWidth) {
-            grassiness *= smoothstepJS(
-              0,
-              1,
-              (distance - halfWidth) / fadeWidth,
-            );
-          }
-        }
-
-        // No grass in flat zones - use TIGHT bounds (no padding)
-        // Flat zones have padding for terrain blending, but grass should only avoid
-        // the actual station/building footprint, not the blend area
-        if (grassiness > 0) {
-          const flatZone = (
-            this.terrainSystem as {
-              getFlatZoneAt?: (x: number, z: number) => FlatZone | null;
-            }
-          ).getFlatZoneAt?.(worldX, worldZ);
-          if (flatZone) {
-            // Check against TIGHT bounds (subtract padding estimate of ~1m from each side)
-            const tightHalfWidth = Math.max(0.5, flatZone.width / 2 - 1.0);
-            const tightHalfDepth = Math.max(0.5, flatZone.depth / 2 - 1.0);
-            const dx = Math.abs(worldX - flatZone.centerX);
-            const dz = Math.abs(worldZ - flatZone.centerZ);
-            if (dx <= tightHalfWidth && dz <= tightHalfDepth) {
-              grassiness = 0;
-            }
-          }
-        }
-
-        // No grass inside buildings (tile-accurate check)
-        if (grassiness > 0 && this.isInsideBuilding(worldX, worldZ)) {
-          grassiness = 0;
-        }
-
-        // === STEEP SLOPES (dirt/rock) ===
-        // Matches terrain shader: slope > 0.15 starts showing dirt, > 0.45 shows rock
-        if (grassiness > 0 && slope > 0.15) {
-          const slopeFactor = smoothstepJS(0.15, 0.5, slope);
-          grassiness = Math.max(0, grassiness - slopeFactor * 0.8);
-        }
-
-        // === VERY STEEP = ROCK (no grass at all) ===
-        if (grassiness > 0 && slope > 0.45) {
-          const rockFactor = smoothstepJS(0.45, 0.75, slope);
-          grassiness = Math.max(0, grassiness - rockFactor);
-        }
-
-        // === SHORELINE (sand/mud near water) ===
-        // Matches terrain shader shoreline logic
-        if (grassiness > 0 && height < 14) {
-          // Wet dirt zone (8-14m) - reduce grass
-          const wetDirtZone = smoothstepJS(14, 8, height);
-          grassiness = Math.max(0, grassiness - wetDirtZone * 0.4);
-        }
-        if (grassiness > 0 && height < 9) {
-          // Mud zone (6-9m) - strong reduction
-          const mudZone = smoothstepJS(9, 6, height);
-          grassiness = Math.max(0, grassiness - mudZone * 0.7);
-        }
-        if (grassiness > 0 && height < 6.5) {
-          // Water's edge (5-6.5m) - no grass
-          const edgeZone = smoothstepJS(6.5, 5, height);
-          grassiness = Math.max(0, grassiness - edgeZone * 0.9);
-        }
-
-        // === SNOW AT HIGH ELEVATION ===
-        const snowHeight = TERRAIN_SHADER_CONSTANTS.SNOW_HEIGHT; // 50
-        if (grassiness > 0 && height > snowHeight - 5) {
-          const snowFactor = smoothstepJS(snowHeight - 5, 60, height);
-          grassiness = Math.max(0, grassiness - snowFactor);
-        }
-
-        // Store in RGBA float texture: R = height, G = grassiness, B = slope
-        const normalized = Math.max(0, Math.min(1, height / maxHeight));
-        const idx = (y * size + x) * 4;
-        rgbaHeightData[idx + 0] = normalized; // R = height
-        rgbaHeightData[idx + 1] = Math.max(0, Math.min(1, grassiness)); // G = grassiness
-        rgbaHeightData[idx + 2] = Math.min(1, slope); // B = slope (for GPU color calc)
-        rgbaHeightData[idx + 3] = 1;
-      }
-    }
-
-    this.heightmapTexture = new THREE.DataTexture(
-      rgbaHeightData,
-      size,
-      size,
-      THREE.RGBAFormat,
-      THREE.FloatType,
-    );
-    this.heightmapTexture.wrapS = THREE.ClampToEdgeWrapping;
-    this.heightmapTexture.wrapT = THREE.ClampToEdgeWrapping;
-    this.heightmapTexture.magFilter = THREE.LinearFilter;
-    this.heightmapTexture.minFilter = THREE.LinearFilter;
-    this.heightmapTexture.needsUpdate = true;
-    this.heightmapTextureNode = THREE.TSL.texture(this.heightmapTexture);
-  }
-
-  /**
-   * GPU Compute Shader - samples heightmap + grassiness and writes instance data
-   */
-  private createComputeShader(): void {
-    if (
-      !this.positionsBuffer ||
-      !this.variationsBuffer ||
-      !this.heightmapTexture
-    )
-      return;
-
-    const cellSize = float(GRASS_CONFIG.CELL_SIZE);
-    const waterLevel = float(GRASS_CONFIG.WATER_LEVEL);
-    const maxDistSq = float(GRASS_CONFIG.FADE_END * GRASS_CONFIG.FADE_END);
-    const hmWorldSize = float(GRASS_CONFIG.HEIGHTMAP_WORLD_SIZE);
-    const hmMaxHeight = float(GRASS_CONFIG.MAX_HEIGHT);
-
-    const positionsRef = this.positionsBuffer;
-    const variationsRef = this.variationsBuffer;
-    const gridOriginRef = this.uGridOrigin;
-    // Note: Camera position NOT used in compute - ensures grass is stable during rotation
-    // Frustum culling and fade are handled in vertex shader
-
-    // Create texture node for use in compute shader
-    const heightmapTexNode = THREE.TSL.texture(this.heightmapTexture);
-
-    // Stratified sampling constants
-    const subCellsPerAxis = float(GRASS_CONFIG.SUB_CELLS_PER_AXIS);
-    const subCellsTotal = float(GRASS_CONFIG.SUB_CELLS_TOTAL);
-    const falloffRate = float(GRASS_CONFIG.DENSITY_FALLOFF_RATE);
-    const gridCellsFloat = float(GRASS_CONFIG.GRID_CELLS);
-    const gridHalfSizeRef = float(
-      (GRASS_CONFIG.GRID_CELLS * GRASS_CONFIG.CELL_SIZE) / 2,
-    );
-
-    const computeFn = Fn(() => {
-      const idx = float(instanceIndex);
-
-      // ================================================================
-      // WORLD-STABLE GRASS PLACEMENT
-      // Seeds based on WORLD cell coordinates (quantized), not grid-relative
-      // This ensures grass doesn't shift when camera moves
-      // ================================================================
-
-      // Decompose instance into cell + blade within cell
-      const bladeIdx = idx.mod(subCellsTotal);
-      const cellIdx = floor(idx.div(subCellsTotal));
-
-      // Grid cell coordinates (relative to moving grid origin)
-      const gridCellX = cellIdx.mod(gridCellsFloat);
-      const gridCellZ = floor(cellIdx.div(gridCellsFloat));
-
-      // Cell corner in world space
-      const cellWorldX = add(gridOriginRef.x, mul(gridCellX, cellSize));
-      const cellWorldZ = add(gridOriginRef.y, mul(gridCellZ, cellSize));
-
-      // ================================================================
-      // WORLD-QUANTIZED CELL COORDINATES FOR SEEDING
-      // These are absolute world cell indices, not relative to grid origin
-      // Grass at world position (10.5, 20.3) with cellSize=0.7 is always in cell (15, 29)
-      // ================================================================
-      const worldCellX = floor(div(cellWorldX, cellSize));
-      const worldCellZ = floor(div(cellWorldZ, cellSize));
-
-      // ================================================================
-      // DECORRELATED RANDOM GENERATION using world-stable seeds
-      // X offset uses ONLY worldCellX, Z uses ONLY worldCellZ
-      // bladeIdx scrambled differently for each axis
-      // ================================================================
-
-      // Create unique blade identifier that's different for X and Z
-      const bladeIdxScrambledX = fract(mul(bladeIdx, float(0.618033988749895))); // golden ratio
-      const bladeIdxScrambledZ = fract(mul(bladeIdx, float(0.414213562373095))); // sqrt(2)-1
-
-      // X RANDOM: Based on worldCellX and scrambled bladeIdx only (NO Z!)
-      const xSeed1 = fract(
-        mul(add(worldCellX, bladeIdxScrambledX), float(0.7548776662)),
-      );
-      const xSeed2 = fract(
-        mul(
-          add(worldCellX, mul(bladeIdxScrambledX, float(2.3))),
-          float(0.5765683227),
-        ),
-      );
-      const xSeed3 = fract(
-        mul(mul(worldCellX, add(bladeIdx, float(1))), float(0.00001)),
-      );
-
-      // Z RANDOM: Based on worldCellZ and differently scrambled bladeIdx only (NO X!)
-      const zSeed1 = fract(
-        mul(add(worldCellZ, bladeIdxScrambledZ), float(0.8437284728)),
-      );
-      const zSeed2 = fract(
-        mul(
-          add(worldCellZ, mul(bladeIdxScrambledZ, float(3.7))),
-          float(0.3928474782),
-        ),
-      );
-      const zSeed3 = fract(
-        mul(mul(worldCellZ, add(bladeIdx, float(7))), float(0.00001)),
-      );
-
-      // Combine multiple sources for each axis (still independent)
-      const randX = fract(
-        add(add(xSeed1, mul(xSeed2, float(0.5))), mul(xSeed3, float(0.25))),
-      );
-      const randZ = fract(
-        add(add(zSeed1, mul(zSeed2, float(0.5))), mul(zSeed3, float(0.25))),
-      );
-
-      // Property seeds (can use both X and Z since not for position)
-      const propSeed = add(
-        add(mul(worldCellX, float(73856093)), mul(worldCellZ, float(19349663))),
-        mul(bladeIdx, float(83492791)),
-      );
-      const r3 = fract(mul(propSeed, float(0.00000001)));
-      const r4 = fract(mul(propSeed, float(0.000000017)));
-      const r5 = fract(mul(propSeed, float(0.000000023)));
-      const r6 = fract(mul(propSeed, float(0.000000031)));
-
-      // ================================================================
-      // RANDOM POSITION within extended cell area
-      // ================================================================
-
-      // Coverage area: cell + overflow into neighbors
-      const coverageRange = mul(cellSize, float(JITTER_AMOUNT));
-
-      // Position: anywhere within coverage area centered on cell
-      const offsetX = mul(
-        sub(randX, float(0.5)),
-        mul(coverageRange, float(2.0)),
-      );
-      const offsetZ = mul(
-        sub(randZ, float(0.5)),
-        mul(coverageRange, float(2.0)),
-      );
-
-      // Final world position (cell corner + half cell + random offset)
-      const worldX = add(add(cellWorldX, mul(cellSize, float(0.5))), offsetX);
-      const worldZ = add(add(cellWorldZ, mul(cellSize, float(0.5))), offsetZ);
-
-      // Use r5 for density check (independent from position)
-      const h3 = r5;
-
-      // ================================================================
-      // GRID-CENTER BASED DENSITY (not camera-based!)
-      // Using distance from GRID CENTER ensures density is stable
-      // regardless of camera position/rotation within the grid
-      // ================================================================
-      const gridCenterX = add(gridOriginRef.x, gridHalfSizeRef);
-      const gridCenterZ = add(gridOriginRef.y, gridHalfSizeRef);
-      const dxGrid = sub(worldX, gridCenterX);
-      const dzGrid = sub(worldZ, gridCenterZ);
-      const distFromCenterSq = add(mul(dxGrid, dxGrid), mul(dzGrid, dzGrid));
-      const distFromCenter = distFromCenterSq.sqrt();
-
-      // Sample heightmap for Y position and grassiness
-      const halfWorld = mul(hmWorldSize, float(0.5));
-      const uvX = add(worldX, halfWorld).div(hmWorldSize);
-      const uvZ = add(worldZ, halfWorld).div(hmWorldSize);
-      const clampedUvX = uvX.clamp(float(0.001), float(0.999));
-      const clampedUvZ = uvZ.clamp(float(0.001), float(0.999));
-      const hmUV = vec2(clampedUvX, clampedUvZ);
-      const hmSample = heightmapTexNode.uv(hmUV);
-      const normalizedHeight = hmSample.r;
-      const grassiness = hmSample.g;
-      const worldY = mul(normalizedHeight, hmMaxHeight);
-
-      // ================================================================
-      // EXPONENTIAL DENSITY FALLOFF from grid center
-      // This is STABLE - only changes when grid scrolls, not on camera rotation
-      // ================================================================
-      const density = THREE.TSL.exp(mul(distFromCenter.negate(), falloffRate));
-      // Skip threshold: 1 - density (lower density = higher skip chance)
-      const skipThreshold = sub(float(1.0), density);
-      const passedDensityCheck = h3.greaterThan(skipThreshold);
-
-      // Visibility checks - all stable, no camera dependency
-      const inRange = distFromCenterSq.lessThan(maxDistSq);
-      const aboveWater = worldY.greaterThan(waterLevel);
-      const isGrassy = grassiness.greaterThan(float(0.1));
-
-      const visible = inRange
-        .and(aboveWater)
-        .and(isGrassy)
-        .and(passedDensityCheck);
-
-      const position = positionsRef.element(instanceIndex);
-      const variation = variationsRef.element(instanceIndex);
-
-      If(visible, () => {
-        // SIZE VARIANCE using our random values
-        // Height: 0.6-1.2x, Width: 0.7-1.3x
-        const baseHeightVar = add(float(0.6), mul(r3, float(0.6)));
-        const baseWidthVar = add(float(0.7), mul(r4, float(0.6)));
-
-        // EDGE FALLOFF: Scale down blades where grassiness is lower
-        const grassinessScale = grassiness.clamp(float(0.3), float(1.0));
-        const heightVariance = mul(baseHeightVar, grassinessScale);
-        const widthVariance = mul(baseWidthVar, grassinessScale);
-
-        position.assign(vec4(worldX, worldY, worldZ, heightVariance));
-
-        // Full 360 degree rotation for variety (unique per blade)
-        const rotation = mul(r5, float(Math.PI * 2));
-        const phase = mul(r6, float(Math.PI * 2));
-        // variation: x=rotation, y=widthVariance, z=grassiness (for color), w=phase
-        variation.assign(vec4(rotation, widthVariance, grassiness, phase));
-      }).Else(() => {
-        position.assign(vec4(0, -1000, 0, 0));
-        variation.assign(vec4(0, 0, 0, 0));
-      });
-    });
-
-    // TSL Fn returns a callable that produces a ShaderNodeObject with compute()
-    type ComputeCallable = {
-      (): { compute: (count: number) => THREE.ComputeNode };
-    };
-    this.computeNode = (computeFn as ComputeCallable)().compute(
-      GRASS_CONFIG.MAX_INSTANCES,
-    );
-  }
-
-  private createGrassMaterial(): THREE.MeshStandardNodeMaterial {
-    const material = new MeshStandardNodeMaterial();
-
-    if (!this.positionsBuffer || !this.variationsBuffer) {
-      return material;
-    }
-
-    // Blade dimensions - use uniforms for runtime control from debug panel
-    const bladeHeight = this.uBladeHeight;
-    const bladeWidth = this.uBladeWidth;
-    const fadeStartSq = mul(this.uFadeStart, this.uFadeStart);
-    const fadeEndSq = mul(this.uFadeEnd, this.uFadeEnd);
-
-    // Wind parameters - use uniforms for runtime control
-    const windSpeed = this.uWindSpeed;
-    const windStrength = this.uWindStrength;
-    const windFreq = float(GRASS_CONFIG.WIND_FREQUENCY);
-    const gustSpeed = float(GRASS_CONFIG.GUST_SPEED);
-    const flutterIntensity = float(GRASS_CONFIG.FLUTTER_INTENSITY);
-    const bladeCurve = float(0.15); // Natural blade curve
-    const timeRef = this.uTime;
-
-    // Heightmap sampling params
-    const hmWorldSize = float(GRASS_CONFIG.HEIGHTMAP_WORLD_SIZE);
-
-    // Noise texture for terrain color calculation (shared with TerrainShader)
-    const noiseTex = this.noiseTextureNode;
-    const noiseScale = float(TERRAIN_SHADER_CONSTANTS.NOISE_SCALE); // 0.0008
-
-    // Heightmap texture node (captured for use in Fn callback)
-    const heightmapTexNode = this.heightmapTextureNode;
-
-    const positionsRef = this.positionsBuffer;
-    const variationsRef = this.variationsBuffer;
-    const cameraPosition = this.uCameraPos;
-    const cameraForwardRef = this.uCameraForward; // For vertex shader frustum culling
-
-    // Displacer uniforms array
-    const [d0Pos, d1Pos, d2Pos, d3Pos, d4Pos, d5Pos, d6Pos, d7Pos] =
-      this.displacerUniforms;
-    const displacerRadius = this.uDisplacerRadius;
-    const displacerStrength = this.uDisplacerStrength;
-
-    const positionLocal = THREE.TSL.positionLocal;
-
-    // VERTEX SHADER with wind animation, blade curve, and cylindrical billboarding
-    material.positionNode = Fn(() => {
-      const localPos = positionLocal;
-
-      const instancePos = positionsRef.element(instanceIndex);
-      const instanceVar = variationsRef.element(instanceIndex);
-
-      const worldX = instancePos.x;
-      const worldY = instancePos.y;
-      const worldZ = instancePos.z;
-      const heightScale = instancePos.w;
-
-      const baseRotation = instanceVar.x; // Random rotation for variation
-      const widthScale = instanceVar.y;
-      const phase = instanceVar.w; // Per-blade phase offset for wind variation
-
-      // Height along blade (0 at base, 1 at tip)
-      const t = localPos.y;
-      const tSquared = mul(t, t);
-
-      // Scale blade
-      const scaledHeight = mul(bladeHeight, heightScale);
-      const scaledWidth = mul(bladeWidth, widthScale);
-
-      // ================================================================
-      // CYLINDRICAL BILLBOARDING (Y-axis only)
-      // Blade WIDTH faces camera, but BEND is in a fixed world direction
-      // This gives each blade 3D volume - never looks flat/thin
-      // ================================================================
-      const toCameraX = sub(cameraPosition.x, worldX);
-      const toCameraZ = sub(cameraPosition.z, worldZ);
-      // Billboard angle: blade width perpendicular to camera view
-      const billboardAngle = atan(toCameraZ, toCameraX);
-
-      // Small random variation in billboard (±15 degrees) for natural look
-      const billboardVariation = mul(
-        sub(baseRotation, float(3.14159)),
-        float(0.08),
-      );
-      const facingRotation = add(billboardAngle, billboardVariation);
-
-      // BEND DIRECTION: Fixed per-blade, based on random seed
-      // This is independent of camera - gives blade depth/thickness
-      const bendDirection = baseRotation; // Use full random rotation for bend
-
-      // ================================================================
-      // BLADE CURVE - bends in fixed world direction (not toward camera)
-      // This creates 3D volume - blade has thickness from any angle
-      // ================================================================
-      const curveAmount = mul(bladeCurve, tSquared);
-
-      // ================================================================
-      // WIND ANIMATION - Bending from base, not translation
-      // Wind causes blade to ROTATE/BEND, not slide sideways
-      // ================================================================
-
-      // Wind wave across the field (spatial variation)
-      const windWave = mul(add(worldX, mul(worldZ, float(0.7))), windFreq);
-      const windTime = add(mul(timeRef, windSpeed), phase);
-
-      // Primary wind bend - smooth sine wave
-      const primaryBend = sin(add(windWave, windTime));
-
-      // Secondary harmonic for more organic movement
-      const secondaryBend = mul(
-        sin(add(mul(windWave, float(2.1)), mul(windTime, float(1.3)))),
-        float(0.3),
-      );
-
-      // Gusts - slower, stronger pulses
-      const gustWave = mul(add(worldX, mul(worldZ, float(0.5))), float(0.015));
-      const gustTime = mul(timeRef, gustSpeed);
-      const gustPulse = mul(
-        add(float(1.0), sin(add(gustWave, gustTime))),
-        float(0.5),
-      ); // 0-1
-
-      // Per-blade flutter (subtle high-freq)
-      const flutterTime = mul(timeRef, float(4.0));
-      const flutter = mul(
-        sin(add(mul(phase, float(12.0)), flutterTime)),
-        flutterIntensity,
-      );
-
-      // Combined wind bend amount (radians) - affects blade rotation angle
-      // Base strength + gust boost, scaled by windStrength uniform
-      const windBendAmount = mul(
-        add(primaryBend, add(secondaryBend, flutter)),
-        mul(windStrength, add(float(1.0), mul(gustPulse, float(0.5)))),
-      );
-
-      // Wind direction - fixed world direction with slight variation
-      const windDirectionAngle = add(float(0.5), mul(primaryBend, float(0.15))); // ~30° with variation
-
-      // ================================================================
-      // MULTI-DISPLACER SYSTEM - Grass bends away from players/entities
-      // Unrolled for 8 displacers (far-away positions = no effect)
-      // ================================================================
-
-      // Displacer 0
-      const toD0X = sub(worldX, d0Pos.x);
-      const toD0Z = sub(worldZ, d0Pos.z);
-      const d0Dist = sqrt(add(mul(toD0X, toD0X), mul(toD0Z, toD0Z)));
-      const d0Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d0Dist),
-        displacerStrength,
-      );
-      const d0PushX = mul(div(toD0X, max(d0Dist, float(0.01))), d0Inf);
-      const d0PushZ = mul(div(toD0Z, max(d0Dist, float(0.01))), d0Inf);
-
-      // Displacer 1
-      const toD1X = sub(worldX, d1Pos.x);
-      const toD1Z = sub(worldZ, d1Pos.z);
-      const d1Dist = sqrt(add(mul(toD1X, toD1X), mul(toD1Z, toD1Z)));
-      const d1Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d1Dist),
-        displacerStrength,
-      );
-      const d1PushX = mul(div(toD1X, max(d1Dist, float(0.01))), d1Inf);
-      const d1PushZ = mul(div(toD1Z, max(d1Dist, float(0.01))), d1Inf);
-
-      // Displacer 2
-      const toD2X = sub(worldX, d2Pos.x);
-      const toD2Z = sub(worldZ, d2Pos.z);
-      const d2Dist = sqrt(add(mul(toD2X, toD2X), mul(toD2Z, toD2Z)));
-      const d2Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d2Dist),
-        displacerStrength,
-      );
-      const d2PushX = mul(div(toD2X, max(d2Dist, float(0.01))), d2Inf);
-      const d2PushZ = mul(div(toD2Z, max(d2Dist, float(0.01))), d2Inf);
-
-      // Displacer 3
-      const toD3X = sub(worldX, d3Pos.x);
-      const toD3Z = sub(worldZ, d3Pos.z);
-      const d3Dist = sqrt(add(mul(toD3X, toD3X), mul(toD3Z, toD3Z)));
-      const d3Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d3Dist),
-        displacerStrength,
-      );
-      const d3PushX = mul(div(toD3X, max(d3Dist, float(0.01))), d3Inf);
-      const d3PushZ = mul(div(toD3Z, max(d3Dist, float(0.01))), d3Inf);
-
-      // Displacer 4
-      const toD4X = sub(worldX, d4Pos.x);
-      const toD4Z = sub(worldZ, d4Pos.z);
-      const d4Dist = sqrt(add(mul(toD4X, toD4X), mul(toD4Z, toD4Z)));
-      const d4Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d4Dist),
-        displacerStrength,
-      );
-      const d4PushX = mul(div(toD4X, max(d4Dist, float(0.01))), d4Inf);
-      const d4PushZ = mul(div(toD4Z, max(d4Dist, float(0.01))), d4Inf);
-
-      // Displacer 5
-      const toD5X = sub(worldX, d5Pos.x);
-      const toD5Z = sub(worldZ, d5Pos.z);
-      const d5Dist = sqrt(add(mul(toD5X, toD5X), mul(toD5Z, toD5Z)));
-      const d5Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d5Dist),
-        displacerStrength,
-      );
-      const d5PushX = mul(div(toD5X, max(d5Dist, float(0.01))), d5Inf);
-      const d5PushZ = mul(div(toD5Z, max(d5Dist, float(0.01))), d5Inf);
-
-      // Displacer 6
-      const toD6X = sub(worldX, d6Pos.x);
-      const toD6Z = sub(worldZ, d6Pos.z);
-      const d6Dist = sqrt(add(mul(toD6X, toD6X), mul(toD6Z, toD6Z)));
-      const d6Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d6Dist),
-        displacerStrength,
-      );
-      const d6PushX = mul(div(toD6X, max(d6Dist, float(0.01))), d6Inf);
-      const d6PushZ = mul(div(toD6Z, max(d6Dist, float(0.01))), d6Inf);
-
-      // Displacer 7
-      const toD7X = sub(worldX, d7Pos.x);
-      const toD7Z = sub(worldZ, d7Pos.z);
-      const d7Dist = sqrt(add(mul(toD7X, toD7X), mul(toD7Z, toD7Z)));
-      const d7Inf = mul(
-        smoothstep(displacerRadius, float(0.0), d7Dist),
-        displacerStrength,
-      );
-      const d7PushX = mul(div(toD7X, max(d7Dist, float(0.01))), d7Inf);
-      const d7PushZ = mul(div(toD7Z, max(d7Dist, float(0.01))), d7Inf);
-
-      // Sum all displacer contributions
-      const totalPushX = add(
-        add(add(d0PushX, d1PushX), add(d2PushX, d3PushX)),
-        add(add(d4PushX, d5PushX), add(d6PushX, d7PushX)),
-      );
-      const totalPushZ = add(
-        add(add(d0PushZ, d1PushZ), add(d2PushZ, d3PushZ)),
-        add(add(d4PushZ, d5PushZ), add(d6PushZ, d7PushZ)),
-      );
-
-      // Scale by height (tips move most)
-      const displacerPushX = mul(totalPushX, tSquared);
-      const displacerPushZ = mul(totalPushZ, tSquared);
-
-      // ================================================================
-      // FINAL POSITION CALCULATION
-      // Wind causes blade to BEND from base, tips move most
-      // ================================================================
-
-      // Rotation for blade WIDTH (faces camera - billboard)
-      const cosFacing = cos(facingRotation);
-      const sinFacing = sin(facingRotation);
-
-      // COMBINED BEND: Static curve + wind-induced bend
-      // Wind adds to the base bend direction, scaled by height (tips bend more)
-      const windBendX = mul(windBendAmount, cos(windDirectionAngle));
-      const windBendZ = mul(windBendAmount, sin(windDirectionAngle));
-
-      // Total bend = static curve + wind bend + displacer push
-      // Apply more bend higher up the blade (tSquared gives natural arc)
-      const totalBendX = add(
-        add(mul(curveAmount, cos(bendDirection)), mul(windBendX, tSquared)),
-        displacerPushX,
-      );
-      const totalBendZ = add(
-        add(mul(curveAmount, sin(bendDirection)), mul(windBendZ, tSquared)),
-        displacerPushZ,
-      );
-
-      // Local X offset (blade width) - rotated to face camera
-      const rotatedLocalX = mul(localPos.x, cosFacing);
-      const rotatedLocalZ = mul(localPos.x, sinFacing);
-
-      // Blade height with bend-induced shortening (when bent, blade appears shorter)
-      // This is subtle but makes the bending look more natural
-      const bendMagnitude = add(
-        mul(totalBendX, totalBendX),
-        mul(totalBendZ, totalBendZ),
-      );
-      const heightReduction = mul(bendMagnitude, float(0.1)); // Slight shortening when bent
-      const effectiveHeight = mul(
-        scaledHeight,
-        sub(float(1.0), heightReduction),
-      );
-
-      // Final position: base + width (billboard) + bend offset
-      const finalX = add(
-        mul(rotatedLocalX, scaledWidth),
-        mul(totalBendX, effectiveHeight),
-      );
-      const finalZ = add(
-        mul(rotatedLocalZ, scaledWidth),
-        mul(totalBendZ, effectiveHeight),
-      );
-      const finalY = mul(t, effectiveHeight);
-
-      // ================================================================
-      // VERTEX SHADER FRUSTUM CULLING
-      // Check if grass is behind camera, if so move off-screen
-      // This is done per-frame without recompute, keeping grass stable on rotation
-      // ================================================================
-      const toCamX = sub(cameraPosition.x, worldX);
-      const toCamZ = sub(cameraPosition.z, worldZ);
-      const toCamDist = sqrt(add(mul(toCamX, toCamX), mul(toCamZ, toCamZ)));
-      const safeDist = max(toCamDist, float(0.1));
-
-      // Direction from grass to camera (normalized XZ)
-      const dirToCamX = div(toCamX, safeDist);
-      const dirToCamZ = div(toCamZ, safeDist);
-
-      // Camera forward direction (updated every frame via uniform)
-      const camFwdX = cameraForwardRef.x;
-      const camFwdZ = cameraForwardRef.z;
-
-      // Dot product: negative when grass is in front of camera
-      // (grass-to-camera dot camera-forward = negative when camera looks at grass)
-      const dotFwd = add(mul(dirToCamX, camFwdX), mul(dirToCamZ, camFwdZ));
-
-      // Grass is visible if:
-      // - dot < 0.4 (in front or to the side, within ~113° total cone)
-      // - OR distance < 10m (always show nearby grass)
-      const inFrustum = dotFwd
-        .lessThan(float(0.4))
-        .or(toCamDist.lessThan(float(10.0)));
-
-      // If behind camera, move way below ground (efficient GPU cull)
-      const cullOffsetY = inFrustum.select(float(0.0), float(-2000.0));
-
-      return vec3(
-        add(worldX, finalX),
-        add(add(worldY, finalY), cullOffsetY),
-        add(worldZ, finalZ),
-      );
-    })();
-
-    // Fog uniforms - IDENTICAL to TerrainShader.ts
-    const fogNearSq = float(
-      TERRAIN_SHADER_CONSTANTS.FOG_NEAR * TERRAIN_SHADER_CONSTANTS.FOG_NEAR,
-    );
-    const fogFarSq = float(
-      TERRAIN_SHADER_CONSTANTS.FOG_FAR * TERRAIN_SHADER_CONSTANTS.FOG_FAR,
-    );
-    const fogColor = vec3(
-      TERRAIN_SHADER_CONSTANTS.FOG_COLOR.r,
-      TERRAIN_SHADER_CONSTANTS.FOG_COLOR.g,
-      TERRAIN_SHADER_CONSTANTS.FOG_COLOR.b,
-    );
-
-    // COLOR NODE - Terrain-matched color using SAME algorithm as TerrainShader
-    // Samples the shared noise texture and applies identical color calculations
-    material.colorNode = Fn(() => {
-      const instancePos = positionsRef.element(instanceIndex);
-      const uvCoord = uv();
-      const heightT = uvCoord.y; // 0 at base, 1 at tip
-
-      const worldX = instancePos.x;
-      const worldY = instancePos.y;
-      const worldZ = instancePos.z;
-
-      // Sample heightmap for slope data
-      const halfWorld = mul(hmWorldSize, float(0.5));
-      const hmUvX = add(worldX, halfWorld).div(hmWorldSize);
-      const hmUvZ = add(worldZ, halfWorld).div(hmWorldSize);
-      const hmUV = vec2(
-        hmUvX.clamp(float(0.001), float(0.999)),
-        hmUvZ.clamp(float(0.001), float(0.999)),
-      );
-      const hmSample = heightmapTexNode
-        ? heightmapTexNode.uv(hmUV)
-        : vec4(0, 1, 0, 1);
-      const slope = hmSample.b; // Slope stored in B channel
-
-      // Get actual height from instance position (more accurate)
-      const height = worldY;
-
-      // ================================================================
-      // TERRAIN COLOR CALCULATION - IDENTICAL TO TerrainShader.ts
-      // ================================================================
-
-      // Sample noise texture - SAME as terrain shader
-      const noiseUV = mul(vec2(worldX, worldZ), noiseScale);
-      const noiseValue = noiseTex ? noiseTex.uv(noiseUV).r : float(0.5);
-
-      // Derived secondary noise (same as terrain: sin(noise * 6.28) * 0.3 + 0.5)
-      const noiseValue2 = add(
-        mul(sin(mul(noiseValue, float(6.28))), float(0.3)),
-        float(0.5),
-      );
-
-      // === OSRS-STYLE TERRAIN COLORS (exact match to TerrainShader.ts) ===
-      const grassGreen = vec3(0.3, 0.55, 0.15); // Rich green grass
-      const grassDark = vec3(0.22, 0.42, 0.1); // Darker grass variation
-      const dirtBrown = vec3(0.45, 0.32, 0.18); // Light brown dirt
-      const dirtDark = vec3(0.32, 0.22, 0.12); // Dark brown dirt
-      const sandYellow = vec3(0.7, 0.6, 0.38); // Sandy beach
-      const mudBrown = vec3(0.18, 0.12, 0.08); // Wet mud near water
-
-      // === BASE: GRASS with light/dark variation ===
-      const grassVariation = smoothstep(float(0.4), float(0.6), noiseValue2);
-      const baseGrassColor = mix(grassGreen, grassDark, grassVariation);
-
-      // === DIRT PATCHES (noise-based, flat ground only) ===
-      const dirtThreshold = float(TERRAIN_SHADER_CONSTANTS.DIRT_THRESHOLD); // 0.5
-      const dirtPatchFactor = smoothstep(
-        sub(dirtThreshold, float(0.05)),
-        add(dirtThreshold, float(0.15)),
-        noiseValue,
-      );
-      const flatnessFactor = smoothstep(float(0.3), float(0.05), slope);
-      const dirtVariation = smoothstep(float(0.3), float(0.7), noiseValue2);
-      const dirtColor = mix(dirtBrown, dirtDark, dirtVariation);
-      const withDirtPatches = mix(
-        baseGrassColor,
-        dirtColor,
-        mul(dirtPatchFactor, flatnessFactor),
-      );
-
-      // === SLOPE-BASED DIRT (steeper = more dirt) ===
-      const withSlopeDirt = mix(
-        withDirtPatches,
-        dirtColor,
-        mul(smoothstep(float(0.15), float(0.5), slope), float(0.6)),
-      );
-
-      // === SAND NEAR WATER (flat areas only) ===
-      const sandBlend = mul(
-        smoothstep(float(10.0), float(6.0), height),
-        smoothstep(float(0.25), float(0.0), slope),
-      );
-      const withSand = mix(
-        withSlopeDirt,
-        sandYellow,
-        mul(sandBlend, float(0.6)),
-      );
-
-      // === SHORELINE TRANSITIONS ===
-      // Wet dirt zone (8-14m)
-      const wetDirtZone = smoothstep(float(14.0), float(8.0), height);
-      const withWetDirt = mix(withSand, dirtDark, mul(wetDirtZone, float(0.4)));
-
-      // Mud zone (6-9m)
-      const mudZone = smoothstep(float(9.0), float(6.0), height);
-      const terrainColor = mix(withWetDirt, mudBrown, mul(mudZone, float(0.7)));
-
-      // ================================================================
-      // GRASS-SPECIFIC MODIFICATIONS
-      // ================================================================
-
-      // BRIGHTNESS BOOST - lighten the grass compared to terrain
-      const brightnessBoost = float(1.5); // 50% brighter than terrain
-      const brightenedColor = vec3(
-        mul(terrainColor.x, brightnessBoost),
-        mul(terrainColor.y, brightnessBoost),
-        mul(terrainColor.z, brightnessBoost),
-      );
-
-      // Slight brightening toward blade tips (natural grass coloration)
-      const tipBrighten = mul(
-        smoothstep(float(0.3), float(1.0), heightT),
-        float(0.08),
-      );
-
-      // Final grass color = brightened terrain color + subtle tip brightening
-      const grassColor = vec3(
-        add(brightenedColor.x, tipBrighten),
-        add(brightenedColor.y, mul(tipBrighten, float(1.1))), // slightly more green at tips
-        add(brightenedColor.z, mul(tipBrighten, float(0.3))),
-      );
-
-      // Distance calculation for fog
-      const dx = sub(worldX, cameraPosition.x);
-      const dz = sub(worldZ, cameraPosition.z);
-      const distSq = add(mul(dx, dx), mul(dz, dz));
-
-      // === FOG ===
-      const fogFactor = smoothstep(fogNearSq, fogFarSq, distSq);
-
-      return mix(grassColor, fogColor, fogFactor);
-    })();
-
-    // OPACITY NODE - BOTW-style organic blade shape
-    material.opacityNode = Fn(() => {
-      const instancePos = positionsRef.element(instanceIndex);
-      const uvCoord = uv();
-      const u = uvCoord.x;
-      const v = uvCoord.y;
-
-      // ORGANIC BLADE SHAPE - wider at base, graceful taper to pointed tip
-      // Use smoothstep for natural curve instead of linear taper
-      const taperCurve = smoothstep(float(0), float(1.0), v);
-      // Width: 0.48 at base, tapering to 0.05 at tip with acceleration
-      const bladeHalfWidth = mix(
-        float(0.48),
-        float(0.05),
-        mul(taperCurve, taperCurve),
-      );
-
-      // Slight center-offset for asymmetry (more natural)
-      const centerOffset = mul(sin(mul(v, float(3.14))), float(0.02));
-      const distFromCenter = abs(sub(u, add(float(0.5), centerOffset)));
-
-      // Soft edge falloff for anti-aliasing
-      const edgeSoftness = float(0.08);
-      const inBlade = sub(
-        float(1),
-        smoothstep(
-          sub(bladeHalfWidth, edgeSoftness),
-          bladeHalfWidth,
-          distFromCenter,
-        ),
-      );
-
-      // Very soft bottom fade (grass emerges from ground)
-      const bottomFade = smoothstep(float(0), float(0.08), v);
-
-      // Slight tip fade for softness
-      const tipFade = sub(float(1), smoothstep(float(0.92), float(1.0), v));
-
-      // Distance fade (smooth falloff at render distance)
-      const dx = sub(instancePos.x, cameraPosition.x);
-      const dz = sub(instancePos.z, cameraPosition.z);
-      const distSq = add(mul(dx, dx), mul(dz, dz));
-      const distanceFade = sub(
-        float(1.0),
-        smoothstep(fadeStartSq, fadeEndSq, distSq),
-      );
-
-      return mul(mul(mul(inBlade, bottomFade), tipFade), distanceFade);
-    })();
-
-    // Material properties - MATCH TERRAIN EXACTLY
-    // TerrainShader uses: roughness = 1.0, metalness = 0.0
-    material.roughness = 1.0; // Fully matte - no specular (same as terrain)
-    material.metalness = 0.0; // Non-metallic (same as terrain)
-    material.side = THREE.DoubleSide;
-    material.shadowSide = THREE.DoubleSide; // Ensure proper shadow reception on both sides
-    material.transparent = true;
-    material.alphaTest = 0.1;
-    material.depthWrite = true;
-    material.fog = false; // We handle fog in shader
-
-    return material;
-  }
-
-  // Track last grid cell indices (integers) for stable comparison
-  private lastGridCellX = -999999;
-  private lastGridCellZ = -999999;
-  // Track the position used for last compute to ensure significant movement
-  private lastComputePos = new THREE.Vector3(Infinity, Infinity, Infinity);
-
-  // Minimum camera movement (in meters) before allowing grid scroll
-  // This prevents grid updates during orbit camera rotation
-  private static readonly GRID_SCROLL_THRESHOLD = 2.0;
-
-  private runCompute(): void {
-    if (!this.renderer || !this.computeNode) return;
-
-    const camera = this.world.camera;
-    if (!camera) return;
-
-    // SNAP grid origin to cell boundaries using INTEGER cell indices
-    const cellSize = GRASS_CONFIG.CELL_SIZE;
-    const gridHalfSize = (GRID_CELLS * cellSize) / 2;
-
-    // Calculate integer cell index for grid origin
-    const gridCellX = Math.floor((camera.position.x - gridHalfSize) / cellSize);
-    const gridCellZ = Math.floor((camera.position.z - gridHalfSize) / cellSize);
-
-    // Convert back to world position
-    const snappedX = gridCellX * cellSize;
-    const snappedZ = gridCellZ * cellSize;
-
-    this.uGridOrigin.value.set(snappedX, snappedZ);
-    this.uCameraPos.value.copy(camera.position);
-
-    // Update camera forward direction for frustum culling
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(camera.quaternion);
-    this.uCameraForward.value.set(forward.x, 0, forward.z).normalize();
-
-    this.renderer.compute(this.computeNode);
-
-    // Store integer cell indices for stable comparison
-    this.lastGridCellX = gridCellX;
-    this.lastGridCellZ = gridCellZ;
-    this.lastComputePos.copy(camera.position);
-  }
-
-  private needsGridScroll(camera: THREE.Camera): boolean {
-    // First check: has camera moved significantly since last compute?
-    // This prevents grid updates during orbit rotation
-    const dx = camera.position.x - this.lastComputePos.x;
-    const dz = camera.position.z - this.lastComputePos.z;
-    const distSq = dx * dx + dz * dz;
-    const thresholdSq = ProceduralGrassSystem.GRID_SCROLL_THRESHOLD ** 2;
-
-    if (distSq < thresholdSq) {
-      return false; // Camera hasn't moved enough - don't scroll
-    }
-
-    // Calculate current integer cell index
-    const cellSize = GRASS_CONFIG.CELL_SIZE;
-    const gridHalfSize = (GRID_CELLS * cellSize) / 2;
-    const gridCellX = Math.floor((camera.position.x - gridHalfSize) / cellSize);
-    const gridCellZ = Math.floor((camera.position.z - gridHalfSize) / cellSize);
-
-    // Compare INTEGER cell indices (no floating point issues)
-    return gridCellX !== this.lastGridCellX || gridCellZ !== this.lastGridCellZ;
-  }
-
-  private tempForward = new THREE.Vector3();
-
-  update(deltaTime: number): void {
-    if (!this.grassInitialized || !this.mesh) return;
-
-    if (this.windEnabled) {
-      this.uTime.value += deltaTime;
-    }
-
-    const camera = this.world.camera;
-    if (!camera) return;
-
-    this.uCameraPos.value.copy(camera.position);
-
-    // Update camera forward for frustum culling
-    this.tempForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
-    const forwardXZ = this.tempForward
-      .set(this.tempForward.x, 0, this.tempForward.z)
-      .normalize();
-    this.uCameraForward.value.copy(forwardXZ);
-
-    this.updateDisplacersFromEntities(camera.position);
-
-    // Re-run compute ONLY when grid scrolls (snapped origin changed)
-    // Frustum culling is done in vertex shader, so rotation doesn't need recompute
-    // This keeps grass positions stable during camera rotation
-    if (this.needsGridScroll(camera)) {
-      this.runCompute();
-    }
-  }
-
-  /** Update displacer positions from nearby players and mobs */
-  private updateDisplacersFromEntities(cameraPos: THREE.Vector3): void {
-    const maxDistSq = 3600; // 60m radius
     let idx = 0;
+    for (let row = 0; row < rowCount; row++) {
+      const v = row / segments;
+      const y = v * height;
+      const halfWidth = taper(v);
 
-    const entities = this.world.entities as {
-      players?: Map<string, { position?: THREE.Vector3 }>;
-      items?: Map<string, { position?: THREE.Vector3; type?: string }>;
-    } | null;
-    if (!entities) return;
+      const left = row * 2;
+      const right = left + 1;
 
-    // Helper to check and add displacer
-    const tryAddDisplacer = (position: THREE.Vector3 | undefined) => {
-      if (idx >= GRASS_CONFIG.MAX_DISPLACERS || !position) return;
-      const dx = position.x - cameraPos.x;
-      const dz = position.z - cameraPos.z;
-      if (dx * dx + dz * dz <= maxDistSq) {
-        this.displacerUniforms[idx++].value.copy(position);
+      positions[3 * left + 0] = -halfWidth;
+      positions[3 * left + 1] = y;
+      positions[3 * left + 2] = 0;
+
+      positions[3 * right + 0] = halfWidth;
+      positions[3 * right + 1] = y;
+      positions[3 * right + 2] = 0;
+
+      uvs[2 * left + 0] = 0.0;
+      uvs[2 * left + 1] = v;
+      uvs[2 * right + 0] = 1.0;
+      uvs[2 * right + 1] = v;
+
+      if (row > 0) {
+        const prevLeft = (row - 1) * 2;
+        const prevRight = prevLeft + 1;
+
+        indices[idx++] = prevLeft;
+        indices[idx++] = prevRight;
+        indices[idx++] = right;
+
+        indices[idx++] = prevLeft;
+        indices[idx++] = right;
+        indices[idx++] = left;
       }
-    };
-
-    // Players
-    entities.players?.forEach((p) => tryAddDisplacer(p.position));
-
-    // Mobs/NPCs
-    entities.items?.forEach((item) => {
-      const type = item.type?.toLowerCase() ?? "";
-      if (
-        type.includes("mob") ||
-        type.includes("npc") ||
-        type.includes("player")
-      ) {
-        tryAddDisplacer(item.position);
-      }
-    });
-
-    // Clear unused displacers
-    for (let i = idx; i < GRASS_CONFIG.MAX_DISPLACERS; i++) {
-      this.displacerUniforms[i].value.set(99999, 0, 99999);
     }
+
+    const tip = rowCount * 2;
+    positions[3 * tip + 0] = 0;
+    positions[3 * tip + 1] = height;
+    positions[3 * tip + 2] = 0;
+    uvs[2 * tip + 0] = 0.5;
+    uvs[2 * tip + 1] = 1.0;
+
+    const lastLeft = (rowCount - 1) * 2;
+    const lastRight = lastLeft + 1;
+    indices[idx++] = lastLeft;
+    indices[idx++] = lastRight;
+    indices[idx++] = tip;
+
+    const geom = new THREE.BufferGeometry();
+
+    const posAttribute = new THREE.BufferAttribute(positions, 3);
+    posAttribute.setUsage(THREE.StaticDrawUsage);
+    geom.setAttribute("position", posAttribute);
+
+    const uvAttribute = new THREE.BufferAttribute(uvs, 2);
+    uvAttribute.setUsage(THREE.StaticDrawUsage);
+    geom.setAttribute("uv", uvAttribute);
+
+    const indexAttribute = new THREE.BufferAttribute(indices, 1);
+    indexAttribute.setUsage(THREE.StaticDrawUsage);
+    geom.setIndex(indexAttribute);
+
+    return geom;
   }
 
-  private scheduleHeightmapRefresh(): void {
-    if (!this.grassInitialized) return;
-    if (this.heightmapRefreshTimeout !== null) return;
+  update(_deltaTime: number): void {
+    if (!this.grassInitialized || !this.mesh || !this.ssbo || !this.renderer)
+      return;
 
-    this.heightmapRefreshTimeout = setTimeout(() => {
-      this.heightmapRefreshTimeout = null;
-      this.updateHeightmap()
-        .then(() => {
-          this.createComputeShader();
-          this.runCompute();
-        })
-        .catch(() => {
-          console.warn("[ProceduralGrass] Heightmap refresh failed");
-        });
-    }, 200);
+    const camera = this.world.camera;
+    if (!camera) return;
+
+    const playerPos = camera.position;
+
+    // Update uniforms
+    uniforms.uPlayerPosition.value.copy(playerPos);
+
+    // Camera frustum data
+    const proj = camera.projectionMatrix;
+    uniforms.uCameraMatrix.value.copy(proj).multiply(camera.matrixWorldInverse);
+    camera.getWorldDirection(uniforms.uCameraForward.value);
+
+    // Move grass mesh to follow player (XZ only, Y at 0 since heightmap handles Y)
+    this.mesh.position.set(playerPos.x, 0, playerPos.z);
+
+    // Run compute shader
+    this.renderer.computeAsync(this.ssbo.computeUpdate);
   }
 
-  /**
-   * Update heightmap texture (call when terrain changes)
-   */
-  async updateHeightmap(): Promise<void> {
-    await this.generateHeightmapTexture();
-  }
-
-  /** Lazily acquire building collision service from TownSystem */
-  private tryAcquireBuildingCollisionService(): void {
-    if (this.buildingCollisionService) return;
-    const townSystem = this.world.getSystem("towns") as {
-      getCollisionService?: () => BuildingCollisionService;
-    } | null;
-    this.buildingCollisionService = townSystem?.getCollisionService?.() ?? null;
-  }
-
-  /** Check if a world position is inside a building */
-  private isInsideBuilding(worldX: number, worldZ: number): boolean {
-    this.tryAcquireBuildingCollisionService();
-    if (!this.buildingCollisionService) return false;
-    const result = this.buildingCollisionService.queryCollision(
-      Math.floor(worldX),
-      Math.floor(worldZ),
-      0,
-    );
-    return result.isInsideBuilding;
-  }
-
-  getActiveInstanceCount(): number {
-    return GRASS_CONFIG.MAX_INSTANCES;
-  }
-
-  static getConfig(): typeof GRASS_CONFIG {
-    return GRASS_CONFIG;
-  }
-
-  // ============================================================================
-  // DEBUG CONTROLS - For GrassDebugPanel
-  // ============================================================================
-
-  /** Get the grass mesh for visibility control */
+  // Public API
   getMesh(): THREE.InstancedMesh | null {
     return this.mesh;
   }
 
-  /** Set grass visibility */
   setVisible(visible: boolean): void {
-    if (this.mesh) {
-      this.mesh.visible = visible;
-    }
+    if (this.mesh) this.mesh.visible = visible;
   }
 
-  /** Check if grass is visible */
   isVisible(): boolean {
     return this.mesh?.visible ?? false;
   }
 
-  /** Get current time uniform (for wind animation) */
-  getTime(): number {
-    return this.uTime.value;
-  }
-
-  /** Pause/resume wind animation */
-  setWindEnabled(enabled: boolean): void {
-    this.windEnabled = enabled;
-  }
-
-  /** Check if wind is enabled */
-  isWindEnabled(): boolean {
-    return this.windEnabled;
-  }
-
-  // ============================================================================
-  // SHADER PARAMETER SETTERS - Real-time control from debug panel
-  // ============================================================================
-
-  /** Set wind strength (0-0.5 typical) */
-  setWindStrength(value: number): void {
-    this.uWindStrength.value = value;
-  }
-
-  /** Get current wind strength */
-  getWindStrength(): number {
-    return this.uWindStrength.value;
-  }
-
-  /** Set wind speed (0-1 typical) */
-  setWindSpeed(value: number): void {
-    this.uWindSpeed.value = value;
-  }
-
-  /** Get current wind speed */
-  getWindSpeed(): number {
-    return this.uWindSpeed.value;
-  }
-
-  /** Set blade height in meters (0.1-0.6 typical) */
-  setBladeHeight(value: number): void {
-    this.uBladeHeight.value = value;
-  }
-
-  /** Get current blade height */
-  getBladeHeight(): number {
-    return this.uBladeHeight.value;
-  }
-
-  /** Set blade width in meters (0.01-0.05 typical) */
-  setBladeWidth(value: number): void {
-    this.uBladeWidth.value = value;
-  }
-
-  /** Get current blade width */
-  getBladeWidth(): number {
-    return this.uBladeWidth.value;
-  }
-
-  /** Set fade start distance in meters */
-  setFadeStart(value: number): void {
-    this.uFadeStart.value = value;
-  }
-
-  /** Get current fade start distance */
-  getFadeStart(): number {
-    return this.uFadeStart.value;
-  }
-
-  /** Set fade end distance in meters */
-  setFadeEnd(value: number): void {
-    this.uFadeEnd.value = value;
-  }
-
-  /** Get current fade end distance */
-  getFadeEnd(): number {
-    return this.uFadeEnd.value;
-  }
-
-  // ================================================================
-  // DISPLACER CONTROLS (grass bends away from players/entities)
-  // ================================================================
-
-  /** Update all displacers at once. Unused slots are set to infinity. */
-  setDisplacers(positions: THREE.Vector3[]): void {
-    const count = Math.min(positions.length, GRASS_CONFIG.MAX_DISPLACERS);
-    for (let i = 0; i < GRASS_CONFIG.MAX_DISPLACERS; i++) {
-      if (i < count) {
-        this.displacerUniforms[i].value.copy(positions[i]);
-      } else {
-        this.displacerUniforms[i].value.set(99999, 0, 99999);
-      }
-    }
-  }
-
-  /** Set a single displacer position by index (0-7) */
-  setDisplacerPosition(index: number, position: THREE.Vector3): void {
-    if (index >= 0 && index < GRASS_CONFIG.MAX_DISPLACERS) {
-      this.displacerUniforms[index].value.copy(position);
-    }
-  }
-
-  /** Set the first displacer (typically the local player) */
-  setPlayerPosition(x: number, y: number, z: number): void {
-    this.displacerUniforms[0].value.set(x, y, z);
-  }
-
-  /** Set the first displacer from Vector3 */
-  setPlayerPositionVec3(position: THREE.Vector3): void {
-    this.displacerUniforms[0].value.copy(position);
-  }
-
-  /** Clear a displacer by moving it far away */
-  clearDisplacer(index: number): void {
-    if (index >= 0 && index < GRASS_CONFIG.MAX_DISPLACERS) {
-      this.displacerUniforms[index].value.set(99999, 0, 99999);
-    }
-  }
-
-  /** Clear all displacers */
-  clearAllDisplacers(): void {
-    this.displacerUniforms.forEach((u) => u.value.set(99999, 0, 99999));
-  }
-
-  setDisplacerRadius(radius: number): void {
-    this.uDisplacerRadius.value = radius;
-  }
-
-  getDisplacerRadius(): number {
-    return this.uDisplacerRadius.value;
-  }
-
-  setDisplacerStrength(strength: number): void {
-    this.uDisplacerStrength.value = strength;
-  }
-
-  getDisplacerStrength(): number {
-    return this.uDisplacerStrength.value;
-  }
-
-  getMaxDisplacers(): number {
-    return GRASS_CONFIG.MAX_DISPLACERS;
+  static getConfig(): typeof config {
+    return config;
   }
 
   stop(): void {
@@ -1733,26 +841,10 @@ export class ProceduralGrassSystem extends System {
     this.mesh?.geometry.dispose();
     (this.mesh?.material as THREE.Material | undefined)?.dispose();
     this.mesh = null;
-    this.heightmapTexture?.dispose();
-    this.heightmapTexture = null;
-    this.heightmapTextureNode = null;
-    // Note: noiseTexture is shared with TerrainShader, don't dispose
-    this.noiseTexture = null;
-    this.noiseTextureNode = null;
-    if (this.heightmapRefreshTimeout !== null) {
-      clearTimeout(this.heightmapRefreshTimeout);
-      this.heightmapRefreshTimeout = null;
-    }
+    this.ssbo = null;
     this.grassInitialized = false;
+    this.noiseTexture?.dispose();
+    noiseAtlasTexture = null;
+    heightmapTexture = null;
   }
-}
-
-// ============================================================================
-// HELPER FUNCTIONS
-// ============================================================================
-
-/** Smoothstep helper matching GLSL smoothstep */
-function smoothstepJS(edge0: number, edge1: number, x: number): number {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
-  return t * t * (3 - 2 * t);
 }

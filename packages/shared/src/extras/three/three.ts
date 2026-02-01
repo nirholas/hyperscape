@@ -123,6 +123,35 @@ export const {
   viewportSize,
 } = THREE_NAMESPACE.TSL;
 
+// Additional TSL functions for grass system
+export const {
+  // Hash and random
+  hash,
+  // Transform functions
+  rotate,
+  // Time
+  time,
+  // Constants
+  PI,
+  PI2,
+  INFINITY,
+  EPSILON,
+  // Remapping
+  remap,
+  // Storage
+  storage,
+  instancedArray,
+  // Additional math
+  negate,
+  oneMinus,
+  dFdx,
+  dFdy,
+  // Select
+  select,
+  // Property access
+  element,
+} = THREE_NAMESPACE.TSL;
+
 // Re-export Node Materials (these ARE directly on three/webgpu)
 export {
   MeshStandardNodeMaterial,

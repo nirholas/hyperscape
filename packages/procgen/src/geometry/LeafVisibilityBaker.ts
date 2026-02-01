@@ -190,7 +190,7 @@ export interface LeafVisibilityData {
  * Options for visibility baking.
  */
 export interface LeafVisibilityBakeOptions {
-  /** Number of horizontal directions to sample (default: 16) */
+  /** Number of horizontal directions to sample (default: 8, reduced for mobile) */
   directionCount?: number;
   /** Distance from tree center to camera (default: auto from bounds) */
   cameraDistance?: number;
@@ -240,7 +240,7 @@ export function bakeLeafVisibility(
   const startTime = performance.now();
 
   const {
-    directionCount = 16,
+    directionCount = 8, // Reduced from 16 for mobile performance
     depthEpsilon = 0.01,
     resolution = 512,
   } = options;

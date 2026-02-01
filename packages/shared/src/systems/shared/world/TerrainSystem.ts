@@ -42,6 +42,7 @@ import {
  */
 
 import type { BiomeData } from "../../../types/core/core";
+import type { BiomeTreeConfig } from "../../../types/world/world-types";
 import type {
   ResourceNode,
   TerrainTile,
@@ -2347,8 +2348,6 @@ export class TerrainSystem extends System {
   ): Float32Array {
     const vertexCount = vertices.length / 2;
     const influences = new Float32Array(vertexCount);
-    const tileOffsetX = tileX * this.CONFIG.TILE_SIZE;
-    const tileOffsetZ = tileZ * this.CONFIG.TILE_SIZE;
 
     for (let i = 0; i < vertexCount; i++) {
       const localX = vertices[i * 2];
@@ -3790,19 +3789,19 @@ export class TerrainSystem extends System {
       return;
     }
 
-    // TEMPORARILY DISABLED - debugging leaf rendering
-    // this.generateTreesForTile(tile, biomeData);
+    // Re-enabled: tree spawning with optimized LOD system
+    this.generateTreesForTile(tile, biomeData);
 
     // Re-enabled for ore LOD testing
     this.generateOtherResourcesForTile(tile, biomeData);
 
     // Generate decorative rocks (client only)
-    // NOTE: Plants disabled - not working/looking good yet
-    // const isClient = this.world.isClient || false;
-    // if (isClient) {
-    //   this.generateDecorativeRocksForTile(tile, biomeData);
-    //   // this.generateDecorativePlantsForTile(tile, biomeData); // DISABLED
-    // }
+    const isClient = this.world.isClient || false;
+    if (isClient) {
+      this.generateDecorativeRocksForTile(tile, biomeData);
+      // NOTE: Plants disabled - not working/looking good yet
+      // this.generateDecorativePlantsForTile(tile, biomeData);
+    }
     // Roads are now generated using noise patterns instead of segments
   }
 
@@ -3930,12 +3929,34 @@ export class TerrainSystem extends System {
   // }
 
   /**
+   * Default tree configuration for biomes without explicit tree config.
+   * Targets ~1 tree per 10m spacing (density 100 = ~41 trees per 64m tile).
+   */
+  private static readonly DEFAULT_TREE_CONFIG: BiomeTreeConfig = {
+    enabled: true,
+    distribution: {
+      tree_normal: 40, // Quaking Aspen
+      tree_oak: 30, // Black Oak
+      tree_maple: 15, // Acer (Japanese Maple)
+      tree_willow: 10, // Weeping Willow
+      tree_yew: 5, // European Larch
+    },
+    density: 100, // ~1 tree per 10m (41 trees per 64m tile)
+    minSpacing: 8, // Minimum 8m between trees
+    clustering: true,
+    clusterSize: 4,
+    scaleVariation: [0.7, 1.3],
+  };
+
+  /**
    * Generate harvestable trees for a tile based on biome configuration.
    * Uses the extracted BiomeResourceGenerator for the actual algorithm.
+   * Falls back to DEFAULT_TREE_CONFIG if biome has no tree config.
    */
   private generateTreesForTile(tile: TerrainTile, biomeData: BiomeData): void {
-    const treeConfig = biomeData.trees;
-    if (!treeConfig) {
+    // Use biome tree config or fall back to defaults
+    const treeConfig = biomeData.trees ?? TerrainSystem.DEFAULT_TREE_CONFIG;
+    if (!treeConfig.enabled) {
       return;
     }
 

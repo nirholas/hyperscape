@@ -4,25 +4,32 @@
  * Interactive tool for visualizing and testing tree generation.
  */
 
+import { createColoredCube } from "@hyperscape/impostor";
 import * as THREE from "three";
-import * as THREE_WEBGPU from "three/webgpu";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
+import * as THREE_WEBGPU from "three/webgpu";
 import {
-  TreeGenerator,
-  getPreset,
-  type TreeMeshResult,
+  BUILDING_RECIPES,
+  BuildingGenerator,
+  TownGenerator,
+  type BuildingStats,
+  type GeneratedBuilding,
+  type GeneratedTown,
+  type TownSize,
+} from "../src/building/index.js";
+import {
+  computeQuickVertexAO,
   disposeTreeMesh,
-  TreeImpostor,
+  getPreset,
+  ImpostorBaker,
   OctahedralImpostor,
   OctahedronType,
-  ImpostorBaker,
-  type ImpostorInstance,
+  TreeGenerator,
+  TreeImpostor,
   type ImpostorBakeResult,
-  computeVertexAO,
-  computeQuickVertexAO,
-  cycleImpostorDebugMode,
-  setImpostorDebugMode,
+  type ImpostorInstance,
+  type TreeMeshResult,
 } from "../src/index.js";
 import {
   generateFromPreset as generatePlantFromPreset,
@@ -32,31 +39,17 @@ import {
   type PlantPresetName,
 } from "../src/plant/index.js";
 import {
+  DEFAULT_PARAMS as ROCK_DEFAULT_PARAMS,
+  ROCK_TYPE_PRESETS,
   RockGenerator,
   SHAPE_PRESETS,
-  ROCK_TYPE_PRESETS,
-  DEFAULT_PARAMS as ROCK_DEFAULT_PARAMS,
-  type GeneratedRock,
-  type PartialRockParams,
   type BaseShapeType,
   type ColorModeType,
+  type GeneratedRock,
+  type PartialRockParams,
   type TexturePatternType,
   type UVMethodType,
 } from "../src/rock/index.js";
-import {
-  BuildingGenerator,
-  BUILDING_RECIPES,
-  TownGenerator,
-  type GeneratedTown,
-  type TownSize,
-  type BuildingStats,
-  type GeneratedBuilding,
-} from "../src/building/index.js";
-import {
-  createColoredCube,
-  setImpostorAlphaThreshold,
-  getImpostorAlphaThreshold,
-} from "@hyperscape/impostor";
 import { NavigationVisualizer } from "./NavigationVisualizer.js";
 
 // DOM elements
@@ -110,6 +103,33 @@ const rockStatsPanel = document.getElementById("stats-rock")!;
 const buildingStatsPanel = document.getElementById("stats-building")!;
 const townStatsPanel = document.getElementById("stats-town")!;
 const treeDisplayControls = document.getElementById("tree-display-controls")!;
+
+// Leaf Cluster controls
+const showClustersCheckbox = document.getElementById(
+  "showClusters",
+) as HTMLInputElement;
+const showOctreeCellsCheckbox = document.getElementById(
+  "showOctreeCells",
+) as HTMLInputElement;
+const enableViewCullingCheckbox = document.getElementById(
+  "enableViewCulling",
+) as HTMLInputElement;
+const enableFrustumCullingCheckbox = document.getElementById(
+  "enableFrustumCulling",
+) as HTMLInputElement;
+const clusterDensityInput = document.getElementById(
+  "clusterDensity",
+) as HTMLInputElement;
+const clusterDensityValueSpan = document.getElementById("clusterDensityValue")!;
+const cullThresholdInput = document.getElementById(
+  "cullThreshold",
+) as HTMLInputElement;
+const cullThresholdValueSpan = document.getElementById("cullThresholdValue")!;
+const clusterCountSpan = document.getElementById("clusterCount")!;
+const visibleClustersSpan = document.getElementById("visibleClusters")!;
+const frustumCulledSpan = document.getElementById("frustumCulled")!;
+const viewCulledSpan = document.getElementById("viewCulled")!;
+const densityCulledSpan = document.getElementById("densityCulled")!;
 
 // Plant controls
 const plantPresetSelect = document.getElementById(
@@ -459,6 +479,25 @@ let forestInstances: ExtendedImpostorInstance[] = [];
 let flattenedSource: THREE.Group | null = null;
 let debugCube: THREE.Mesh | null = null;
 
+// Leaf Cluster visualization state
+interface ClusterData {
+  center: THREE.Vector3;
+  size: { width: number; height: number };
+  density: number;
+  leafCount: number;
+  octreeCell: number; // 0-63 for 4x4x4 grid
+}
+let clusterMesh: THREE.InstancedMesh | null = null;
+let octreeCellMesh: THREE.LineSegments | null = null;
+let clusterData: ClusterData[] = [];
+let clusterStats = {
+  total: 0,
+  visible: 0,
+  frustumCulled: 0,
+  viewCulled: 0,
+  densityCulled: 0,
+};
+
 type ImpostorSourceMode = "tree" | "flattened" | "debugCube";
 
 /**
@@ -534,23 +573,6 @@ async function initScene(): Promise<void> {
 
   // Handle resize
   window.addEventListener("resize", onWindowResize);
-
-  // Handle keyboard shortcuts
-  window.addEventListener("keydown", (e) => {
-    // Press 'D' to cycle impostor debug mode
-    if (e.key === "d" || e.key === "D") {
-      const mode = cycleImpostorDebugMode();
-      const modeNames = [
-        "Normal rendering",
-        "Raw UV (gradient = working)",
-        "Face Weights (flat = normal)",
-        "Atlas UV (slight gradient)",
-        "Raw Normal Atlas",
-        "Decoded Normals",
-      ];
-      console.log(`[Impostor] Debug mode: ${mode} (${modeNames[mode]})`);
-    }
-  });
 
   // Create navigation visualizer
   navigationVisualizer = new NavigationVisualizer(scene, camera);
@@ -758,6 +780,21 @@ function disposeTreeAssets(): void {
     currentTree = null;
   }
   disposeFlattenedSource();
+
+  // Dispose cluster visualization
+  clusterData = [];
+  if (clusterMesh) {
+    scene.remove(clusterMesh);
+    clusterMesh.geometry.dispose();
+    (clusterMesh.material as THREE.Material).dispose();
+    clusterMesh = null;
+  }
+  if (octreeCellMesh) {
+    scene.remove(octreeCellMesh);
+    octreeCellMesh.geometry.dispose();
+    (octreeCellMesh.material as THREE.Material).dispose();
+    octreeCellMesh = null;
+  }
 
   if (impostorInstance) {
     scene.remove(impostorInstance.mesh);
@@ -1872,6 +1909,12 @@ function animate(): void {
     }
   }
 
+  // Update cluster billboards to face camera and refresh culling
+  if (clusterMesh && showClustersCheckbox?.checked) {
+    // Update cluster visualization when camera moves
+    updateClusterVisualization();
+  }
+
   // Reset render info before rendering to get per-frame stats
   renderer.info.reset();
 
@@ -1965,7 +2008,7 @@ async function bakeImpostor(): Promise<void> {
       gridSizeX,
       gridSizeY,
       atlasSize,
-      alphaTest: getImpostorAlphaThreshold(),
+      alphaTest: 1,
       enableLighting, // Bake with normals for dynamic lighting
       useTSL: true, // WebGPU: Use TSL materials
     });
@@ -2499,6 +2542,374 @@ function setupEventListeners(): void {
       navigationVisualizer.clearUserPath();
     }
   });
+
+  // Leaf Cluster controls
+  showClustersCheckbox?.addEventListener("change", updateClusterVisualization);
+  showOctreeCellsCheckbox?.addEventListener(
+    "change",
+    updateClusterVisualization,
+  );
+  enableViewCullingCheckbox?.addEventListener(
+    "change",
+    updateClusterVisualization,
+  );
+  enableFrustumCullingCheckbox?.addEventListener(
+    "change",
+    updateClusterVisualization,
+  );
+
+  clusterDensityInput?.addEventListener("input", () => {
+    const value = parseInt(clusterDensityInput.value, 10);
+    clusterDensityValueSpan.textContent = `${value}%`;
+    updateClusterVisualization();
+  });
+
+  cullThresholdInput?.addEventListener("input", () => {
+    const value = parseInt(cullThresholdInput.value, 10) / 100;
+    cullThresholdValueSpan.textContent = value.toFixed(2);
+    updateClusterVisualization();
+  });
+}
+
+// ============================================================================
+// LEAF CLUSTER VISUALIZATION
+// ============================================================================
+
+/**
+ * Generate cluster data from tree leaves using octree-based spatial clustering.
+ */
+function generateClusterData(tree: TreeMeshResult): ClusterData[] {
+  const treeData = generator?.getLastTreeData();
+  if (!treeData || treeData.leaves.length === 0) return [];
+
+  const leaves = treeData.leaves;
+  const positions: THREE.Vector3[] = leaves.map((l) => l.position.clone());
+
+  // Calculate bounds
+  const bounds = new THREE.Box3();
+  for (const pos of positions) {
+    bounds.expandByPoint(pos);
+  }
+
+  // Target cluster count based on leaf count
+  const targetClusters = Math.max(
+    20,
+    Math.min(100, Math.ceil(leaves.length / 25)),
+  );
+
+  // Calculate octree cell size
+  const size = new THREE.Vector3();
+  bounds.getSize(size);
+  const avgDim = (size.x + size.y + size.z) / 3;
+  const cellSize = avgDim / Math.cbrt(targetClusters);
+
+  // Build spatial hash map
+  const cellMap = new Map<string, number[]>();
+  const cellKey = (pos: THREE.Vector3) => {
+    const x = Math.floor((pos.x - bounds.min.x) / cellSize);
+    const y = Math.floor((pos.y - bounds.min.y) / cellSize);
+    const z = Math.floor((pos.z - bounds.min.z) / cellSize);
+    return `${x},${y},${z}`;
+  };
+
+  for (let i = 0; i < positions.length; i++) {
+    const key = cellKey(positions[i]);
+    if (!cellMap.has(key)) cellMap.set(key, []);
+    cellMap.get(key)!.push(i);
+  }
+
+  // Extract clusters from cells
+  const clusters: ClusterData[] = [];
+  const minLeavesPerCluster = 3;
+
+  for (const [, indices] of cellMap) {
+    if (indices.length < minLeavesPerCluster) continue;
+
+    // Calculate center
+    const center = new THREE.Vector3();
+    for (const idx of indices) center.add(positions[idx]);
+    center.divideScalar(indices.length);
+
+    // Calculate bounds for this cluster
+    const clusterBounds = new THREE.Box3();
+    for (const idx of indices) clusterBounds.expandByPoint(positions[idx]);
+
+    const clusterSize = new THREE.Vector3();
+    clusterBounds.getSize(clusterSize);
+
+    // Calculate octree cell ID (4x4x4 = 64 cells)
+    const nx = size.x > 0 ? (center.x - bounds.min.x) / size.x : 0.5;
+    const ny = size.y > 0 ? (center.y - bounds.min.y) / size.y : 0.5;
+    const nz = size.z > 0 ? (center.z - bounds.min.z) / size.z : 0.5;
+    const cx = Math.min(3, Math.floor(nx * 4));
+    const cy = Math.min(3, Math.floor(ny * 4));
+    const cz = Math.min(3, Math.floor(nz * 4));
+    const octreeCell = cx + cy * 4 + cz * 16;
+
+    // Calculate density
+    const volume = Math.max(
+      0.001,
+      clusterSize.x * clusterSize.y * clusterSize.z,
+    );
+    const density = indices.length / volume;
+
+    clusters.push({
+      center,
+      size: {
+        width: Math.max(0.5, Math.max(clusterSize.x, clusterSize.z) * 1.3),
+        height: Math.max(0.5, clusterSize.y * 1.3),
+      },
+      density,
+      leafCount: indices.length,
+      octreeCell,
+    });
+  }
+
+  return clusters;
+}
+
+/**
+ * Create instanced mesh for cluster visualization.
+ */
+function createClusterMesh(clusters: ClusterData[]): THREE.InstancedMesh {
+  // Create billboard quad geometry
+  const geometry = new THREE.PlaneGeometry(1, 1);
+  geometry.translate(0, 0.5, 0); // Anchor at bottom
+
+  // Create material with color based on octree cell
+  const material = new THREE.MeshBasicMaterial({
+    color: 0x00ff00,
+    transparent: true,
+    opacity: 0.6,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  });
+
+  const mesh = new THREE.InstancedMesh(geometry, material, clusters.length);
+  mesh.frustumCulled = false;
+
+  // Set up instance transforms and colors
+  const dummy = new THREE.Object3D();
+  const colors = new Float32Array(clusters.length * 3);
+
+  for (let i = 0; i < clusters.length; i++) {
+    const cluster = clusters[i];
+
+    dummy.position.copy(cluster.center);
+    dummy.position.y -= cluster.size.height * 0.5;
+    dummy.scale.set(cluster.size.width, cluster.size.height, 1);
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+
+    // Color based on octree cell (rainbow gradient)
+    const hue = cluster.octreeCell / 64;
+    const color = new THREE.Color().setHSL(hue, 0.8, 0.5);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+
+  mesh.instanceMatrix.needsUpdate = true;
+
+  // Add instance colors
+  const colorAttr = new THREE.InstancedBufferAttribute(colors, 3);
+  mesh.geometry.setAttribute("instanceColor", colorAttr);
+  mesh.instanceColor = colorAttr;
+
+  return mesh;
+}
+
+/**
+ * Create octree cell wireframe visualization.
+ */
+function createOctreeCellMesh(bounds: THREE.Box3): THREE.LineSegments {
+  const size = new THREE.Vector3();
+  bounds.getSize(size);
+
+  const cellSize = new THREE.Vector3(size.x / 4, size.y / 4, size.z / 4);
+  const vertices: number[] = [];
+
+  // Create 4x4x4 grid lines
+  for (let x = 0; x <= 4; x++) {
+    for (let y = 0; y <= 4; y++) {
+      for (let z = 0; z <= 4; z++) {
+        const px = bounds.min.x + x * cellSize.x;
+        const py = bounds.min.y + y * cellSize.y;
+        const pz = bounds.min.z + z * cellSize.z;
+
+        // X lines
+        if (x < 4) {
+          vertices.push(px, py, pz, px + cellSize.x, py, pz);
+        }
+        // Y lines
+        if (y < 4) {
+          vertices.push(px, py, pz, px, py + cellSize.y, pz);
+        }
+        // Z lines
+        if (z < 4) {
+          vertices.push(px, py, pz, px, py, pz + cellSize.z);
+        }
+      }
+    }
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(vertices, 3),
+  );
+
+  const material = new THREE.LineBasicMaterial({
+    color: 0xffff00,
+    transparent: true,
+    opacity: 0.3,
+  });
+
+  return new THREE.LineSegments(geometry, material);
+}
+
+/**
+ * Update cluster visualization based on current settings.
+ */
+function updateClusterVisualization(): void {
+  // Remove existing visualizations
+  if (clusterMesh) {
+    scene.remove(clusterMesh);
+    clusterMesh.geometry.dispose();
+    (clusterMesh.material as THREE.Material).dispose();
+    clusterMesh = null;
+  }
+  if (octreeCellMesh) {
+    scene.remove(octreeCellMesh);
+    octreeCellMesh.geometry.dispose();
+    (octreeCellMesh.material as THREE.Material).dispose();
+    octreeCellMesh = null;
+  }
+
+  // Reset stats
+  clusterStats = {
+    total: 0,
+    visible: 0,
+    frustumCulled: 0,
+    viewCulled: 0,
+    densityCulled: 0,
+  };
+
+  if (!currentTree || !showClustersCheckbox?.checked) {
+    updateClusterStats();
+    return;
+  }
+
+  // Generate clusters if needed
+  if (clusterData.length === 0) {
+    clusterData = generateClusterData(currentTree);
+  }
+
+  if (clusterData.length === 0) {
+    updateClusterStats();
+    return;
+  }
+
+  // Get settings
+  const density =
+    (clusterDensityInput?.value
+      ? parseInt(clusterDensityInput.value, 10)
+      : 100) / 100;
+  const cullThreshold =
+    (cullThresholdInput?.value ? parseInt(cullThresholdInput.value, 10) : -30) /
+    100;
+  const enableViewCull = enableViewCullingCheckbox?.checked ?? true;
+  const enableFrustumCull = enableFrustumCullingCheckbox?.checked ?? true;
+
+  // Filter clusters based on culling
+  const visibleClusters: ClusterData[] = [];
+  const cameraPos = camera.position;
+  const treeCenter = new THREE.Vector3(0, 0, 0); // Assume tree at origin
+
+  for (let i = 0; i < clusterData.length; i++) {
+    const cluster = clusterData[i];
+    clusterStats.total++;
+
+    // Density culling (deterministic based on index)
+    const densityHash = ((i * 12345 + 67890) % 1000) / 1000;
+    if (densityHash > density) {
+      clusterStats.densityCulled++;
+      continue;
+    }
+
+    // Frustum culling (simplified - check if in front of camera)
+    if (enableFrustumCull) {
+      const toCluster = cluster.center.clone().sub(cameraPos);
+      const cameraDir = new THREE.Vector3(0, 0, -1).applyQuaternion(
+        camera.quaternion,
+      );
+      if (toCluster.dot(cameraDir) < 0) {
+        clusterStats.frustumCulled++;
+        continue;
+      }
+    }
+
+    // View-dependent culling
+    if (enableViewCull) {
+      const viewDir = new THREE.Vector2(
+        treeCenter.x - cameraPos.x,
+        treeCenter.z - cameraPos.z,
+      ).normalize();
+
+      // Extract cell position from octree ID
+      const cellX = cluster.octreeCell % 4;
+      const cellZ = Math.floor(cluster.octreeCell / 16);
+      const normalizedX = (cellX - 1.5) / 1.5;
+      const normalizedZ = (cellZ - 1.5) / 1.5;
+
+      const facingDot = normalizedX * viewDir.x + normalizedZ * viewDir.y;
+
+      if (facingDot < cullThreshold) {
+        clusterStats.viewCulled++;
+        continue;
+      }
+    }
+
+    visibleClusters.push(cluster);
+    clusterStats.visible++;
+  }
+
+  // Create visualization for visible clusters
+  if (visibleClusters.length > 0) {
+    clusterMesh = createClusterMesh(visibleClusters);
+    scene.add(clusterMesh);
+  }
+
+  // Show octree cells if enabled
+  if (showOctreeCellsCheckbox?.checked && clusterData.length > 0) {
+    // Calculate bounds from clusters
+    const bounds = new THREE.Box3();
+    for (const cluster of clusterData) {
+      bounds.expandByPoint(cluster.center);
+    }
+    bounds.expandByScalar(1); // Add padding
+
+    octreeCellMesh = createOctreeCellMesh(bounds);
+    scene.add(octreeCellMesh);
+  }
+
+  updateClusterStats();
+}
+
+/**
+ * Update cluster statistics display.
+ */
+function updateClusterStats(): void {
+  if (clusterCountSpan)
+    clusterCountSpan.textContent = clusterStats.total.toString();
+  if (visibleClustersSpan)
+    visibleClustersSpan.textContent = clusterStats.visible.toString();
+  if (frustumCulledSpan)
+    frustumCulledSpan.textContent = clusterStats.frustumCulled.toString();
+  if (viewCulledSpan)
+    viewCulledSpan.textContent = clusterStats.viewCulled.toString();
+  if (densityCulledSpan)
+    densityCulledSpan.textContent = clusterStats.densityCulled.toString();
 }
 
 /**
@@ -2517,9 +2928,6 @@ async function init(): Promise<void> {
     parseGeneratorMode(activeTab?.getAttribute("data-mode") ?? null) ?? "tree";
   setMode(initialMode);
   generateCurrent();
-
-  // Reset debug mode to normal rendering (mode 0)
-  setImpostorDebugMode(0);
 
   // Auto-bake impostor on init for tree mode
   if (initialMode === "tree") {

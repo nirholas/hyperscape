@@ -105,8 +105,10 @@ const VARIANTS_PER_PRESET = 3;
 /**
  * Cache version - increment this when the generation algorithm changes
  * to invalidate cached variants and force regeneration.
+ *
+ * Version 2: Mobile-optimized LOD geometry (cheaper trees, trunk-only LOD1/LOD2)
  */
-const CACHE_VERSION = 1;
+const CACHE_VERSION = 3; // Bumped to regenerate trees with leaf transforms for cluster system
 
 /**
  * Crown shape types for LOD2 procedural billboards.
@@ -185,59 +187,70 @@ const VARIANT_SEEDS = [12345, 67890, 24680];
  */
 
 /**
- * LOD0 geometry options - High-quality close-up detail
- * Target: ~15,000-25,000 triangles per tree (acceptable for close-up)
+ * LOD0 geometry options - Mobile-optimized close-up detail
+ * Target: ~500 triangles per tree (cheap but recognizable)
  *
- * LOD0 is only used for trees within ~30m of the player.
- * Typically only 5-15 trees at LOD0 at any time, so we can afford quality.
- * The LOD system handles the transition to lower detail at distance.
+ * LOD0 is used for trees within ~25m of the player.
+ * Mobile-first: minimal geometry, leaves handled by clusters.
  *
- * Settings for nice-looking close-up trees:
- * - maxStems: 150 keeps full branch structure for visual appeal
- * - maxBranchDepth: 3 includes secondary branches for realism
- * - radialSegments: 6 (smooth cylindrical branches)
- * - maxLeaves: 2000 instanced cards for dense foliage
- * - segmentSamples: 3 for smooth curves
+ * Settings for efficient trees:
+ * - maxStems: 20 for trunk + first branches only
+ * - maxBranchDepth: 1 (trunk + main branches, no sub-branches)
+ * - radialSegments: 3 (triangle cross-section, minimum)
+ * - maxLeaves: 0 (clusters handle all foliage)
+ * - segmentSamples: 2 for smooth enough curves
  *
  * Budget breakdown for a typical tree:
- * - 150 stems × ~12 ring samples × 6 radial × 2 tris = ~21,600 branch tris
- * - 2000 leaf cards × 2 tris = 4,000 leaf tris
- * - Total: ~25,600 tris (acceptable for LOD0)
+ * - 20 stems × ~6 ring samples × 3 radial × 2 tris = ~720 branch tris
+ * - Leaves handled by GlobalLeafClusterInstancer (separate draw call)
+ * - Total: ~720 tris (great for mobile LOD0)
  */
 const LOD0_GEOMETRY_OPTIONS = {
-  radialSegments: 6, // Hexagonal cross-section (smooth branches)
-  maxLeaves: 2000, // Dense foliage for close-up viewing
-  maxBranchDepth: 3, // Full branch structure
-  maxStems: 150, // Enough for detailed tree structure
-  segmentSamples: 3, // Smooth curves
+  radialSegments: 3, // Triangle cross-section (minimum for smooth look)
+  maxLeaves: 2000, // Generate leaf transforms for cluster system (actual leaves render via clusters)
+  maxBranchDepth: 1, // Trunk + first level branches only
+  maxStems: 20, // Minimal but recognizable structure
+  segmentSamples: 2, // Smooth enough curves
 };
 
 /**
- * LOD1 geometry options - medium distance detail
- * Target: ~2,000-4,000 triangles per tree
+ * LOD1 geometry options - Trunk only (no branches)
+ * Target: ~100-200 triangles per tree
  *
- * LOD1 is used for trees 30-60m away. Still visible but not inspected closely.
- * More trees at LOD1 than LOD0, but still reasonable to have decent detail.
+ * LOD1 is used for trees 25-50m away. Trunk silhouette is enough.
+ * Leaves at 50% density handled by clusters.
  *
  * Budget breakdown:
- * - 50 stems × ~8 ring samples × 4 radial × 2 tris = ~3,200 branch tris
- * - 400 leaf cards × 2 tris = 800 leaf tris
- * - Total: ~4,000 tris (good for medium distance)
+ * - 1 stem (trunk) × ~6 ring samples × 3 radial × 2 tris = ~36 tris
+ * - Leaf clusters at 50% density (separate draw call)
+ * - Total: ~36 trunk tris + clusters
  */
 const LOD1_GEOMETRY_OPTIONS = {
-  radialSegments: 4, // Square cross-section (smoothed by normals)
-  maxLeaves: 400, // Enough for crown shape
-  maxBranchDepth: 2, // Trunk + main branches
-  maxStems: 50, // Main branch structure visible
-  segmentSamples: 2, // Fewer samples than LOD0
+  radialSegments: 3, // Triangle cross-section
+  maxLeaves: 0, // Clusters handle leaves at 50% density
+  maxBranchDepth: 0, // TRUNK ONLY - no branches
+  maxStems: 1, // Just the trunk
+  segmentSamples: 2,
 };
 
 /**
- * LOD2 "Card Tree" - billboard cards for distant viewing
- * Target: ~20-40 triangles
+ * LOD2 geometry options - Same as LOD1 (trunk only)
+ * Leaves at 80% culled (20% visible) via clusters
  *
- * Uses camera-facing billboard cards arranged in a cross pattern
- * for good 360° coverage with minimal geometry
+ * At 50-100m, trunk silhouette + sparse clusters is sufficient.
+ */
+const LOD2_GEOMETRY_OPTIONS = {
+  radialSegments: 3,
+  maxLeaves: 0,
+  maxBranchDepth: 0,
+  maxStems: 1,
+  segmentSamples: 1, // Minimal curve detail
+};
+
+/**
+ * LOD2 "Card Tree" - billboard cards for distant viewing (LEGACY)
+ * Now only used as fallback if trunk geometry fails.
+ * Primary LOD2 uses trunk mesh + leaf clusters.
  */
 const LOD2_CARD_OPTIONS = {
   trunkSegments: 3, // 3-sided trunk (triangle)
@@ -398,8 +411,65 @@ async function generateLOD1Tree(
 }
 
 /**
+ * Generate LOD2 tree using procgen with trunk-only geometry.
+ * This replaces the card tree approach with actual trunk mesh + leaf clusters.
+ */
+async function generateLOD2Tree(
+  presetName: string,
+  seed: number,
+): Promise<{
+  group: THREE.Group;
+  vertexCount: number;
+  triangleCount: number;
+} | null> {
+  if (!TreeGenerator) {
+    return null;
+  }
+
+  try {
+    // Create generator with LOD2 geometry settings (trunk only)
+    const generator = new TreeGenerator(presetName, {
+      geometry: LOD2_GEOMETRY_OPTIONS,
+    });
+
+    const result = generator.generate(seed);
+
+    // Count vertices and triangles
+    let vertexCount = 0;
+    let triangleCount = 0;
+
+    result.group.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.geometry) {
+        const geo = child.geometry;
+        if (geo.attributes.position) {
+          vertexCount += geo.attributes.position.count;
+        }
+        if (geo.index) {
+          triangleCount += geo.index.count / 3;
+        } else if (geo.attributes.position) {
+          triangleCount += geo.attributes.position.count / 3;
+        }
+      }
+    });
+
+    return {
+      group: result.group,
+      vertexCount,
+      triangleCount,
+    };
+  } catch (error) {
+    console.warn(
+      `[ProcgenTreeCache] LOD2 generation failed for ${presetName}:`,
+      error,
+    );
+    return null;
+  }
+}
+
+/**
  * Generate tree variants for a preset.
- * Generates both LOD0 (full detail) and LOD1 (simplified) for each variant.
+ * Generates LOD0, LOD1, and LOD2 with progressively simpler geometry.
+ * Leaves are handled by GlobalLeafClusterInstancer at all LOD levels.
  */
 /**
  * Extract colors and dimensions from a generated tree.
@@ -778,10 +848,10 @@ function serializeTreeVariant(variant: TreeVariant): SerializedTreeVariant {
  * Deserialize a tree variant from IndexedDB storage.
  * Creates simplified meshes from stored geometry - materials are basic.
  */
-function deserializeTreeVariant(
+async function deserializeTreeVariant(
   data: SerializedTreeVariant,
   presetName: string,
-): TreeVariant {
+): Promise<TreeVariant> {
   const leafColor = deserializeColor(data.leafColor);
   const barkColor = deserializeColor(data.barkColor);
 
@@ -825,26 +895,43 @@ function deserializeTreeVariant(
     }
   }
 
-  // Regenerate LOD2 card tree (procedural materials can't be serialized easily)
+  // Regenerate LOD2 trunk mesh (same as initial generation)
+  // Falls back to card tree if trunk generation fails
   const seed = VARIANT_SEEDS[0]; // Use first seed for consistency
-  const lod2Result = generateLOD2CardTree(
-    data.dimensions,
-    leafColor,
-    barkColor,
-    presetName,
-    seed,
-  );
+  let lod2Group: THREE.Group;
+  let lod2VertexCount: number;
+  let lod2TriangleCount: number;
+
+  // Try trunk-only generation first (matches initial generation behavior)
+  const lod2TrunkResult = await generateLOD2Tree(presetName, seed);
+  if (lod2TrunkResult) {
+    lod2Group = lod2TrunkResult.group;
+    lod2VertexCount = lod2TrunkResult.vertexCount;
+    lod2TriangleCount = lod2TrunkResult.triangleCount;
+  } else {
+    // Fallback to card tree
+    const lod2CardResult = generateLOD2CardTree(
+      data.dimensions,
+      leafColor,
+      barkColor,
+      presetName,
+      seed,
+    );
+    lod2Group = lod2CardResult.group;
+    lod2VertexCount = lod2CardResult.vertexCount;
+    lod2TriangleCount = lod2CardResult.triangleCount;
+  }
 
   return {
     group,
     lod1Group,
-    lod2Group: lod2Result.group,
+    lod2Group,
     vertexCount: data.vertexCount,
     triangleCount: data.triangleCount,
     lod1VertexCount: data.lod1VertexCount,
     lod1TriangleCount: data.lod1TriangleCount,
-    lod2VertexCount: data.lod2VertexCount,
-    lod2TriangleCount: data.lod2TriangleCount,
+    lod2VertexCount,
+    lod2TriangleCount,
     dimensions: { ...data.dimensions },
     leafColor,
     barkColor,
@@ -912,21 +999,26 @@ async function generateVariants(presetName: string): Promise<TreeVariant[]> {
         result.group,
       );
 
-      // Generate LOD1 using procgen with reduced settings (same seed for visual consistency)
+      // Generate LOD1 using procgen with trunk-only settings (same seed for visual consistency)
       const lod1Result = await generateLOD1Tree(presetName, seed);
 
       // Yield after LOD1 generation
       await yield_();
 
-      // Generate LOD2 "card tree" - ultra-simplified with procedural crown
-      // Crown shape is determined by the tree preset (conical for conifers, rounded for deciduous, etc.)
-      const lod2Result = generateLOD2CardTree(
-        dimensions,
-        leafColor,
-        barkColor,
-        presetName,
-        seed,
-      );
+      // Generate LOD2 trunk-only geometry (leaves handled by clusters at 20% density)
+      // Falls back to card tree if trunk generation fails
+      let lod2Result = await generateLOD2Tree(presetName, seed);
+
+      if (!lod2Result) {
+        // Fallback to card tree if trunk generation fails
+        lod2Result = generateLOD2CardTree(
+          dimensions,
+          leafColor,
+          barkColor,
+          presetName,
+          seed,
+        );
+      }
 
       // Store the variant
       variants.push({
@@ -1050,9 +1142,9 @@ async function ensureVariantsLoaded(presetName: string): Promise<PresetCache> {
         );
 
       if (cached && cached.length > 0) {
-        // Deserialize from cache
-        cache.variants = cached.map((data) =>
-          deserializeTreeVariant(data, presetName),
+        // Deserialize from cache (async due to LOD2 trunk generation)
+        cache.variants = await Promise.all(
+          cached.map((data) => deserializeTreeVariant(data, presetName)),
         );
         console.log(
           `[ProcgenTreeCache] Loaded ${cache.variants.length} cached variants for "${presetName}"`,

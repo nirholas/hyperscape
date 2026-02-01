@@ -81,7 +81,10 @@ export interface InstancedAnimatedImpostorConfig {
   scale?: number;
   /** Alpha clamp threshold (default: 0.05) */
   alphaClamp?: number;
-  /** Sprites per side in the atlas */
+  /**
+   * Sprites per side in the atlas (backwards compatible)
+   * @deprecated Use spritesX and spritesY from atlas
+   */
   spritesPerSide?: number;
   /** Use hemi-octahedron mapping */
   useHemiOctahedron?: boolean;
@@ -94,7 +97,10 @@ export interface InstancedAnimatedUniforms {
   frameIndex: { value: number };
   globalScale: { value: number };
   alphaClamp: { value: number };
+  /** @deprecated Use spritesX and spritesY */
   spritesPerSide: { value: number };
+  spritesX: { value: number };
+  spritesY: { value: number };
 }
 
 const PLANE_GEOMETRY = new PlaneGeometry();
@@ -137,11 +143,14 @@ export class InstancedAnimatedImpostor extends InstancedMesh<
     material.roughness = 0.7;
 
     const arrayTexture = config.atlas.atlasArray;
-    const spritesPerSide = config.spritesPerSide ?? 16;
+    // Support asymmetric grids (more horizontal than vertical views)
+    const spritesX = config.atlas.spritesX ?? config.spritesPerSide ?? 16;
+    const spritesY = config.atlas.spritesY ?? config.spritesPerSide ?? 8;
     const useHemiOct = config.useHemiOctahedron ?? true;
 
-    // Uniforms
-    const spritesPerSideUniform = uniform(spritesPerSide);
+    // Uniforms (separate X and Y for asymmetric grids)
+    const spritesXUniform = uniform(spritesX);
+    const spritesYUniform = uniform(spritesY);
     const alphaClamp = uniform(config.alphaClamp ?? 0.05);
     const useHemiOctahedron = uniform(useHemiOct ? 1 : 0);
     const frameIndex = uniform(0);
@@ -192,8 +201,10 @@ export class InstancedAnimatedImpostor extends InstancedMesh<
     const vVariantIdx = varying(float(), "vVariantIdx");
 
     // Vertex: billboarding + octahedral sprite selection per instance
+    // Uses asymmetric grid (more horizontal than vertical views)
     material.positionNode = Fn(() => {
-      const spritesMinusOne = vec2(spritesPerSideUniform.sub(1.0));
+      const spritesMinusOneX = spritesXUniform.sub(1.0);
+      const spritesMinusOneY = spritesYUniform.sub(1.0);
 
       // Read per-instance state
       const state = this._instanceStateStorage.element(instanceIndex);
@@ -270,8 +281,12 @@ export class InstancedAnimatedImpostor extends InstancedMesh<
         grid.assign(dir.xz.mul(0.5).add(0.5));
       });
 
-      const spriteGrid = grid.mul(spritesMinusOne);
-      vSprite.assign(min(round(spriteGrid), spritesMinusOne));
+      // Asymmetric grid: scale grid.x by spritesX, grid.y by spritesY
+      const spriteGridX = grid.x.mul(spritesMinusOneX);
+      const spriteGridY = grid.y.mul(spritesMinusOneY);
+      const spriteX = min(round(spriteGridX), spritesMinusOneX);
+      const spriteY = min(round(spriteGridY), spritesMinusOneY);
+      vSprite.assign(vec2(spriteX, spriteY));
       vSpriteUV.assign(uv());
 
       return vec4(projectedVertex, 1.0);
@@ -285,11 +300,15 @@ export class InstancedAnimatedImpostor extends InstancedMesh<
         Discard();
       });
 
-      const frameSize = float(1.0).div(spritesPerSideUniform);
+      // Asymmetric frame sizes for non-square grids
+      const frameSizeX = float(1.0).div(spritesXUniform);
+      const frameSizeY = float(1.0).div(spritesYUniform);
       const uvY = mix(vSpriteUV.y, float(1.0).sub(vSpriteUV.y), flipYFlag);
       const localUV = vec2(vSpriteUV.x, uvY);
-      const spriteUV = frameSize.mul(
-        vSprite.add(clamp(localUV, vec2(0), vec2(1))),
+      // Calculate UV with asymmetric cell sizes
+      const spriteUV = vec2(
+        frameSizeX.mul(vSprite.x.add(clamp(localUV.x, float(0), float(1)))),
+        frameSizeY.mul(vSprite.y.add(clamp(localUV.y, float(0), float(1)))),
       );
 
       // Get animation offset and variant
@@ -338,7 +357,9 @@ export class InstancedAnimatedImpostor extends InstancedMesh<
       frameIndex,
       globalScale,
       alphaClamp,
-      spritesPerSide: spritesPerSideUniform,
+      spritesPerSide: spritesXUniform, // Backwards compatible
+      spritesX: spritesXUniform,
+      spritesY: spritesYUniform,
       yawSpriteOffset,
     };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -51,15 +51,18 @@ import {
 import { BuildingCollisionService } from "./BuildingCollisionService";
 import type { FlatZone } from "../../../types/world/terrain";
 import { BFSPathfinder } from "../movement/BFSPathfinder";
+import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // Default configuration values
+// IMPORTANT: waterThreshold must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
+// to ensure town candidates are placed on actual land, not underwater
 const DEFAULTS = {
   townCount: 25,
   worldSize: 10000,
   minTownSpacing: 800,
   flatnessSampleRadius: 40,
   flatnessSampleCount: 16,
-  waterThreshold: 5.4,
+  waterThreshold: TERRAIN_CONSTANTS.WATER_THRESHOLD, // 9.0 - must match TerrainSystem
   optimalWaterDistanceMin: 30,
   optimalWaterDistanceMax: 150,
 } as const;
@@ -960,28 +963,31 @@ export class TownSystem extends System {
         // Cache the layout for BuildingRenderingSystem to reuse
         this.buildingLayouts.set(building.id, generated.layout);
 
-        // Use the building's stored Y position directly
-        // This was set when the building was created (before any flat zones)
-        // DO NOT query terrain height here - previous buildings in this batch
-        // may have already registered flat zones, which would include
-        // FOUNDATION_HEIGHT in the terrain height, causing double-counting
-        const groundY = building.position.y;
+        // CRITICAL: Calculate maximum terrain height under the building footprint
+        // On steep hills, the building floor must be at the HIGHEST terrain point
+        // Use getProceduralHeightAt to get raw terrain (ignoring previously registered flat zones)
+        const maxGroundY = this.calculateMaxTerrainHeightForBuilding(
+          building,
+          generated.layout,
+        );
 
         // Convert BuildingLayout to BuildingLayoutInput for collision service
         const layoutInput = this.convertLayoutToInput(generated.layout);
 
-        // Register collision with the service
+        // Register collision with the service using maxGroundY
+        // This ensures collision floor elevations match the flat zone height
         this.collisionService.registerBuilding(
           building.id,
           town.id,
           layoutInput,
-          { x: building.position.x, y: groundY, z: building.position.z },
+          { x: building.position.x, y: maxGroundY, z: building.position.z },
           building.rotation,
         );
 
         // Register flat zone with TerrainSystem (like duel arena does)
         // This ensures terrain heightmap is modified so players walk at correct height
-        this.registerBuildingFlatZone(building, generated.layout, groundY);
+        // Uses the same maxGroundY for consistency
+        this.registerBuildingFlatZone(building, generated.layout, maxGroundY);
 
         registeredBuildings++;
       }
@@ -1575,6 +1581,125 @@ export class TownSystem extends System {
   }
 
   /**
+   * Calculate the maximum terrain height under a building's footprint.
+   * On steep hills, the building floor must be at the HIGHEST terrain point
+   * to prevent terrain from poking through the building.
+   *
+   * Uses getProceduralHeightAt to get raw terrain height, ignoring previously
+   * registered flat zones (which could cause double-counting of FOUNDATION_HEIGHT).
+   *
+   * @param building - The building to calculate height for
+   * @param layout - The building's generated layout
+   * @returns Maximum terrain height under the building footprint
+   */
+  private calculateMaxTerrainHeightForBuilding(
+    building: TownBuilding,
+    layout: BuildingLayout,
+  ): number {
+    // Fallback to building center height if terrain system unavailable
+    if (!this.terrainSystem) {
+      return building.position.y;
+    }
+
+    // Get ground floor footprint
+    const groundFloor = layout.floorPlans[0];
+    if (!groundFloor?.footprint) {
+      return building.position.y;
+    }
+
+    const footprint = groundFloor.footprint;
+
+    // Find the bounding box of all occupied cells in LOCAL space
+    let minCol = Infinity,
+      maxCol = -Infinity;
+    let minRow = Infinity,
+      maxRow = -Infinity;
+
+    for (let row = 0; row < footprint.length; row++) {
+      for (let col = 0; col < footprint[row].length; col++) {
+        if (footprint[row][col]) {
+          minCol = Math.min(minCol, col);
+          maxCol = Math.max(maxCol, col);
+          minRow = Math.min(minRow, row);
+          maxRow = Math.max(maxRow, row);
+        }
+      }
+    }
+
+    // If no cells found, return center height
+    if (minCol === Infinity) {
+      return building.position.y;
+    }
+
+    // Get procedural height function (ignores flat zones)
+    const terrain = this.terrainSystem as {
+      getProceduralHeightAt?: (x: number, z: number) => number;
+      getHeightAt: (x: number, z: number) => number;
+    };
+    const getHeight = terrain.getProceduralHeightAt
+      ? (x: number, z: number) =>
+          (terrain.getProceduralHeightAt as (x: number, z: number) => number)(
+            x,
+            z,
+          )
+      : (x: number, z: number) => terrain.getHeightAt(x, z);
+
+    // Add padding for exterior area
+    const exteriorPadding = 3.0;
+
+    // Calculate building bounds in LOCAL space (before rotation)
+    const localMinX = (minCol - layout.width / 2) * CELL_SIZE - exteriorPadding;
+    const localMaxX =
+      (maxCol + 1 - layout.width / 2) * CELL_SIZE + exteriorPadding;
+    const localMinZ = (minRow - layout.depth / 2) * CELL_SIZE - exteriorPadding;
+    const localMaxZ =
+      (maxRow + 1 - layout.depth / 2) * CELL_SIZE + exteriorPadding;
+
+    // Get building rotation
+    const cos = Math.cos(building.rotation);
+    const sin = Math.sin(building.rotation);
+
+    // Helper to rotate a local point to world coordinates
+    const rotateToWorld = (
+      localX: number,
+      localZ: number,
+    ): { x: number; z: number } => ({
+      x: building.position.x + localX * cos - localZ * sin,
+      z: building.position.z + localX * sin + localZ * cos,
+    });
+
+    // Sample terrain at multiple points across the footprint
+    const samplePoints = [
+      // 4 corners
+      rotateToWorld(localMinX, localMinZ),
+      rotateToWorld(localMaxX, localMinZ),
+      rotateToWorld(localMinX, localMaxZ),
+      rotateToWorld(localMaxX, localMaxZ),
+      // Edge midpoints
+      rotateToWorld((localMinX + localMaxX) / 2, localMinZ),
+      rotateToWorld((localMinX + localMaxX) / 2, localMaxZ),
+      rotateToWorld(localMinX, (localMinZ + localMaxZ) / 2),
+      rotateToWorld(localMaxX, (localMinZ + localMaxZ) / 2),
+      // Center
+      { x: building.position.x, z: building.position.z },
+      // Interior samples for large buildings
+      rotateToWorld(localMinX / 2, localMinZ / 2),
+      rotateToWorld(localMaxX / 2, localMinZ / 2),
+      rotateToWorld(localMinX / 2, localMaxZ / 2),
+      rotateToWorld(localMaxX / 2, localMaxZ / 2),
+    ];
+
+    // Find maximum terrain height across all sample points
+    let maxTerrainHeight = building.position.y;
+    for (const point of samplePoints) {
+      const height = getHeight(point.x, point.z);
+      maxTerrainHeight = Math.max(maxTerrainHeight, height);
+    }
+
+    return maxTerrainHeight;
+  }
+
+  /**
    * Register a flat zone for a building with TerrainSystem.
    *
    * This is the key to making buildings walkable - same approach as duel arena:
@@ -1586,22 +1711,24 @@ export class TownSystem extends System {
    * seams between adjacent cells. The `getFlatZoneHeight` function only uses
    * the first matching zone, so multiple overlapping zones cause hard edges.
    *
+   * **STEEP HILL HANDLING:**
+   * - The groundY passed in is already the MAXIMUM terrain height (from calculateMaxTerrainHeightForBuilding)
+   * - Accounts for building rotation when calculating flat zone bounds
+   * - Flat zone is axis-aligned bounding box of the rotated footprint
+   *
    * For L-shaped buildings, we flatten the entire bounding box, which is
    * acceptable since the unused corners are typically small.
    *
    * @param building - The building to register a flat zone for
    * @param layout - The building's generated layout
-   * @param groundY - The ground height at the building position
+   * @param groundY - The MAXIMUM terrain height under the building footprint
    */
   private registerBuildingFlatZone(
     building: TownBuilding,
     layout: BuildingLayout,
-    groundY: number,
+    maxGroundY: number,
   ): void {
     if (!this.terrainSystem) return;
-
-    // Floor height is ground + foundation
-    const floorHeight = groundY + FOUNDATION_HEIGHT;
 
     // Get ground floor footprint
     const groundFloor = layout.floorPlans[0];
@@ -1615,7 +1742,7 @@ export class TownSystem extends System {
 
     const footprint = groundFloor.footprint;
 
-    // Find the bounding box of all occupied cells
+    // Find the bounding box of all occupied cells in LOCAL space
     let minCol = Infinity,
       maxCol = -Infinity;
     let minRow = Infinity,
@@ -1648,25 +1775,61 @@ export class TownSystem extends System {
     };
     if (!terrain.registerFlatZone) return;
 
-    // Calculate flat zone dimensions for the entire building footprint
-    // Add padding around exterior for door approach areas
-    const exteriorPadding = 1.5; // 1.5m around building (covers steps)
-    const blendRadius = 8.0; // 8m smooth blend for natural transitions
+    // Exterior padding and blend radius (must match calculateMaxTerrainHeightForBuilding)
+    const exteriorPadding = 3.0; // 3m around building
+    const blendRadius = 10.0; // 10m smooth blend for natural transitions on steep hills
 
-    // Calculate building bounds in local space
-    // Layout origin is at building center, cells are CELL_SIZE x CELL_SIZE
-    const buildingMinX = (minCol - layout.width / 2) * CELL_SIZE;
-    const buildingMaxX = (maxCol + 1 - layout.width / 2) * CELL_SIZE;
-    const buildingMinZ = (minRow - layout.depth / 2) * CELL_SIZE;
-    const buildingMaxZ = (maxRow + 1 - layout.depth / 2) * CELL_SIZE;
+    // Calculate building bounds in LOCAL space (before rotation)
+    const localMinX = (minCol - layout.width / 2) * CELL_SIZE - exteriorPadding;
+    const localMaxX =
+      (maxCol + 1 - layout.width / 2) * CELL_SIZE + exteriorPadding;
+    const localMinZ = (minRow - layout.depth / 2) * CELL_SIZE - exteriorPadding;
+    const localMaxZ =
+      (maxRow + 1 - layout.depth / 2) * CELL_SIZE + exteriorPadding;
 
-    // Flat zone dimensions including padding
-    const zoneWidth = buildingMaxX - buildingMinX + exteriorPadding * 2;
-    const zoneDepth = buildingMaxZ - buildingMinZ + exteriorPadding * 2;
+    // Get building rotation
+    const cos = Math.cos(building.rotation);
+    const sin = Math.sin(building.rotation);
 
-    // Flat zone center in world coordinates
-    const zoneCenterX = building.position.x + (buildingMinX + buildingMaxX) / 2;
-    const zoneCenterZ = building.position.z + (buildingMinZ + buildingMaxZ) / 2;
+    // Helper to rotate a local point to world coordinates
+    const rotateToWorld = (
+      localX: number,
+      localZ: number,
+    ): { x: number; z: number } => ({
+      x: building.position.x + localX * cos - localZ * sin,
+      z: building.position.z + localX * sin + localZ * cos,
+    });
+
+    // Calculate all 4 corners of the rotated footprint in world coordinates
+    const corners = [
+      rotateToWorld(localMinX, localMinZ),
+      rotateToWorld(localMaxX, localMinZ),
+      rotateToWorld(localMinX, localMaxZ),
+      rotateToWorld(localMaxX, localMaxZ),
+    ];
+
+    // Calculate axis-aligned bounding box of the rotated footprint
+    let worldMinX = Infinity,
+      worldMaxX = -Infinity;
+    let worldMinZ = Infinity,
+      worldMaxZ = -Infinity;
+
+    for (const corner of corners) {
+      worldMinX = Math.min(worldMinX, corner.x);
+      worldMaxX = Math.max(worldMaxX, corner.x);
+      worldMinZ = Math.min(worldMinZ, corner.z);
+      worldMaxZ = Math.max(worldMaxZ, corner.z);
+    }
+
+    // Floor height is MAXIMUM terrain height + foundation
+    // maxGroundY is already calculated by calculateMaxTerrainHeightForBuilding
+    const floorHeight = maxGroundY + FOUNDATION_HEIGHT;
+
+    // Flat zone dimensions from axis-aligned bounding box
+    const zoneWidth = worldMaxX - worldMinX;
+    const zoneDepth = worldMaxZ - worldMinZ;
+    const zoneCenterX = (worldMinX + worldMaxX) / 2;
+    const zoneCenterZ = (worldMinZ + worldMaxZ) / 2;
 
     const zone: FlatZone = {
       id: `building_${building.id}`,
@@ -1680,9 +1843,13 @@ export class TownSystem extends System {
 
     terrain.registerFlatZone(zone);
 
+    // Log for debugging steep hill cases
+    const centerHeight = building.position.y;
+    const heightDiff = maxGroundY - centerHeight;
     Logger.system(
       "TownSystem",
-      `Registered flat zone for ${building.id}: ${zoneWidth.toFixed(1)}x${zoneDepth.toFixed(1)}m at (${zoneCenterX.toFixed(0)}, ${zoneCenterZ.toFixed(0)}), height=${floorHeight.toFixed(2)}m`,
+      `Registered flat zone for ${building.id}: ${zoneWidth.toFixed(1)}x${zoneDepth.toFixed(1)}m at (${zoneCenterX.toFixed(0)}, ${zoneCenterZ.toFixed(0)}), ` +
+        `floor=${floorHeight.toFixed(2)}m (maxTerrain=${maxGroundY.toFixed(2)}, center=${centerHeight.toFixed(2)}, slopeDiff=${heightDiff.toFixed(2)}m)`,
     );
   }
 

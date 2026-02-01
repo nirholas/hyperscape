@@ -174,26 +174,42 @@ export class TreeImpostor {
         break;
     }
 
-    // Calculate tree dimensions from bounding box (for proper aspect ratio)
-    if (this.bakeResult?.boundingBox) {
+    // Calculate tree dimensions from bounding sphere to match baking scale
+    // The baker uses radius * 1.05 margin, so effective diameter = radius * 2 * 1.05
+    if (this.bakeResult?.boundingSphere) {
+      const sphere = this.bakeResult.boundingSphere;
+      // treeSize is the effective diameter used in baking (matches impostor plane size)
+      this.treeSize = sphere.radius * 2 * 1.05;
+
+      // For display purposes, also track actual dimensions from bounding box
+      if (this.bakeResult.boundingBox) {
+        const boxSize = new THREE.Vector3();
+        this.bakeResult.boundingBox.getSize(boxSize);
+        this.treeWidth = Math.max(boxSize.x, boxSize.z);
+        this.treeHeight = boxSize.y;
+      } else {
+        this.treeWidth = this.treeSize;
+        this.treeHeight = this.treeSize;
+      }
+
+      // Height offset: distance from ground to sphere center minus half the effective diameter
+      // This positions the impostor so the bottom matches the original tree's bottom
+      const boxMinY = this.bakeResult.boundingBox
+        ? this.bakeResult.boundingBox.min.y
+        : sphere.center.y - sphere.radius;
+      this.heightOffset = boxMinY;
+    } else if (this.bakeResult?.boundingBox) {
+      // Fallback: compute sphere from box
       const boxSize = new THREE.Vector3();
       this.bakeResult.boundingBox.getSize(boxSize);
-      this.treeWidth = Math.max(boxSize.x, boxSize.z); // Horizontal extent
-      this.treeHeight = boxSize.y; // Vertical extent
-      this.treeSize = Math.max(this.treeWidth, this.treeHeight); // For backward compat
+      this.treeWidth = Math.max(boxSize.x, boxSize.z);
+      this.treeHeight = boxSize.y;
 
-      // Height offset: distance from bottom of bbox to its center
-      const boxCenter = new THREE.Vector3();
-      this.bakeResult.boundingBox.getCenter(boxCenter);
-      this.heightOffset = boxCenter.y - boxSize.y / 2;
-    } else if (this.bakeResult?.boundingSphere) {
-      // Fallback to sphere-based calculation
-      this.treeSize = this.bakeResult.boundingSphere.radius * 2;
-      this.treeWidth = this.treeSize;
-      this.treeHeight = this.treeSize;
-      this.heightOffset =
-        this.bakeResult.boundingSphere.center.y -
-        this.bakeResult.boundingSphere.radius;
+      const tempSphere = new THREE.Sphere();
+      this.bakeResult.boundingBox.getBoundingSphere(tempSphere);
+      this.treeSize = tempSphere.radius * 2 * 1.05;
+
+      this.heightOffset = this.bakeResult.boundingBox.min.y;
     }
 
     return this;
@@ -242,11 +258,21 @@ export class TreeImpostor {
       debugMode,
     });
 
-    // Position Y so the bottom of the billboard is at ground level
-    // The plane size is maxDimension × maxDimension (square), matching the atlas cell
-    // Height offset is the Y position of the bounding box's bottom
-    const scaledSize = this.treeSize * scale;
-    instance.mesh.position.y = scaledSize / 2 + this.heightOffset * scale;
+    // Position Y so the tree content is at ground level
+    // The baking centers the mesh on the bounding sphere center, so the atlas content
+    // is centered at the origin. When displaying, we position the plane center at
+    // (sphereCenter.y - boundingBox.min.y) to place the tree's bottom at Y=0.
+    const sphere = this.bakeResult?.boundingSphere;
+    const box = this.bakeResult?.boundingBox;
+
+    if (sphere && box) {
+      // Position so tree bottom is at Y=0
+      const groundOffset = sphere.center.y - box.min.y;
+      instance.mesh.position.y = groundOffset * scale;
+    } else if (sphere) {
+      // Fallback: use sphere center (assumes bottom was at Y=0)
+      instance.mesh.position.y = sphere.center.y * scale;
+    }
 
     // Perform initial update with a default front view direction
     // This ensures the impostor displays content immediately instead of black

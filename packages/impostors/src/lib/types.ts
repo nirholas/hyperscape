@@ -339,8 +339,15 @@ export interface ImpostorSpecularConfig {
 export interface AnimatedBakeConfig {
   /** Atlas texture size per frame (default: 512) */
   atlasSize: number;
-  /** Number of sprites per side in octahedral grid (default: 12 for hemisphere) */
-  spritesPerSide: number;
+  /**
+   * Number of sprites per side in octahedral grid (default: 12 for hemisphere)
+   * @deprecated Use spritesX and spritesY for asymmetric grids (more horizontal than vertical)
+   */
+  spritesPerSide?: number;
+  /** Number of horizontal sprites (columns) - defaults to spritesPerSide or 16 */
+  spritesX?: number;
+  /** Number of vertical sprites (rows) - defaults to spritesX/2 for hemisphere (more horizontal views) */
+  spritesY?: number;
   /** Target animation FPS (default: 6) - determines frame count */
   animationFPS: number;
   /** Animation clip duration in seconds */
@@ -355,10 +362,16 @@ export interface AnimatedBakeConfig {
 
 /**
  * Default configuration for animated impostor baking
+ *
+ * Uses minimal asymmetric grid (6x3 = 18 views) for maximum performance:
+ * - 6 horizontal views (enough for yaw rotation around horizon)
+ * - 3 vertical views (eye-level, slight up, slight down)
+ * - 87% fewer views than 12x12, much faster baking and less memory
  */
 export const DEFAULT_ANIMATED_BAKE_CONFIG: AnimatedBakeConfig = {
   atlasSize: 512,
-  spritesPerSide: 12,
+  spritesX: 6, // Horizontal views (enough for yaw rotation)
+  spritesY: 3, // Vertical views (minimal elevation variation)
   animationFPS: 6,
   animationDuration: 1.0,
   hemisphere: true,
@@ -377,8 +390,15 @@ export interface AnimatedBakeResult {
   atlasArray: THREE.DataArrayTexture;
   /** Number of animation frames baked */
   frameCount: number;
-  /** Sprites per side in octahedral grid */
+  /**
+   * Sprites per side in octahedral grid (for backwards compatibility)
+   * @deprecated Use spritesX and spritesY
+   */
   spritesPerSide: number;
+  /** Number of horizontal sprites (columns) */
+  spritesX: number;
+  /** Number of vertical sprites (rows) */
+  spritesY: number;
   /** Animation duration in seconds */
   animationDuration: number;
   /** Target FPS for playback */
@@ -422,8 +442,15 @@ export interface GlobalMobAtlas {
   totalFrames: number;
   /** Configuration for each mob variant */
   variants: Map<string, MobVariantConfig>;
-  /** Sprites per side (same for all variants) */
+  /**
+   * Sprites per side (same for all variants)
+   * @deprecated Use spritesX and spritesY
+   */
   spritesPerSide: number;
+  /** Number of horizontal sprites (columns) */
+  spritesX: number;
+  /** Number of vertical sprites (rows) */
+  spritesY: number;
   /** Whether hemisphere octahedron was used */
   hemisphere: boolean;
   /** Animation FPS (same for all variants) */
@@ -452,8 +479,15 @@ export interface AnimatedImpostorInstanceData {
 export interface AnimatedImpostorMaterialConfig {
   /** Texture array containing animation frames */
   atlasArray: THREE.DataArrayTexture;
-  /** Sprites per side in octahedral grid */
+  /**
+   * Sprites per side in octahedral grid (backwards compatible)
+   * @deprecated Use spritesX and spritesY for asymmetric grids
+   */
   spritesPerSide: number;
+  /** Number of horizontal sprites (columns) - defaults to spritesPerSide */
+  spritesX?: number;
+  /** Number of vertical sprites (rows) - defaults to spritesPerSide */
+  spritesY?: number;
   /** Use hemisphere octahedron (alias: useHemiOctahedron) */
   hemisphere: boolean;
   /** Number of frames in animation */

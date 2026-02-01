@@ -42,7 +42,8 @@ const _NOISE_DISPLACEMENT_SCALE = 0.01;
 const _NOISE_DISPLACEMENT_STRENGTH = 3;
 const _MIN_POINT_SPACING = 4;
 const TILE_SIZE = 100;
-const WATER_THRESHOLD = 5.4;
+// IMPORTANT: This must match TERRAIN_CONSTANTS.WATER_THRESHOLD (9.0)
+const WATER_THRESHOLD = 9.0;
 const HEURISTIC_WEIGHT = 2.5;
 
 // A* neighbor directions
@@ -2258,10 +2259,10 @@ describe("RoadNetworkSystem Algorithms", () => {
       const roadId = "town_to_town_road";
 
       // Process tile (0, 0)
-      const tileX = 0;
+      let tileX = 0;
       const tileZ = 0;
-      const tileMinX = 0;
-      const tileMaxX = 100;
+      let tileMinX = 0;
+      let tileMaxX = 100;
       const tileMinZ = 0;
       const tileMaxZ = 100;
 

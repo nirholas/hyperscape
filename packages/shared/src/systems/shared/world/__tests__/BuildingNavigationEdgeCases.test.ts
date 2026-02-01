@@ -965,8 +965,6 @@ describe("Window vs Door Behavior", () => {
       BUILDING_POS,
       0,
     );
-
-    pathfinder = new BFSPathfinder();
   }, TEST_TIMEOUT);
 
   afterAll(() => {
@@ -1090,8 +1088,6 @@ describe("Internal Wall Diagonal Clipping", () => {
       BUILDING_POS,
       0,
     );
-
-    pathfinder = new BFSPathfinder();
   }, TEST_TIMEOUT);
 
   afterAll(() => {

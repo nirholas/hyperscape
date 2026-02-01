@@ -578,13 +578,6 @@ export class PathfindingDebugSystem extends System {
           playerFloor,
         );
 
-        // Check if tile is walkable in building system
-        const buildingWalkable = this.collisionService.isTileWalkableInBuilding(
-          tileX,
-          tileZ,
-          playerFloor,
-        );
-
         // Determine tile category
         let category: TileCategory | null = null;
 

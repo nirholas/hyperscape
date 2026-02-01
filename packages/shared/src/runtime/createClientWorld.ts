@@ -73,6 +73,7 @@ import { POISystem } from "../systems/shared";
 import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
+import { ProceduralFlowerSystem } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
@@ -81,6 +82,9 @@ import {
   prewarmCache as prewarmTreeCache,
   TREE_PRESETS,
 } from "../systems/shared/world/ProcgenTreeCache";
+
+// Mob impostor pre-warming (bakes animated impostors at load time, like Horde)
+import { prewarmMobImpostors } from "../systems/shared/rendering/MobImpostorPreloader";
 
 // PhysX loading - used to defer heavy work until WASM is loaded
 import { waitForPhysX } from "../physics/PhysXManager";
@@ -261,6 +265,13 @@ export function createClientWorld() {
   world.register("grass", ProceduralGrassSystem);
 
   // ============================================================================
+  // FLOWER SYSTEM
+  // ============================================================================
+  // GPU Procedural flowers using SpriteNodeMaterial (from Revo Realms)
+
+  world.register("flowers", ProceduralFlowerSystem);
+
+  // ============================================================================
   // THREE.JS SETUP
   // ============================================================================
   // Expose THREE.js to the stage system after a short delay
@@ -311,6 +322,31 @@ export function createClientWorld() {
           await prewarmTreeCache([...TREE_PRESETS]);
         } catch (err) {
           console.warn("[createClientWorld] Tree cache pre-warm failed:", err);
+        }
+      })();
+
+      // Pre-warm mob/NPC animated impostors AFTER renderer is ready
+      // This pre-bakes GLB mob animated impostor atlases at load time.
+      // VRM mobs will still be baked on-demand (they need the full avatar system).
+      // Uses modelCache.loadModel() for consistent loading with MobEntity.
+      (async () => {
+        try {
+          // Wait for renderer to be initialized (graphics system creates it)
+          await waitForPhysX("MobImpostorPrewarm", 120000);
+
+          // Give renderer and modelCache a moment to initialize
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+
+          console.log(
+            "[createClientWorld] Starting mob impostor pre-baking...",
+          );
+
+          await prewarmMobImpostors(world);
+        } catch (err) {
+          console.warn(
+            "[createClientWorld] Mob impostor pre-warm failed:",
+            err,
+          );
         }
       })();
 

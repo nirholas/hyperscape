@@ -48,7 +48,12 @@ type TSLUniform<T> = ReturnType<typeof uniform> & { value: T };
  * Uniforms exposed by the animated impostor material
  */
 export interface AnimatedImpostorUniforms {
+  /** @deprecated Use spritesX and spritesY for asymmetric grids */
   spritesPerSide: TSLUniform<number>;
+  /** Number of horizontal sprites (columns) */
+  spritesX: TSLUniform<number>;
+  /** Number of vertical sprites (rows) */
+  spritesY: TSLUniform<number>;
   alphaClamp: TSLUniform<number>;
   frameIndex: TSLUniform<number>;
   frameCount: TSLUniform<number>;
@@ -79,8 +84,16 @@ export function createAnimatedImpostorMaterial(
   material.metalness = 0.0;
   material.roughness = 0.7;
 
-  // Uniforms
-  const spritesPerSide = uniform(config.spritesPerSide ?? 16);
+  // Support asymmetric grids (more horizontal than vertical views)
+  // Backwards compatible: if only spritesPerSide is provided, use it for both
+  const spritesXVal =
+    (config as { spritesX?: number }).spritesX ?? config.spritesPerSide ?? 16;
+  const spritesYVal =
+    (config as { spritesY?: number }).spritesY ?? config.spritesPerSide ?? 8;
+
+  // Uniforms (separate X and Y for asymmetric grids)
+  const spritesX = uniform(spritesXVal);
+  const spritesY = uniform(spritesYVal);
   const alphaClamp = uniform(config.alphaClamp ?? 0.05);
   const useHemiOctahedron = uniform(config.hemisphere ? 1 : 0);
   const frameIndex = uniform(0);
@@ -92,9 +105,10 @@ export function createAnimatedImpostorMaterial(
   const vSprite = varying(vec2(), "vSprite");
   const vSpriteUV = varying(vec2(), "vSpriteUV");
 
-  // Vertex: billboarding + octahedral sprite selection
+  // Vertex: billboarding + octahedral sprite selection (asymmetric grid)
   material.positionNode = Fn(() => {
-    const spritesMinusOne = vec2(spritesPerSide.sub(1.0));
+    const spritesMinusOneX = spritesX.sub(1.0);
+    const spritesMinusOneY = spritesY.sub(1.0);
 
     const cameraPosLocal = cameraPosition; // impostor at origin in local
     const cameraDir = normalize(
@@ -134,20 +148,27 @@ export function createAnimatedImpostorMaterial(
       grid.assign(dir.xz.mul(0.5).add(0.5));
     });
 
-    const spriteGrid = grid.mul(spritesMinusOne);
-    vSprite.assign(min(round(spriteGrid), spritesMinusOne));
+    // Asymmetric grid: scale X by spritesX, Y by spritesY
+    const spriteGridX = grid.x.mul(spritesMinusOneX);
+    const spriteGridY = grid.y.mul(spritesMinusOneY);
+    const spriteX = min(round(spriteGridX), spritesMinusOneX);
+    const spriteY = min(round(spriteGridY), spritesMinusOneY);
+    vSprite.assign(vec2(spriteX, spriteY));
     vSpriteUV.assign(uv());
 
     return vec4(projectedVertex, 1.0);
   })();
 
-  // Fragment: sample array layer by frameIndex
+  // Fragment: sample array layer by frameIndex (asymmetric cell sizes)
   material.colorNode = Fn(() => {
-    const frameSize = float(1.0).div(spritesPerSide);
+    const frameSizeX = float(1.0).div(spritesX);
+    const frameSizeY = float(1.0).div(spritesY);
     const uvY = mix(vSpriteUV.y, float(1.0).sub(vSpriteUV.y), flipYFlag);
     const localUV = vec2(vSpriteUV.x, uvY);
-    const finalUV = frameSize.mul(
-      vSprite.add(clamp(localUV, vec2(0), vec2(1))),
+    // Calculate UV with asymmetric cell sizes
+    const finalUV = vec2(
+      frameSizeX.mul(vSprite.x.add(clamp(localUV.x, float(0), float(1)))),
+      frameSizeY.mul(vSprite.y.add(clamp(localUV.y, float(0), float(1)))),
     );
 
     // Wrap frame index to frame count
@@ -169,7 +190,9 @@ export function createAnimatedImpostorMaterial(
   // Cast to extended type for property assignment
   const animatedMaterial = material as AnimatedImpostorMaterial;
   animatedMaterial.animatedImpostorUniforms = {
-    spritesPerSide,
+    spritesPerSide: spritesX, // Backwards compatible (uses X)
+    spritesX,
+    spritesY,
     alphaClamp,
     frameIndex,
     frameCount,
@@ -184,7 +207,12 @@ export function createAnimatedImpostorMaterial(
  * Instanced animated impostor uniforms for per-instance rendering
  */
 export interface InstancedAnimatedImpostorUniforms {
+  /** @deprecated Use spritesX and spritesY for asymmetric grids */
   spritesPerSide: { value: number };
+  /** Number of horizontal sprites (columns) */
+  spritesX: { value: number };
+  /** Number of vertical sprites (rows) */
+  spritesY: { value: number };
   alphaClamp: { value: number };
   frameIndex: { value: number };
   frameCount: { value: number };

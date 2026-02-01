@@ -19,16 +19,15 @@ async function checkServerAvailable(): Promise<boolean> {
   }
 }
 
-// Check server availability at module load time
+// Check server availability at module load time (for future integration tests)
 let serverAvailable = false;
-const serverCheckPromise = checkServerAvailable().then((available) => {
+void checkServerAvailable().then((available) => {
   serverAvailable = available;
   if (!available) {
     console.log(
       "[LoadTestBot Tests] Server not available at localhost:5555, integration tests will be skipped",
     );
   }
-  return available;
 });
 
 describe("LoadTestBot Unit Tests", () => {

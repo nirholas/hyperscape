@@ -113,43 +113,52 @@ const useIntroMusic = (enabled: boolean) => {
 
       const musicPath = `${CDN_URL}/audio/music/intro/${track}`;
 
-      // Resume audio context if suspended (browser autoplay policy)
-      if (ctx.state === "suspended") {
-        const resumeAudio = async () => {
-          await ctx.resume();
-          // Remove listeners after resuming
-          document.removeEventListener("click", resumeAudio);
-          document.removeEventListener("keydown", resumeAudio);
-          resumeAudioCleanup = null;
-        };
-        document.addEventListener("click", resumeAudio);
-        document.addEventListener("keydown", resumeAudio);
-        // Store cleanup function in case component unmounts before user interaction
-        resumeAudioCleanup = () => {
-          document.removeEventListener("click", resumeAudio);
-          document.removeEventListener("keydown", resumeAudio);
-        };
-      }
-
-      // Load audio buffer
+      // Load audio buffer (can do this before context is resumed)
       const response = await fetch(musicPath);
       const arrayBuffer = await response.arrayBuffer();
       const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 
-      // Create source and connect
+      // Create source and connect (but don't start yet)
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.loop = true; // Loop the intro music
       source.connect(gainNode);
-
-      // Fade in
-      const now = ctx.currentTime;
-      gainNode.gain.setValueAtTime(0, now);
-      gainNode.gain.linearRampToValueAtTime(0.3, now + 2); // 2 second fade in
-
-      source.start(0);
       sourceRef.current = source;
-      setIsPlaying(true);
+
+      // Helper to actually start playback
+      const startPlayback = () => {
+        // Fade in
+        const now = ctx.currentTime;
+        gainNode.gain.setValueAtTime(0, now);
+        gainNode.gain.linearRampToValueAtTime(0.3, now + 2); // 2 second fade in
+
+        source.start(0);
+        setIsPlaying(true);
+      };
+
+      // If context is already running, start immediately
+      if (ctx.state === "running") {
+        startPlayback();
+        return;
+      }
+
+      // Otherwise, wait for user gesture to resume context and start playback
+      const resumeAndPlay = async () => {
+        await ctx.resume();
+        // Remove listeners after resuming
+        document.removeEventListener("click", resumeAndPlay);
+        document.removeEventListener("keydown", resumeAndPlay);
+        resumeAudioCleanup = null;
+        // Now start playback
+        startPlayback();
+      };
+      document.addEventListener("click", resumeAndPlay);
+      document.addEventListener("keydown", resumeAndPlay);
+      // Store cleanup function in case component unmounts before user interaction
+      resumeAudioCleanup = () => {
+        document.removeEventListener("click", resumeAndPlay);
+        document.removeEventListener("keydown", resumeAndPlay);
+      };
     };
 
     playIntroMusic();

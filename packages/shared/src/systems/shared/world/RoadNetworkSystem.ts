@@ -1062,8 +1062,14 @@ export class RoadNetworkSystem extends System {
   }
 
   /**
-   * Extend a road path using weighted random walk.
-   * Continues past destination until hitting impassable terrain or boundary.
+   * Extend a road path with purposeful organic curves.
+   * Continues in the general direction away from town until hitting:
+   * - Mountainous terrain (steep upward slope or high elevation)
+   * - Near shoreline (approaching water)
+   * - World boundary
+   *
+   * The path curves organically following terrain contours but maintains
+   * a consistent general direction (not random walk).
    */
   private extendRoadWithRandomWalk(
     currentPath: RoadPathPoint[],
@@ -1085,39 +1091,109 @@ export class RoadNetworkSystem extends System {
     const dx = last.x - secondLast.x;
     const dz = last.z - secondLast.z;
     const dirLen = Math.sqrt(dx * dx + dz * dz);
-    let direction = dirLen > 0.1 ? Math.atan2(dz, dx) : baseDirection;
+    const initialDirection = dirLen > 0.1 ? Math.atan2(dz, dx) : baseDirection;
+    let direction = initialDirection;
 
     let x = last.x;
     let z = last.z;
+    let lastHeight = last.y;
 
-    // Walk parameters
+    // Walk parameters - extend further for more natural termination
     const step = this.config.pathStepSize;
-    const maxSteps = Math.ceil(300 / step);
-    const variance = Math.PI / 8;
-    const forwardBias = 0.7;
+    const maxSteps = Math.ceil(800 / step); // Extend up to 800m to reach natural boundaries
+    const baseVariance = Math.PI / 12; // Reduced variance for more purposeful direction
+    const maxDeviation = Math.PI / 3; // Maximum 60 degrees from initial direction
+
+    // Terrain awareness parameters
+    const MOUNTAIN_SLOPE_THRESHOLD = 0.4; // Steep upward slope = mountainous
+    const SHORELINE_PROXIMITY = 15; // Stop this many meters from water
+    const HIGH_ELEVATION_THRESHOLD = 60; // Consider high ground as mountainous
 
     for (let i = 0; i < maxSteps; i++) {
-      // Weighted random direction adjustment
-      const adjustment =
-        this.random() < forwardBias
-          ? (this.random() - 0.5) * variance * 0.5
-          : (this.random() - 0.5) * variance * 2;
+      // Sample terrain in the current direction and slightly to each side
+      // This helps the road follow terrain contours naturally
+      const sampleDist = step * 1.5;
+      const leftAngle = direction - Math.PI / 6;
+      const rightAngle = direction + Math.PI / 6;
+
+      const forwardHeight = this.terrainSystem.getHeightAt(
+        x + Math.cos(direction) * sampleDist,
+        z + Math.sin(direction) * sampleDist,
+      );
+      const leftHeight = this.terrainSystem.getHeightAt(
+        x + Math.cos(leftAngle) * sampleDist,
+        z + Math.sin(leftAngle) * sampleDist,
+      );
+      const rightHeight = this.terrainSystem.getHeightAt(
+        x + Math.cos(rightAngle) * sampleDist,
+        z + Math.sin(rightAngle) * sampleDist,
+      );
+
+      // Bias direction toward flatter terrain (contour following)
+      const forwardSlope = Math.abs(forwardHeight - lastHeight) / sampleDist;
+      const leftSlope = Math.abs(leftHeight - lastHeight) / sampleDist;
+      const rightSlope = Math.abs(rightHeight - lastHeight) / sampleDist;
+
+      let slopeBias = 0;
+      if (leftSlope < forwardSlope - 0.05 && leftSlope < rightSlope) {
+        slopeBias = -baseVariance * 0.5; // Turn slightly left
+      } else if (rightSlope < forwardSlope - 0.05 && rightSlope < leftSlope) {
+        slopeBias = baseVariance * 0.5; // Turn slightly right
+      }
+
+      // Add small random variation for organic feel
+      const randomVariation = (this.random() - 0.5) * baseVariance * 0.5;
+
+      // Apply adjustment but clamp to max deviation from initial direction
+      let adjustment = slopeBias + randomVariation;
+      const proposedDirection = direction + adjustment;
+      let deviationFromInitial = proposedDirection - initialDirection;
+
+      // Normalize deviation to [-PI, PI]
+      while (deviationFromInitial > Math.PI)
+        deviationFromInitial -= Math.PI * 2;
+      while (deviationFromInitial < -Math.PI)
+        deviationFromInitial += Math.PI * 2;
+
+      // Clamp deviation
+      if (Math.abs(deviationFromInitial) > maxDeviation) {
+        adjustment = 0; // Don't adjust if we'd exceed max deviation
+      }
 
       direction += adjustment;
       const newX = x + Math.cos(direction) * step;
       const newZ = z + Math.sin(direction) * step;
 
-      // Stop conditions: water, world bounds, steep slope, tile boundary
+      // Get terrain at new position
       const height = this.terrainSystem.getHeightAt(newX, newZ);
-      const lastY = extendedPath[extendedPath.length - 1].y;
-      const slope = Math.abs(height - lastY) / step;
+      const slope = (height - lastHeight) / step; // Signed slope (+ = uphill)
+      const absSlope = Math.abs(slope);
+
+      // Check water proximity (look ahead for water)
+      const lookAheadDist = SHORELINE_PROXIMITY + step;
+      const lookAheadHeight = this.terrainSystem.getHeightAt(
+        newX + Math.cos(direction) * lookAheadDist,
+        newZ + Math.sin(direction) * lookAheadDist,
+      );
+
+      // Stop conditions
+      const isNearWater = height < WATER_THRESHOLD + 2; // Very close to water
+      const isApproachingWater = lookAheadHeight < WATER_THRESHOLD;
+      const isSteepUphill = slope > MOUNTAIN_SLOPE_THRESHOLD; // Going uphill steeply
+      const isHighElevation = height > HIGH_ELEVATION_THRESHOLD;
+      const isMountainous =
+        isSteepUphill || (isHighElevation && absSlope > 0.2);
+      const isAtWorldBounds =
+        Math.abs(newX) > this.worldHalfSize ||
+        Math.abs(newZ) > this.worldHalfSize;
 
       if (
-        height < WATER_THRESHOLD ||
-        Math.abs(newX) > this.worldHalfSize ||
-        Math.abs(newZ) > this.worldHalfSize ||
-        slope > 0.5
+        isNearWater ||
+        isApproachingWater ||
+        isMountainous ||
+        isAtWorldBounds
       ) {
+        // Record boundary exit for cross-tile continuity
         this.recordBoundaryExitIfAtEdge(x, z, direction, roadId);
         break;
       }
@@ -1125,11 +1201,7 @@ export class RoadNetworkSystem extends System {
       extendedPath.push({ x: newX, z: newZ, y: height });
       x = newX;
       z = newZ;
-
-      if (this.isAtTileBoundary(x, z)) {
-        this.recordBoundaryExitIfAtEdge(x, z, direction, roadId);
-        break;
-      }
+      lastHeight = height;
     }
 
     return extendedPath;
@@ -2334,6 +2406,100 @@ export class RoadNetworkSystem extends System {
       generatedAt: Date.now(),
       boundaryExits:
         this.boundaryExits.length > 0 ? [...this.boundaryExits] : undefined,
+    };
+  }
+
+  /**
+   * Calculate road influence at a world position.
+   * Returns 0-1 where 1 = center of road, 0 = no road influence.
+   * Includes smooth falloff at road edges for grass blending.
+   *
+   * @param worldX - World X coordinate
+   * @param worldZ - World Z coordinate
+   * @param extraBlendWidth - Additional blend width beyond road edge (default: 3m for grass)
+   * @returns Road influence value (0-1)
+   */
+  getRoadInfluenceAt(
+    worldX: number,
+    worldZ: number,
+    extraBlendWidth: number = 3,
+  ): number {
+    const distance = this.getDistanceToNearestRoad(worldX, worldZ);
+    const halfWidth = this.config.roadWidth / 2;
+    const totalInfluenceWidth = halfWidth + extraBlendWidth;
+
+    if (distance >= totalInfluenceWidth) return 0;
+    if (distance <= halfWidth) return 1.0;
+
+    // Smooth falloff in blend zone using smoothstep
+    const t = 1.0 - (distance - halfWidth) / extraBlendWidth;
+    return t * t * (3 - 2 * t); // smoothstep formula
+  }
+
+  /**
+   * Generate a road influence texture for GPU grass masking.
+   * The texture covers the world and stores road influence in the red channel.
+   *
+   * @param textureSize - Size of the texture (power of 2 recommended)
+   * @param worldSize - Size of the world in meters (default: from config)
+   * @param extraBlendWidth - Additional blend width for grass fade (default: 3m)
+   * @returns Float32 DataTexture with road influence values
+   */
+  generateRoadInfluenceTexture(
+    textureSize: number = 512,
+    worldSize?: number,
+    extraBlendWidth: number = 3,
+  ): {
+    data: Float32Array;
+    width: number;
+    height: number;
+    worldSize: number;
+  } | null {
+    if (this.roads.length === 0) {
+      Logger.systemWarn(
+        "RoadNetworkSystem",
+        "No roads generated, skipping road influence texture",
+      );
+      return null;
+    }
+
+    // Get world size from config or use provided value
+    const actualWorldSize = worldSize ?? this.worldHalfSize * 2;
+    const metersPerPixel = actualWorldSize / textureSize;
+
+    // Create texture data (single channel float)
+    const data = new Float32Array(textureSize * textureSize);
+
+    // Calculate road influence for each texel
+    // UV (0,0) = world (-halfSize, -halfSize), UV (1,1) = world (halfSize, halfSize)
+    const halfWorld = actualWorldSize / 2;
+
+    for (let y = 0; y < textureSize; y++) {
+      for (let x = 0; x < textureSize; x++) {
+        // Convert texel to world coordinates
+        const worldX = (x / textureSize) * actualWorldSize - halfWorld;
+        const worldZ = (y / textureSize) * actualWorldSize - halfWorld;
+
+        // Get road influence at this position
+        const influence = this.getRoadInfluenceAt(
+          worldX,
+          worldZ,
+          extraBlendWidth,
+        );
+        data[y * textureSize + x] = influence;
+      }
+    }
+
+    Logger.system(
+      "RoadNetworkSystem",
+      `Generated road influence texture: ${textureSize}x${textureSize}, ${metersPerPixel.toFixed(1)}m/pixel`,
+    );
+
+    return {
+      data,
+      width: textureSize,
+      height: textureSize,
+      worldSize: actualWorldSize,
     };
   }
 

@@ -81,19 +81,25 @@ export class AnimatedImpostorBaker {
 
   /**
    * Generate octahedral view directions for hemisphere mapping
-   * Returns array of normalized direction vectors
+   * Supports asymmetric grids (more horizontal than vertical views)
+   *
+   * @param spritesX - Number of horizontal sprites (columns)
+   * @param spritesY - Number of vertical sprites (rows)
+   * @param hemisphere - Whether to use hemisphere (true) or full sphere (false)
+   * @returns Array of normalized direction vectors
    */
   private generateOctahedralDirections(
-    spritesPerSide: number,
+    spritesX: number,
+    spritesY: number,
     hemisphere: boolean,
   ): THREE.Vector3[] {
     const directions: THREE.Vector3[] = [];
 
-    for (let row = 0; row < spritesPerSide; row++) {
-      for (let col = 0; col < spritesPerSide; col++) {
+    for (let row = 0; row < spritesY; row++) {
+      for (let col = 0; col < spritesX; col++) {
         // Convert grid position to normalized coordinates [0, 1]
-        const u = (col + 0.5) / spritesPerSide;
-        const v = (row + 0.5) / spritesPerSide;
+        const u = (col + 0.5) / spritesX;
+        const v = (row + 0.5) / spritesY;
 
         let dir: THREE.Vector3;
 
@@ -261,7 +267,6 @@ export class AnimatedImpostorBaker {
 
     const {
       atlasSize,
-      spritesPerSide,
       animationFPS,
       animationDuration,
       hemisphere,
@@ -269,11 +274,24 @@ export class AnimatedImpostorBaker {
       backgroundAlpha,
     } = finalConfig;
 
+    // Support asymmetric grids (more horizontal than vertical views)
+    // Backwards compatible: if spritesPerSide is provided, use it for both
+    const spritesX =
+      finalConfig.spritesX ??
+      finalConfig.spritesPerSide ??
+      DEFAULT_ANIMATED_BAKE_CONFIG.spritesX ??
+      16;
+    const spritesY =
+      finalConfig.spritesY ??
+      (finalConfig.spritesPerSide
+        ? finalConfig.spritesPerSide
+        : (DEFAULT_ANIMATED_BAKE_CONFIG.spritesY ?? 8));
+
     // Calculate frame count from duration and FPS
     const frameCount = Math.max(1, Math.ceil(animationDuration * animationFPS));
 
     console.log(
-      `[AnimatedImpostorBaker] Baking ${modelId}: ${frameCount} frames @ ${animationFPS}fps, ${spritesPerSide}x${spritesPerSide} sprites, ${atlasSize}px atlas`,
+      `[AnimatedImpostorBaker] Baking ${modelId}: ${frameCount} frames @ ${animationFPS}fps, ${spritesX}x${spritesY} sprites (${spritesX * spritesY} views), ${atlasSize}px atlas`,
     );
 
     // Local alias for renderer - use type assertion for property access
@@ -298,15 +316,18 @@ export class AnimatedImpostorBaker {
     const boundingSphere = new THREE.Sphere();
     boundingBox.getBoundingSphere(boundingSphere);
 
-    // Generate view directions
+    // Generate view directions (asymmetric: more horizontal than vertical)
     const viewDirections = this.generateOctahedralDirections(
-      spritesPerSide,
+      spritesX,
+      spritesY,
       hemisphere,
     );
 
     // Create WebGL render targets
-    const cellSize = Math.floor(atlasSize / spritesPerSide);
-    const cellRenderTarget = new THREE.RenderTarget(cellSize, cellSize, {
+    // Use asymmetric cell sizes for non-square grids
+    const cellWidth = Math.floor(atlasSize / spritesX);
+    const cellHeight = Math.floor(atlasSize / spritesY);
+    const cellRenderTarget = new THREE.RenderTarget(cellWidth, cellHeight, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
       minFilter: THREE.NearestFilter,
@@ -414,8 +435,8 @@ export class AnimatedImpostorBaker {
       // Render each cell (view direction)
       for (let dirIdx = 0; dirIdx < viewDirections.length; dirIdx++) {
         const viewDir = viewDirections[dirIdx];
-        const row = Math.floor(dirIdx / spritesPerSide);
-        const col = dirIdx % spritesPerSide;
+        const row = Math.floor(dirIdx / spritesX);
+        const col = dirIdx % spritesX;
 
         // Position camera
         this.renderCamera.position.copy(viewDir.clone().multiplyScalar(1.1));
@@ -430,9 +451,9 @@ export class AnimatedImpostorBaker {
         renderer.clear();
         renderer.render(this.renderScene, this.renderCamera);
 
-        // Blit cell to frame atlas at correct position
-        const cellW = 2 / spritesPerSide;
-        const cellH = 2 / spritesPerSide;
+        // Blit cell to frame atlas at correct position (asymmetric grid)
+        const cellW = 2 / spritesX;
+        const cellH = 2 / spritesY;
         const ndcX = -1 + (col + 0.5) * cellW;
         const ndcY = 1 - (row + 0.5) * cellH; // Flip Y
 
@@ -476,10 +497,16 @@ export class AnimatedImpostorBaker {
       }
       frameDataArray.push(pixels);
 
-      console.log(
-        `[AnimatedImpostorBaker] Baked frame ${frameIdx + 1}/${frameCount}`,
-      );
+      // Yield to browser between frames to prevent long task warnings
+      // This spreads the GPU work across multiple browser frames
+      if (frameIdx < frameCount - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
     }
+
+    console.log(
+      `[AnimatedImpostorBaker] Baked ${frameCount} frames for ${modelId}`,
+    );
 
     // Restore autoClear
     renderer.autoClear = originalAutoClear;
@@ -551,13 +578,15 @@ export class AnimatedImpostorBaker {
     frameRenderTarget.dispose();
 
     console.log(
-      `[AnimatedImpostorBaker] Completed ${modelId}: ${frameCount} frames baked`,
+      `[AnimatedImpostorBaker] Completed ${modelId}: ${frameCount} frames baked (${spritesX}x${spritesY} = ${spritesX * spritesY} views)`,
     );
 
     return {
       atlasArray,
       frameCount,
-      spritesPerSide,
+      spritesPerSide: spritesX, // Backwards compatible (uses X as default)
+      spritesX,
+      spritesY,
       animationDuration,
       animationFPS,
       boundingSphere,
@@ -586,16 +615,23 @@ export class AnimatedImpostorBaker {
       animationDuration: 0,
     };
 
-    const {
-      atlasSize,
-      spritesPerSide,
-      hemisphere,
-      backgroundColor,
-      backgroundAlpha,
-    } = finalConfig;
+    const { atlasSize, hemisphere, backgroundColor, backgroundAlpha } =
+      finalConfig;
+
+    // Support asymmetric grids (more horizontal than vertical views)
+    const spritesX =
+      finalConfig.spritesX ??
+      finalConfig.spritesPerSide ??
+      DEFAULT_ANIMATED_BAKE_CONFIG.spritesX ??
+      16;
+    const spritesY =
+      finalConfig.spritesY ??
+      (finalConfig.spritesPerSide
+        ? finalConfig.spritesPerSide
+        : (DEFAULT_ANIMATED_BAKE_CONFIG.spritesY ?? 8));
 
     console.log(
-      `[AnimatedImpostorBaker] Baking idle frame for ${modelId}: ${spritesPerSide}x${spritesPerSide} sprites, ${atlasSize}px atlas`,
+      `[AnimatedImpostorBaker] Baking idle frame for ${modelId}: ${spritesX}x${spritesY} sprites (${spritesX * spritesY} views), ${atlasSize}px atlas`,
     );
 
     // Local alias for renderer - use type assertion for property access
@@ -620,15 +656,17 @@ export class AnimatedImpostorBaker {
     const boundingSphere = new THREE.Sphere();
     boundingBox.getBoundingSphere(boundingSphere);
 
-    // Generate view directions
+    // Generate view directions (asymmetric: more horizontal than vertical)
     const viewDirections = this.generateOctahedralDirections(
-      spritesPerSide,
+      spritesX,
+      spritesY,
       hemisphere,
     );
 
-    // Create render targets
-    const cellSize = Math.floor(atlasSize / spritesPerSide);
-    const cellRenderTarget = new THREE.RenderTarget(cellSize, cellSize, {
+    // Create render targets (asymmetric cell sizes for non-square grids)
+    const cellWidth = Math.floor(atlasSize / spritesX);
+    const cellHeight = Math.floor(atlasSize / spritesY);
+    const cellRenderTarget = new THREE.RenderTarget(cellWidth, cellHeight, {
       format: THREE.RGBAFormat,
       type: THREE.UnsignedByteType,
       minFilter: THREE.NearestFilter,
@@ -713,8 +751,8 @@ export class AnimatedImpostorBaker {
     // Render each cell
     for (let dirIdx = 0; dirIdx < viewDirections.length; dirIdx++) {
       const viewDir = viewDirections[dirIdx];
-      const row = Math.floor(dirIdx / spritesPerSide);
-      const col = dirIdx % spritesPerSide;
+      const row = Math.floor(dirIdx / spritesX);
+      const col = dirIdx % spritesX;
 
       this.renderCamera.position.copy(viewDir.clone().multiplyScalar(1.1));
       this.renderCamera.lookAt(0, 0, 0);
@@ -724,8 +762,8 @@ export class AnimatedImpostorBaker {
       renderer.clear();
       renderer.render(this.renderScene, this.renderCamera);
 
-      const cellW = 2 / spritesPerSide;
-      const cellH = 2 / spritesPerSide;
+      const cellW = 2 / spritesX;
+      const cellH = 2 / spritesY;
       const ndcX = -1 + (col + 0.5) * cellW;
       const ndcY = 1 - (row + 0.5) * cellH;
 
@@ -831,7 +869,9 @@ export class AnimatedImpostorBaker {
     return {
       atlasArray,
       frameCount: 1,
-      spritesPerSide,
+      spritesPerSide: spritesX, // Backwards compatible
+      spritesX,
+      spritesY,
       animationDuration: 0,
       animationFPS: finalConfig.animationFPS,
       boundingSphere,
