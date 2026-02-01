@@ -23,6 +23,8 @@ import { ProcessingSystemBase } from "./ProcessingSystemBase";
 import type { World } from "../../../types/index";
 import type { ProcessingAction } from "../../../types/core/core";
 
+const DEBUG_FIREMAKING = false;
+
 export class FiremakingSystem extends ProcessingSystemBase {
   // Firemaking-specific constants
   private readonly FIREMAKING_TIME = 3000; // 3 seconds to light fire
@@ -74,12 +76,14 @@ export class FiremakingSystem extends ProcessingSystemBase {
   }): void {
     const { playerId, logsId, logsSlot, tinderboxSlot } = data;
 
-    console.log("[FiremakingSystem] 🔥 startFiremaking called:", {
-      playerId,
-      logsId,
-      logsSlot,
-      tinderboxSlot,
-    });
+    if (DEBUG_FIREMAKING) {
+      console.log("[FiremakingSystem] startFiremaking called:", {
+        playerId,
+        logsId,
+        logsSlot,
+        tinderboxSlot,
+      });
+    }
 
     // Check if player is already processing
     if (this.activeProcessing.has(playerId)) {
@@ -163,9 +167,11 @@ export class FiremakingSystem extends ProcessingSystemBase {
       // Re-fetch player at callback time - they may have disconnected
       const currentPlayer = this.world.getPlayer(playerId);
       if (!currentPlayer?.node?.position) {
-        console.log(
-          `[FiremakingSystem] Player ${playerId} disconnected during firemaking - cancelling`,
-        );
+        if (DEBUG_FIREMAKING) {
+          console.log(
+            `[FiremakingSystem] Player ${playerId} disconnected during firemaking - cancelling`,
+          );
+        }
         const action = this.activeProcessing.get(playerId);
         this.activeProcessing.delete(playerId);
         if (action) this.releaseAction(action);
@@ -174,9 +180,11 @@ export class FiremakingSystem extends ProcessingSystemBase {
 
       // Verify player is still in activeProcessing (wasn't cancelled)
       if (!this.activeProcessing.has(playerId)) {
-        console.log(
-          `[FiremakingSystem] Firemaking was cancelled for ${playerId}`,
-        );
+        if (DEBUG_FIREMAKING) {
+          console.log(
+            `[FiremakingSystem] Firemaking was cancelled for ${playerId}`,
+          );
+        }
         return;
       }
 
@@ -217,10 +225,12 @@ export class FiremakingSystem extends ProcessingSystemBase {
 
     const logsId = action.targetItem.id;
 
-    console.log(
-      "[FiremakingSystem] 🔥 completeFiremakingProcess - removing logs:",
-      { playerId, logsId, slot: action.targetItem.slot },
-    );
+    if (DEBUG_FIREMAKING) {
+      console.log(
+        "[FiremakingSystem] completeFiremakingProcess - removing logs:",
+        { playerId, logsId, slot: action.targetItem.slot },
+      );
+    }
 
     // Remove logs from inventory
     this.emitTypedEvent(EventType.INVENTORY_ITEM_REMOVED, {
@@ -312,9 +322,11 @@ export class FiremakingSystem extends ProcessingSystemBase {
     playerId: string,
     target: { x: number; y: number; z: number },
   ): void {
-    console.log(
-      `[FiremakingSystem] 🔥 Moving player ${playerId} after firemaking to (${target.x.toFixed(1)}, ${target.z.toFixed(1)})`,
-    );
+    if (DEBUG_FIREMAKING) {
+      console.log(
+        `[FiremakingSystem] Moving player ${playerId} after firemaking to (${target.x.toFixed(1)}, ${target.z.toFixed(1)})`,
+      );
+    }
 
     // Emit event for ServerNetwork to handle
     this.emitTypedEvent(EventType.FIREMAKING_MOVE_REQUEST, {

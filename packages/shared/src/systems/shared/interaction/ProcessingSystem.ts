@@ -39,9 +39,15 @@ import { modelCache } from "../../../utils/rendering/ModelCache";
 const DEBUG_PROCESSING = false;
 
 export class ProcessingSystem extends SystemBase {
-  // Shared fire particle resources (static to avoid re-creation)
+  // Fire visual constants
+  private static readonly FIRE_MODEL_SCALE = 0.35;
+  private static readonly FIRE_MODEL_Y_OFFSET = 0.063;
+  private static readonly FIRE_PARTICLE_SPAWN_Y = 0.1;
+  private static readonly FIRE_PLACEHOLDER_Y_OFFSET = 0.4;
+
+  // Shared fire particle resources (static, lazily initialized on client only)
   private static fireParticleGeometry: THREE.CircleGeometry | null = null;
-  private static fireGlowTextures = new Map<number, THREE.DataTexture>();
+  private static fireGlowTextures: Map<number, THREE.DataTexture> | null = null;
 
   private static getFireParticleGeometry(): THREE.CircleGeometry {
     if (!ProcessingSystem.fireParticleGeometry) {
@@ -51,6 +57,9 @@ export class ProcessingSystem extends SystemBase {
   }
 
   private static getOrCreateGlowTexture(colorHex: number): THREE.DataTexture {
+    if (!ProcessingSystem.fireGlowTextures) {
+      ProcessingSystem.fireGlowTextures = new Map();
+    }
     const cached = ProcessingSystem.fireGlowTextures.get(colorHex);
     if (cached) return cached;
 
@@ -1117,10 +1126,11 @@ export class ProcessingSystem extends SystemBase {
           this.world,
         );
         model = result.scene;
-        model.scale.set(0.35, 0.35, 0.35);
+        const s = ProcessingSystem.FIRE_MODEL_SCALE;
+        model.scale.set(s, s, s);
         model.position.set(
           fire.position.x,
-          fire.position.y + 0.063,
+          fire.position.y + ProcessingSystem.FIRE_MODEL_Y_OFFSET,
           fire.position.z,
         );
         this.world.stage.scene.add(model);
@@ -1175,9 +1185,13 @@ export class ProcessingSystem extends SystemBase {
 
       const model = result.scene;
       model.name = `FireLighting_${playerId}`;
-      model.scale.set(0.5, 0.5, 0.5);
-      // Model bounds Y: -0.18 to +0.18. At scale 0.5, bottom is -0.09. Offset up so it sits on ground.
-      model.position.set(position.x, position.y + 0.063, position.z);
+      const s = ProcessingSystem.FIRE_MODEL_SCALE;
+      model.scale.set(s, s, s);
+      model.position.set(
+        position.x,
+        position.y + ProcessingSystem.FIRE_MODEL_Y_OFFSET,
+        position.z,
+      );
       model.userData = { type: "fireLighting", playerId };
       model.traverse((child: THREE.Object3D) => {
         if ((child as THREE.Mesh).isMesh) {
@@ -1271,7 +1285,7 @@ export class ProcessingSystem extends SystemBase {
 
         meshes[i].position.set(
           fire.position.x + offsetsX[i] * (1 + t * 0.5),
-          fire.position.y + 0.1 + rise,
+          fire.position.y + ProcessingSystem.FIRE_PARTICLE_SPAWN_Y + rise,
           fire.position.z + offsetsZ[i] * (1 + t * 0.5),
         );
 
@@ -1331,7 +1345,7 @@ export class ProcessingSystem extends SystemBase {
     fireMesh.name = `Fire_${fire.id}`;
     fireMesh.position.set(
       fire.position.x,
-      fire.position.y + 0.4,
+      fire.position.y + ProcessingSystem.FIRE_PLACEHOLDER_Y_OFFSET,
       fire.position.z,
     );
     fireMesh.userData = {
