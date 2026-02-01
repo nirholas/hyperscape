@@ -6,7 +6,7 @@
  */
 
 import { getItem } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import { formatQuantity } from "../utils";
 import type { TradeSlotProps } from "../types";
 
@@ -19,7 +19,6 @@ export function TradeSlot({
   isRemoved,
 }: TradeSlotProps) {
   const itemData = item ? getItem(item.itemId) : null;
-  const itemIcon = item ? getItemIcon(item.itemId) : null;
   const quantity = item?.quantity ?? 0;
   const qtyDisplay = quantity > 1 ? formatQuantity(quantity) : null;
 
@@ -60,17 +59,13 @@ export function TradeSlot({
           !
         </span>
       )}
-      {/* Render emoji icon as text */}
-      {itemIcon && (
-        <span
-          style={{
-            fontSize: "20px",
-            color: "#f2d08a",
-            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
-          }}
-        >
-          {itemIcon}
-        </span>
+      {/* Render item icon */}
+      {item && (
+        <ItemIcon
+          itemId={item.itemId}
+          size={32}
+          style={{ filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))" }}
+        />
       )}
       {qtyDisplay && (
         <span

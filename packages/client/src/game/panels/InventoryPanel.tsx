@@ -41,7 +41,7 @@ import {
   CONTEXT_MENU_COLORS,
   type PrimaryActionType,
 } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
@@ -555,7 +555,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             fontSize: "clamp(14px, min(50cqw, 50cqh), 28px)",
           }}
         >
-          {getItemIcon(item.itemId)}
+          <ItemIcon itemId={item.itemId} size={48} />
         </div>
       )}
 
@@ -1378,40 +1378,6 @@ export function InventoryPanel({
       <DragOverlay>
         {activeItem
           ? (() => {
-              // Get icon for drag overlay
-              const getOverlayIcon = (itemId: string) => {
-                if (
-                  itemId.includes("sword") ||
-                  itemId.includes("dagger") ||
-                  itemId.includes("scimitar")
-                )
-                  return "⚔️";
-                if (itemId.includes("shield") || itemId.includes("defender"))
-                  return "🛡️";
-                if (
-                  itemId.includes("helmet") ||
-                  itemId.includes("helm") ||
-                  itemId.includes("hat")
-                )
-                  return "⛑️";
-                if (itemId.includes("boots") || itemId.includes("boot"))
-                  return "👢";
-                if (
-                  itemId.includes("fish") ||
-                  itemId.includes("lobster") ||
-                  itemId.includes("shark")
-                )
-                  return "🐟";
-                if (itemId.includes("log") || itemId.includes("wood"))
-                  return "🪵";
-                if (itemId.includes("ore") || itemId.includes("bar"))
-                  return "⛏️";
-                if (itemId.includes("coin")) return "💰";
-                if (itemId.includes("potion") || itemId.includes("vial"))
-                  return "🧪";
-                if (itemId.includes("axe")) return "🪓";
-                return itemId.substring(0, 2).toUpperCase();
-              };
               const qtyDisplay =
                 activeItem.quantity > 1
                   ? formatQuantity(activeItem.quantity)
@@ -1429,7 +1395,10 @@ export function InventoryPanel({
                     boxShadow: theme.shadows.lg,
                   }}
                 >
-                  {getOverlayIcon(activeItem.itemId)}
+                  <ItemIcon
+                    itemId={activeItem.itemId}
+                    size={dragSlotSize ? dragSlotSize * 0.85 : 36}
+                  />
                   {qtyDisplay && (
                     <div
                       className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"

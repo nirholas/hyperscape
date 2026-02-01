@@ -36,6 +36,7 @@ import { createRetextureRoutes } from "./routes/retexture";
 import { createGenerationRoutes } from "./routes/generation";
 import { aiVisionRoutes } from "./routes/ai-vision";
 import { createAssetRoutes } from "./routes/assets";
+import { createBatchSpritesRoutes } from "./routes/batch-sprites";
 import { promptRoutes } from "./routes/prompts";
 import { playtesterSwarmRoutes } from "./routes/playtester-swarm";
 import { voiceGenerationRoutes } from "./routes/voice-generation";
@@ -226,6 +227,14 @@ const app = new Elysia()
   //   }),
   // )
 
+  // Static file serving - game model assets (for batch sprite generation)
+  .use(
+    staticPlugin({
+      assets: path.resolve(ROOT_DIR, "../server/world/assets/models"),
+      prefix: "/game-models",
+    }),
+  )
+
   // Static file serving - public assets (emotes, rigs, etc.)
   .use(
     staticPlugin({
@@ -239,6 +248,7 @@ const app = new Elysia()
   .use(promptRoutes)
   .use(aiVisionRoutes)
   .use(createAssetRoutes(ROOT_DIR, assetService))
+  .use(createBatchSpritesRoutes(ROOT_DIR))
   .use(createMaterialRoutes(ROOT_DIR))
   .use(createRetextureRoutes(ROOT_DIR, retextureService))
   .use(createGenerationRoutes(generationService))

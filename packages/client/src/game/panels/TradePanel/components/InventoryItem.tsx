@@ -7,7 +7,7 @@
  */
 
 import { getItem } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import { formatQuantity } from "../utils";
 import type { InventoryItemProps } from "../types";
 
@@ -18,7 +18,6 @@ export function InventoryItem({
   onRightClick,
 }: InventoryItemProps) {
   const itemData = getItem(item.itemId);
-  const itemIcon = getItemIcon(item.itemId);
   const qtyDisplay = item.quantity > 1 ? formatQuantity(item.quantity) : null;
 
   return (
@@ -43,18 +42,12 @@ export function InventoryItem({
         onRightClick(e);
       }}
     >
-      {/* Render emoji icon as text */}
-      {itemIcon && (
-        <span
-          style={{
-            fontSize: "20px",
-            color: "#f2d08a",
-            filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))",
-          }}
-        >
-          {itemIcon}
-        </span>
-      )}
+      {/* Render item icon */}
+      <ItemIcon
+        itemId={item.itemId}
+        size={32}
+        style={{ filter: "drop-shadow(0 2px 2px rgba(0, 0, 0, 0.6))" }}
+      />
       {qtyDisplay && (
         <span
           className="absolute bottom-0 right-0.5 text-xs font-bold"

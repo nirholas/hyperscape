@@ -70,6 +70,7 @@ import { EventType } from "../../types/events";
 import type { LootResult, LootFailureReason } from "../../types/death";
 import { generateTransactionId } from "../../utils/IdGenerator";
 import { DeathState } from "../../types/entities";
+import { modelCache } from "../../utils/rendering/ModelCache";
 
 /**
  * Type guard to validate HeadstoneEntityConfig has required properties
@@ -662,23 +663,39 @@ export class HeadstoneEntity extends InteractableEntity {
       return;
     }
 
-    // Create a tombstone/pile visual for the corpse
-    const geometry = new THREE.BoxGeometry(1.5, 0.5, 1.0);
-    // Use MeshStandardMaterial for proper lighting (responds to sun, moon, and environment maps)
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x4a4a4a, // Gray for corpse
-      roughness: 0.9,
-      metalness: 0.0,
-    });
-
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.name = `Corpse_${this.id}`;
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    this.mesh = mesh;
-
     const hd = this.headstoneData;
-    mesh.userData = {
+    const modelPath = "asset://models/headstone/headstone.glb";
+
+    // Try to load the headstone 3D model
+    if (this.world.loader) {
+      try {
+        const { scene } = await modelCache.loadModel(modelPath, this.world);
+        this.mesh = scene;
+        this.mesh.name = `Corpse_${this.id}`;
+        this.mesh.scale.set(1.0, 1.0, 1.0);
+
+        this.mesh.layers.set(1);
+        this.mesh.traverse((child) => {
+          child.layers.set(1);
+          if (child instanceof THREE.Mesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+      } catch (error) {
+        console.warn(
+          `[HeadstoneEntity] Failed to load headstone model, using placeholder:`,
+          error,
+        );
+        this.createPlaceholderMesh();
+      }
+    } else {
+      this.createPlaceholderMesh();
+    }
+
+    if (!this.mesh) return;
+
+    this.mesh.userData = {
       type: "corpse",
       entityId: this.id,
       name: this.config.name,
@@ -692,7 +709,7 @@ export class HeadstoneEntity extends InteractableEntity {
     };
 
     // Add mesh to the entity's node
-    if (this.mesh && this.node) {
+    if (this.node) {
       this.node.add(this.mesh);
 
       // Also set userData on node for easier detection
@@ -703,6 +720,22 @@ export class HeadstoneEntity extends InteractableEntity {
       // Add text label above corpse
       this.createNameLabel();
     }
+  }
+
+  /** Fallback placeholder if model fails to load */
+  private createPlaceholderMesh(): void {
+    const geometry = new THREE.BoxGeometry(1.5, 0.5, 1.0);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x4a4a4a,
+      roughness: 0.9,
+      metalness: 0.0,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.name = `Corpse_${this.id}`;
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.layers.set(1);
+    this.mesh = mesh;
   }
 
   private createNameLabel(): void {

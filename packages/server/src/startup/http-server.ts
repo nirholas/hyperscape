@@ -343,6 +343,19 @@ async function registerStaticFiles(
   });
   console.log(`[HTTP] ✅ Registered /manifests/ → ${config.manifestsDir}`);
 
+  // Register icons directory for item sprite PNGs
+  if (await fs.pathExists(config.iconsDir)) {
+    await fastify.register(statics, {
+      root: config.iconsDir,
+      prefix: "/icons/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /icons/ → ${config.iconsDir}`);
+  }
+
   // Log available assets
   await logAvailableAssets(fastify, config);
 

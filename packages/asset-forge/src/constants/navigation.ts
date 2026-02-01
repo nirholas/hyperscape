@@ -8,6 +8,7 @@ export const NAVIGATION_VIEWS = {
   HAND_RIGGING: "handRigging",
   ARMOR_FITTING: "armorFitting",
   RETARGET_ANIMATE: "retargetAnimate",
+  BATCH_SPRITES: "batchSprites",
 } as const satisfies Record<string, NavigationView>;
 
 // Grid background styles for the app

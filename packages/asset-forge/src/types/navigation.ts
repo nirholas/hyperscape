@@ -4,7 +4,8 @@ export type NavigationView =
   | "equipment"
   | "handRigging"
   | "armorFitting"
-  | "retargetAnimate";
+  | "retargetAnimate"
+  | "batchSprites";
 
 export interface NavigationState {
   currentView: NavigationView;

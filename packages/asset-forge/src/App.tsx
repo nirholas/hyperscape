@@ -11,6 +11,7 @@ import { EquipmentPage } from "./pages/EquipmentPage";
 import { GenerationPage } from "./pages/GenerationPage";
 import { HandRiggingPage } from "./pages/HandRiggingPage";
 import { RetargetAnimatePage } from "./pages/RetargetAnimatePage";
+import { BatchSpritesPage } from "./pages/BatchSpritesPage";
 
 function AppContent() {
   const { currentView, navigateTo, navigateToAsset } = useNavigation();
@@ -52,6 +53,9 @@ function AppContent() {
           )}
           {currentView === NAVIGATION_VIEWS.RETARGET_ANIMATE && (
             <RetargetAnimatePage />
+          )}
+          {currentView === NAVIGATION_VIEWS.BATCH_SPRITES && (
+            <BatchSpritesPage />
           )}
         </main>
       </div>

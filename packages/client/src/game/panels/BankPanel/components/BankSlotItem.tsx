@@ -14,7 +14,8 @@
 import React, { memo } from "react";
 import { useThemeStore } from "@/ui";
 import type { BankItem } from "../types";
-import { formatItemName, formatQuantity, getItemIcon } from "../utils";
+import { formatItemName, formatQuantity } from "../utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 /**
  * Props for the memoized BankSlotItem component
@@ -131,8 +132,8 @@ export const BankSlotItem = memo(function BankSlotItem({
           }}
         />
       )}
-      <span className="text-xl select-none pointer-events-none">
-        {getItemIcon(item.itemId)}
+      <span className="select-none pointer-events-none">
+        <ItemIcon itemId={item.itemId} size={38} />
       </span>
       {item.quantity > 1 && (
         <span

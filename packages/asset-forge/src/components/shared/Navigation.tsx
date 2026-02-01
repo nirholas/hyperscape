@@ -1,4 +1,12 @@
-import { Database, Wand2, Wrench, Hand, Shield, Shuffle } from "lucide-react";
+import {
+  Database,
+  Wand2,
+  Wrench,
+  Hand,
+  Shield,
+  Shuffle,
+  Image,
+} from "lucide-react";
 import React from "react";
 
 import { NAVIGATION_VIEWS } from "../../constants";
@@ -93,6 +101,18 @@ const Navigation: React.FC<NavigationProps> = ({
           >
             <Shuffle size={18} />
             <span>Retarget & Animate</span>
+          </button>
+
+          <button
+            className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all duration-base ${
+              currentView === NAVIGATION_VIEWS.BATCH_SPRITES
+                ? "bg-primary bg-opacity-10 text-primary"
+                : "text-text-secondary hover:text-text-primary hover:bg-bg-tertiary"
+            }`}
+            onClick={() => onViewChange(NAVIGATION_VIEWS.BATCH_SPRITES)}
+          >
+            <Image size={18} />
+            <span>Batch Sprites</span>
           </button>
         </div>
       </div>

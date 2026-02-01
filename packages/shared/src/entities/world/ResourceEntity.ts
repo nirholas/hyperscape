@@ -287,6 +287,11 @@ export class ResourceEntity extends InteractableEntity {
         depleted: true,
       };
 
+      // Align depleted model to ground (same as createMesh)
+      const bbox = new THREE.Box3().setFromObject(this.mesh);
+      const minY = bbox.min.y;
+      this.mesh.position.set(0, -minY, 0);
+
       this.node.add(this.mesh);
     } catch (_error) {
       // Fallback: just hide the original mesh

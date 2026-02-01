@@ -151,6 +151,9 @@ export interface ServerConfig {
   /** Manifests directory path (fetched from CDN) */
   manifestsDir: string;
 
+  /** Icons directory path (generated sprite PNGs) */
+  iconsDir: string;
+
   /** Hyperscape root directory */
   hyperscapeRoot: string;
 
@@ -381,6 +384,9 @@ export async function loadConfig(): Promise<ServerConfig> {
   // Manifests directory - local cache for CDN-fetched manifests
   const manifestsDir = path.join(hyperscapeRoot, "world/assets/manifests");
 
+  // Icons directory - generated sprite PNGs for item icons
+  const iconsDir = path.join(hyperscapeRoot, "world/assets/icons");
+
   // Use root assets directory (not per-world assets)
   // This is the main assets folder at workspace root: /assets/
   const workspaceRoot = path.resolve(hyperscapeRoot, "../..");
@@ -403,6 +409,7 @@ export async function loadConfig(): Promise<ServerConfig> {
     worldDir,
     assetsDir,
     manifestsDir,
+    iconsDir,
     hyperscapeRoot,
     builtInAssetsDir,
     __dirname: hyperscapeRoot, // Package root (for public/ access)

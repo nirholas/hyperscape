@@ -329,7 +329,10 @@ export class ModelCache {
       if (materialWithMaps.emissiveMap) {
         materialWithMaps.emissiveMap.colorSpace = THREE.SRGBColorSpace;
       }
-      // Ensure environment map intensity is set for proper IBL lighting
+      // Force metalness to 0 — the game has no environment map, so metallic
+      // materials lose their diffuse component and appear black. Zeroing metalness
+      // ensures base colors render fully via diffuse lighting.
+      material.metalness = 0;
       material.envMapIntensity = material.envMapIntensity ?? 1.0;
     } else if (
       material instanceof THREE.MeshBasicMaterial ||
