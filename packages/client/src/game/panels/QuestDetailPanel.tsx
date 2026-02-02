@@ -8,7 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from "react";
-import { useQuestSelectionStore } from "@/ui";
+import { useQuestSelectionStore, useTheme } from "@/ui";
 import {
   type Quest,
   calculateQuestProgress,
@@ -68,6 +68,7 @@ const STATUS_COLORS: Record<string, string> = {
  * Auto-closes when no quest is selected - the panel should never show empty.
  */
 export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
+  const theme = useTheme();
   const selectedQuest = useQuestSelectionStore((s) => s.selectedQuest);
   const setSelectedQuest = useQuestSelectionStore((s) => s.setSelectedQuest);
 
@@ -173,7 +174,7 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     height: "100%",
     display: "flex",
     flexDirection: "column",
-    background: COLORS.BG_PRIMARY,
+    background: theme.colors.background.panelSecondary,
     overflow: "hidden",
   };
 
@@ -184,8 +185,8 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     padding: isMobile
       ? `${spacing.sm} ${spacing.sm}`
       : `${spacing.sm} ${spacing.md}`,
-    borderBottom: `1px solid ${COLORS.BORDER_PRIMARY}`,
-    background: COLORS.BG_SECONDARY,
+    borderBottom: `1px solid ${theme.colors.border.default}`,
+    background: theme.colors.background.panelSecondary,
     minHeight: isMobile ? "48px" : "44px",
   };
 
@@ -233,9 +234,9 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     gap: isMobile ? spacing.sm : spacing.md,
     marginBottom: isMobile ? spacing.sm : spacing.md,
     padding: spacing.sm,
-    background: COLORS.BG_TERTIARY,
+    background: theme.colors.background.tertiary,
     borderRadius: "6px",
-    border: `1px solid ${COLORS.BORDER_PRIMARY}`,
+    border: `1px solid ${theme.colors.border.default}`,
     fontSize: isMobile ? typography.fontSize.base : typography.fontSize.sm,
   };
 
@@ -288,8 +289,8 @@ export function QuestDetailPanel({ world, onClose }: QuestDetailPanelProps) {
     flexDirection: isMobile ? "column" : "row",
     gap: spacing.sm,
     padding: isMobile ? spacing.sm : spacing.md,
-    borderTop: `1px solid ${COLORS.BORDER_PRIMARY}`,
-    background: COLORS.BG_SECONDARY,
+    borderTop: `1px solid ${theme.colors.border.default}`,
+    background: theme.colors.background.panelSecondary,
   };
 
   const buttonBaseStyle: React.CSSProperties = {

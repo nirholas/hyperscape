@@ -226,6 +226,24 @@ export const DialogChoices = memo(function DialogChoices({
 }: DialogChoicesProps): React.ReactElement | null {
   const theme = useTheme();
 
+  // Handle choice selection - must be before any conditional returns
+  const handleSelect = useCallback(
+    (choiceId: string) => {
+      if (!disabled) {
+        onSelect?.(choiceId);
+      }
+    },
+    [disabled, onSelect],
+  );
+
+  // Handle choice highlight - must be before any conditional returns
+  const handleHighlight = useCallback(
+    (index: number) => {
+      onHighlight?.(index);
+    },
+    [onHighlight],
+  );
+
   // Handle keyboard navigation
   useEffect(() => {
     if (!enableKeyboard && !enableNumberKeys) return;
@@ -306,24 +324,6 @@ export const DialogChoices = memo(function DialogChoices({
         };
     }
   };
-
-  // Handle choice selection
-  const handleSelect = useCallback(
-    (choiceId: string) => {
-      if (!disabled) {
-        onSelect?.(choiceId);
-      }
-    },
-    [disabled, onSelect],
-  );
-
-  // Handle choice highlight
-  const handleHighlight = useCallback(
-    (index: number) => {
-      onHighlight?.(index);
-    },
-    [onHighlight],
-  );
 
   return (
     <div

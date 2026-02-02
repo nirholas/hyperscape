@@ -7,7 +7,7 @@
 
 import type { World } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
-import { getDuelSystem, sendDuelError, getPlayerId } from "./helpers";
+import { sendDuelError, withDuelAuth } from "./helpers";
 
 // ============================================================================
 // Forfeit Handler
@@ -30,19 +30,11 @@ export function handleDuelForfeit(
   data: { duelId: string },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { duelSystem } = auth;
 
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
-    return;
-  }
-
-  const result = duelSystem.forfeitDuel(playerId);
+  const result = duelSystem.forfeitDuel(auth.playerId);
 
   if (!result.success) {
     sendDuelError(socket, result.error!, result.errorCode || "UNKNOWN");

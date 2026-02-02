@@ -10,7 +10,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { BuildingCollisionService } from "../BuildingCollisionService";
 import { CollisionMatrix } from "../../movement/CollisionMatrix";
-import { BFSPathfinder } from "../../movement/BFSPathfinder";
 import type { TileCoord } from "../../movement/TileSystem";
 import type { World } from "../../../../core/World";
 
@@ -74,7 +73,6 @@ function createBuildingWithCenterDoor() {
 describe("Doorway Adjacent and Corner Navigation", () => {
   let world: World;
   let collisionService: BuildingCollisionService;
-  let pathfinder: BFSPathfinder;
 
   const BUILDING_POS = { x: 20, y: 0, z: 20 };
   const BUILDING_ID = "doorway_test";
@@ -92,7 +90,6 @@ describe("Doorway Adjacent and Corner Navigation", () => {
       0,
     );
 
-    pathfinder = new BFSPathfinder();
     collisionService.setDebugLogging(true);
   }, TEST_TIMEOUT);
 
@@ -178,7 +175,6 @@ describe("Doorway Adjacent and Corner Navigation", () => {
   it("CRITICAL: Non-door wall tiles should block ground player", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
     const floor0 = building.floors[0];
-    const bbox = building.boundingBox;
 
     // Find all door tiles first
     const doorTileSet = new Set<string>();
@@ -429,7 +425,6 @@ describe("Doorway Adjacent and Corner Navigation", () => {
 
   it("CRITICAL: No path should enter building except through door", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
-    const bbox = building.boundingBox;
     const floor0 = building.floors[0];
 
     console.log(`\n=== EXHAUSTIVE ENTRY POINT TEST ===`);

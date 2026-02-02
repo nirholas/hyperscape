@@ -259,7 +259,13 @@ export class CombatEntityResolver {
       const equipmentSystem = this.world.getSystem?.("equipment") as
         | {
             getPlayerEquipment?: (id: string) => {
-              weapon?: { item?: { attackRange?: number; id?: string } };
+              weapon?: {
+                item?: {
+                  attackRange?: number;
+                  id?: string;
+                  attackType?: string;
+                };
+              };
             } | null;
           }
         | undefined;
@@ -270,16 +276,28 @@ export class CombatEntityResolver {
         if (equipment?.weapon?.item) {
           const weaponItem = equipment.weapon.item;
 
-          if (weaponItem.attackRange) {
-            return weaponItem.attackRange;
-          }
+          // OSRS-accurate: Magic weapons (staffs/wands) only use their attackRange
+          // when a spell is selected (autocast). Without autocast, staffs default
+          // to melee range. The selectedSpell check above already returns 10 for
+          // magic range, so if we reach here, no spell is selected.
+          const isMagicWeapon =
+            weaponItem.attackType?.toLowerCase() === "magic" ||
+            (weaponItem.id &&
+              getItem(weaponItem.id)?.attackType?.toLowerCase() === "magic");
 
-          if (weaponItem.id) {
-            const itemData = getItem(weaponItem.id);
-            if (itemData?.attackRange) {
-              return itemData.attackRange;
+          if (!isMagicWeapon) {
+            if (weaponItem.attackRange) {
+              return weaponItem.attackRange;
+            }
+
+            if (weaponItem.id) {
+              const itemData = getItem(weaponItem.id);
+              if (itemData?.attackRange) {
+                return itemData.attackRange;
+              }
             }
           }
+          // Magic weapons without autocast fall through to melee range (1)
         }
       }
     }

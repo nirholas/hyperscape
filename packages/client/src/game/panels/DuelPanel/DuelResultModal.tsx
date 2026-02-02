@@ -15,6 +15,7 @@
 import { useCallback, useState, useEffect, type CSSProperties } from "react";
 import { ModalWindow, useThemeStore } from "@/ui";
 import { getItem } from "@hyperscape/shared";
+import { formatGoldValue } from "./utils";
 
 // ============================================================================
 // Types
@@ -82,17 +83,6 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
 
   const isWinner = state.won;
   const hasItems = state.itemsReceived.length > 0 || state.itemsLost.length > 0;
-
-  // Format gold value with K/M suffixes
-  const formatValue = (value: number): string => {
-    if (value >= 1_000_000) {
-      return `${(value / 1_000_000).toFixed(1)}M`;
-    }
-    if (value >= 1_000) {
-      return `${(value / 1_000).toFixed(1)}K`;
-    }
-    return value.toLocaleString();
-  };
 
   // Styles with entrance animations
   const resultHeaderStyle: CSSProperties = {
@@ -232,7 +222,7 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
                 {qtyStr}
               </span>
               <span style={{ color: "#ffd700" }}>
-                {formatValue(item.value)} gp
+                {formatGoldValue(item.value)} gp
               </span>
             </div>
           );
@@ -275,7 +265,7 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
                 <div style={totalRowStyle}>
                   <span>Total Value:</span>
                   <span style={{ color: theme.colors.state.success }}>
-                    +{formatValue(state.totalValueWon)} gp
+                    +{formatGoldValue(state.totalValueWon)} gp
                   </span>
                 </div>
               </div>
@@ -288,7 +278,7 @@ export function DuelResultModal({ state, onClose }: DuelResultModalProps) {
                 <div style={totalRowStyle}>
                   <span>Total Value:</span>
                   <span style={{ color: theme.colors.state.danger }}>
-                    -{formatValue(state.totalValueLost)} gp
+                    -{formatGoldValue(state.totalValueLost)} gp
                   </span>
                 </div>
               </div>

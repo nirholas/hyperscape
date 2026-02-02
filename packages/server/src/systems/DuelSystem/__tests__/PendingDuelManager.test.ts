@@ -10,26 +10,25 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import type { PlayerID } from "@hyperscape/shared";
 import { PendingDuelManager } from "../PendingDuelManager";
 import { createMockWorld, createDuelPlayers, type MockWorld } from "./mocks";
+import { createPlayerID } from "@hyperscape/shared";
 
-/**
- * Helper to create a challenge with default socket ID and combat level
- */
+// Helper to create a challenge with proper branded types
 function createTestChallenge(
   manager: PendingDuelManager,
   challengerId: string,
   challengerName: string,
   targetId: string,
   targetName: string,
+  combatLevel: number = 100,
 ) {
   return manager.createChallenge(
-    challengerId as PlayerID,
+    createPlayerID(challengerId),
     challengerName,
-    `socket-${challengerId}`,
-    50, // Default combat level for tests
-    targetId as PlayerID,
+    `socket-${challengerId}`, // challengerSocketId
+    combatLevel,
+    createPlayerID(targetId),
     targetName,
   );
 }

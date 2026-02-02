@@ -125,8 +125,10 @@ const names = [
   'firemakingRequest', // Client -> Server: request to light fire (tinderbox + logs)
   'cookingRequest',    // Client -> Server: request to cook food on fire/range
   'cookingSourceInteract', // Client -> Server: server-authoritative cooking (walk to fire first)
-  'fireCreated',       // Server -> Client: fire entity created
-  'fireExtinguished',  // Server -> Client: fire entity expired/removed
+  'fireCreated',          // Server -> Client: fire entity created
+  'fireExtinguished',     // Server -> Client: fire entity expired/removed
+  'fireLightingStarted',  // Server -> Client: fire lighting begun (show model)
+  'fireLightingCancelled', // Server -> Client: fire lighting cancelled (remove preloaded model)
   // Smelting/Smithing packets
   'smeltingSourceInteract', // Client -> Server: player clicked furnace to smelt
   'smithingSourceInteract', // Client -> Server: player clicked anvil to smith
@@ -136,6 +138,22 @@ const names = [
   'smithingInterfaceOpen', // Server -> Client: show smithing interface with available recipes
   'smeltingClose',         // Server -> Client: close smelting interface (walked away, etc.)
   'smithingClose',         // Server -> Client: close smithing interface (walked away, etc.)
+  // Crafting packets (leather, jewelry, gem cutting)
+  'craftingSourceInteract', // Client -> Server: player clicked crafting source (needle/chisel)
+  'processingCrafting',     // Client -> Server: player selected item to craft from UI
+  'craftingInterfaceOpen',  // Server -> Client: show crafting interface with available recipes
+  'craftingClose',          // Server -> Client: close crafting interface
+  // Fletching packets (knife + logs, stringing, arrow tipping)
+  'fletchingSourceInteract', // Client -> Server: player used knife on logs or item-on-item
+  'processingFletching',     // Client -> Server: player selected recipe to fletch from UI
+  'fletchingInterfaceOpen',  // Server -> Client: show fletching interface with available recipes
+  'fletchingClose',          // Server -> Client: close fletching interface
+  // Tanning packets (NPC tanner)
+  'processingTanning',      // Client -> Server: player selected hides to tan from UI
+  'tanningInterfaceOpen',   // Server -> Client: show tanning interface with available hides
+  'tanningClose',           // Server -> Client: close tanning interface
+  // Runecrafting packets (essence + altar → runes)
+  'runecraftingAltarInteract', // Client -> Server: player clicked runecrafting altar
   // Combat packets
   'attackMob',
   'attackPlayer',  // PvP attack
@@ -181,6 +199,8 @@ const names = [
   // Combat visual feedback packets
   'combatDamageDealt',
   'projectileLaunched',  // Server -> Client: ranged/magic projectile for visual rendering
+  'combatFaceTarget',    // Server -> Client: tell player to face combat target (rotation)
+  'combatClearFaceTarget', // Server -> Client: tell player to stop facing combat target
   // Player state packets
   'playerUpdated',
   'playerNameChanged',     // Server -> Client: player name change confirmed

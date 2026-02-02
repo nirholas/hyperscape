@@ -370,6 +370,7 @@ export {
   SKILL_UNLOCKS,
   getUnlocksAtLevel,
   getUnlocksUpToLevel,
+  getUnlocksForSkill,
   getAllSkillUnlocks,
   clearSkillUnlocksCache,
   loadSkillUnlocks,
@@ -431,6 +432,7 @@ export { CombatSystem } from "./systems/shared/combat";
 export { PrayerSystem } from "./systems/shared/character/PrayerSystem";
 export { LootSystem } from "./systems/shared/economy/LootSystem";
 export { StoreSystem } from "./systems/shared/economy/StoreSystem";
+export { GroundItemSystem } from "./systems/shared/economy/GroundItemSystem";
 export { ResourceSystem } from "./systems/shared/entities/ResourceSystem";
 export { QuestSystem } from "./systems/shared/progression/QuestSystem";
 export {
@@ -854,6 +856,7 @@ export type {
   SkillsLevelUpEvent,
   EquipmentSyncData,
   InventorySyncData,
+  FletchingInterfaceOpenPayload,
 } from "./types/events";
 
 // Export additional core types
@@ -865,7 +868,12 @@ export type {
   PlayerCombatStyle,
 } from "./types/entities";
 export type { GroupType } from "./types/rendering/nodes";
-export type { InventoryItemInfo } from "./types/events";
+export type {
+  InventoryItemInfo,
+  ActionBarSlotContent,
+  ActionBarSlotUpdatePayload,
+  ActionBarSlotSwapPayload,
+} from "./types/events";
 
 // Export database/event types
 export type {
@@ -1084,6 +1092,12 @@ export { DISTANCE_CONSTANTS } from "./constants/GameConstants";
 // Terrain constants (water threshold, walkable slopes, etc.)
 // Single source of truth for terrain-related values used across all systems
 export { TERRAIN_CONSTANTS } from "./constants/GameConstants";
+
+// Inventory constants (slot counts, stack sizes)
+export { INVENTORY_CONSTANTS } from "./constants/GameConstants";
+
+// Player constants (health, stamina, speeds)
+export { PLAYER_CONSTANTS } from "./constants/GameConstants";
 
 // Gathering constants (tick-based timing, ranges, etc.)
 export { GATHERING_CONSTANTS } from "./constants/GatheringConstants";

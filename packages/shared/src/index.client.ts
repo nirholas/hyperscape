@@ -157,6 +157,12 @@ export { CONTEXT_MENU_COLORS } from "./constants/GameConstants";
 // Home teleport constants (cooldown, cast time)
 export { HOME_TELEPORT_CONSTANTS } from "./constants/GameConstants";
 
+// Inventory constants (slot counts, stack sizes)
+export { INVENTORY_CONSTANTS } from "./constants/GameConstants";
+
+// Player constants (health, stamina, speeds)
+export { PLAYER_CONSTANTS } from "./constants/GameConstants";
+
 // Export avatar options for character creation
 export { AVATAR_OPTIONS } from "./data/avatars";
 
@@ -176,6 +182,7 @@ export {
   SKILL_UNLOCKS,
   getUnlocksAtLevel,
   getUnlocksUpToLevel,
+  getUnlocksForSkill,
   getAllSkillUnlocks,
   clearSkillUnlocksCache,
   loadSkillUnlocks,

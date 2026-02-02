@@ -147,6 +147,7 @@ export interface ProcessingAction {
   primaryItem: { id: string; slot: number }; // Item being used (tinderbox/raw fish)
   targetItem?: { id: string; slot: number }; // Target item (logs/fire)
   targetFire?: string; // Fire ID for cooking
+  startPosition?: Position3D; // Cached position at start (for firemaking movement detection)
   startTime: number;
   duration: number;
   xpReward: number;

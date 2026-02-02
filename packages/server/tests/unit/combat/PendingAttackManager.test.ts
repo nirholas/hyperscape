@@ -37,9 +37,12 @@ function createMockWorld() {
 // Mock TileMovementManager
 function createMockTileMovementManager() {
   const movePlayerTowardFn = vi.fn();
+  const stopPlayerFn = vi.fn();
   return {
     movePlayerToward: movePlayerTowardFn,
+    stopPlayer: stopPlayerFn,
     _movePlayerToward: movePlayerTowardFn,
+    _stopPlayer: stopPlayerFn,
   };
 }
 

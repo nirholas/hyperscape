@@ -66,6 +66,18 @@ export async function handleBankOpen(
     return;
   }
 
+  // Block bank access during duels
+  const duelSystemBank = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemBank?.isPlayerInDuel?.(playerId)) {
+    sendToSocket(socket, "showToast", {
+      message: "You can't use a bank during a duel.",
+      type: "error",
+    });
+    return;
+  }
+
   // Validate bankId before processing
   if (!data.bankId) {
     console.warn(
@@ -189,6 +201,20 @@ export async function handleBankDeposit(
   if (!isValidQuantity(data.quantity)) {
     sendErrorToast(socket, "Invalid quantity");
     return;
+  }
+
+  // Block depositing staked items during duels
+  if (data.slot !== undefined) {
+    const duelSystemDeposit = world.getSystem("duel") as
+      | { getStakedSlots?: (id: string) => Set<number> }
+      | undefined;
+    const stakedSlotsDeposit = duelSystemDeposit?.getStakedSlots?.(
+      ctx.playerId,
+    );
+    if (stakedSlotsDeposit?.has(data.slot)) {
+      sendErrorToast(socket, "That item is staked in a duel.");
+      return;
+    }
   }
 
   // BANK NOTE SYSTEM: Auto-unnote deposited notes

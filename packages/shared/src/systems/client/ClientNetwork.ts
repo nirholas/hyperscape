@@ -102,6 +102,7 @@ import type {
 } from "../../types";
 import type { Entity } from "../../entities/Entity";
 import { EventType } from "../../types/events";
+import type { FletchingInterfaceOpenPayload } from "../../types/events";
 import { DeathState } from "../../types/entities";
 // Social system types - use shared types for consistency
 import type {
@@ -1291,6 +1292,51 @@ export class ClientNetwork extends SystemBase {
       // This ensures when mob respawns (changes.aiState='idle'), it's treated as alive
       // and position updates are applied correctly
       const newState = changes.aiState || entityData.aiState;
+
+      // Detect mob respawn: entity's current aiState is 'dead' but incoming state is NOT 'dead'.
+      // This needs special handling because entity.data.e may still be 'death' (stale emote
+      // from the death animation). Without this check, isDeadMob stays true after respawn,
+      // causing tile state to be cleared every packet and position updates to malfunction.
+      const currentAiState =
+        (entity.data as { aiState?: string })?.aiState ?? entityData.aiState;
+      const isMobRespawning =
+        currentAiState === "dead" &&
+        typeof changes.aiState === "string" &&
+        changes.aiState !== "dead";
+
+      if (isMobRespawning) {
+        // Clean slate: clear ALL movement/interpolation state for this entity
+        this.interpolationStates.delete(id);
+        if (this.tileInterpolator.hasState(id)) {
+          this.tileInterpolator.removeEntity(id);
+        }
+
+        // Clear stale 'death' emote so subsequent packets don't think mob is still dead
+        // (also cleared in MobEntity.modify() respawn block as defense in depth)
+        (entity.data as Record<string, unknown>).e = undefined;
+        (entity.data as Record<string, unknown>).emote = undefined;
+
+        // Apply ALL changes including position (p) — mob must snap to new spawn point
+        entity.modify(changes);
+
+        // Set up tile state at new spawn position for subsequent tile-based movement
+        const changesObj = changes as Record<string, unknown>;
+        if (hasP && hasQ) {
+          const pArr = changesObj.p as number[];
+          this.tileInterpolator.setCombatRotation(
+            id,
+            changesObj.q as number[],
+            { x: pArr[0], y: pArr[1], z: pArr[2] },
+          );
+        }
+
+        // Sync emote if present
+        if (typeof changes.e === "string") {
+          entity.data.emote = changes.e;
+        }
+        return;
+      }
+
       const newEmote =
         (changes as { e?: string }).e || (entityData as { e?: string }).e;
 
@@ -1353,9 +1399,11 @@ export class ClientNetwork extends SystemBase {
 
         // Route combat rotation to TileInterpolator (single source of truth)
         if (q && Array.isArray(q) && q.length === 4) {
+          // Pass entity position so state creation uses correct position (not origin)
           const applied = this.tileInterpolator.setCombatRotation(
             id,
             q as number[],
+            entity.position,
           );
           // If TileInterpolator didn't apply it (entity moving), that's intentional
           // Movement direction wins over combat rotation while moving
@@ -1367,7 +1415,49 @@ export class ClientNetwork extends SystemBase {
         // Apply non-transform changes (emote, health, combat state, etc.)
         entity.modify(restChanges);
       } else {
-        entity.modify(changes);
+        // For stationary entities (no TileInterpolator state), route combat rotation
+        // to TileInterpolator which will create a minimal state and apply the quaternion.
+        // This fixes magic/ranged attacks where the player doesn't move toward the target
+        // but still needs to face them.
+        const changesObj = changes as Record<string, unknown>;
+        if (
+          changesObj.q &&
+          Array.isArray(changesObj.q) &&
+          (changesObj.q as number[]).length === 4
+        ) {
+          // Pass position to setCombatRotation so new state uses correct position (not origin).
+          // Prefer server position from packet, fall back to entity's current position.
+          const pArr = changesObj.p as number[] | undefined;
+          const posForState =
+            pArr && pArr.length === 3
+              ? { x: pArr[0], y: pArr[1], z: pArr[2] }
+              : {
+                  x: entity.position.x,
+                  y: entity.position.y,
+                  z: entity.position.z,
+                };
+          this.tileInterpolator.setCombatRotation(
+            id,
+            changesObj.q as number[],
+            posForState,
+          );
+          // Strip q (TileInterpolator handles rotation) but KEEP p in modify.
+          // MobEntity.modify() needs p to snap position on respawn (death→idle transition).
+          // Base Entity.modify() just Object.assign's data — p doesn't auto-set position.
+          const { q, ...restChanges } = changesObj;
+          entity.modify(restChanges);
+        } else {
+          entity.modify(changes);
+        }
+      }
+
+      // Sync entity.data.emote from abbreviated 'e' key
+      // entity.modify() sets data.e via Object.assign, but the animation system
+      // reads data.emote (set explicitly in onTileMovementEnd). Without this sync,
+      // emote resets via entityModified (e.g., from failed gathering) are ignored
+      // by the animation system since it never sees the updated emote property.
+      if (typeof changes.e === "string") {
+        entity.data.emote = changes.e;
       }
     }
 
@@ -1822,6 +1912,17 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.FIRE_EXTINGUISHED, data);
   };
 
+  onFireLightingStarted = (data: {
+    playerId: string;
+    position: { x: number; y: number; z: number };
+  }) => {
+    this.world.emit(EventType.FIRE_LIGHTING_STARTED, data);
+  };
+
+  onFireLightingCancelled = (data: { playerId: string }) => {
+    this.world.emit(EventType.FIRE_LIGHTING_CANCELLED, data);
+  };
+
   onFishingSpotMoved = (data: {
     resourceId: string;
     oldPosition: { x: number; y: number; z: number };
@@ -2198,6 +2299,82 @@ export class ClientNetwork extends SystemBase {
         anvilId: data.anvilId,
         availableRecipes: data.availableRecipes,
       },
+    });
+  };
+
+  // --- Crafting interface handler ---
+  onCraftingInterfaceOpen = (data: {
+    availableRecipes: Array<{
+      output: string;
+      name: string;
+      category: string;
+      inputs: Array<{ item: string; amount: number }>;
+      tools: string[];
+      level: number;
+      xp: number;
+      meetsLevel: boolean;
+      hasInputs: boolean;
+    }>;
+    station: string;
+  }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "crafting",
+      data: {
+        isOpen: true,
+        availableRecipes: data.availableRecipes,
+        station: data.station,
+      },
+    });
+  };
+
+  onCraftingClose = (_data: { reason?: string }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "craftingClose",
+      data: _data,
+    });
+  };
+
+  // --- Fletching interface handler ---
+  onFletchingInterfaceOpen = (
+    data: Omit<FletchingInterfaceOpenPayload, "playerId">,
+  ) => {
+    this.world.emit(EventType.FLETCHING_INTERFACE_OPEN, {
+      playerId: this.world?.entities?.player?.id || "",
+      availableRecipes: data.availableRecipes,
+    });
+  };
+
+  onFletchingClose = (_data: { reason?: string }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "fletchingClose",
+      data: _data,
+    });
+  };
+
+  // --- Tanning interface handler ---
+  onTanningInterfaceOpen = (data: {
+    availableRecipes: Array<{
+      input: string;
+      output: string;
+      cost: number;
+      name: string;
+      hasHide: boolean;
+      hideCount: number;
+    }>;
+  }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tanning",
+      data: {
+        isOpen: true,
+        availableRecipes: data.availableRecipes,
+      },
+    });
+  };
+
+  onTanningClose = (_data: { reason?: string }) => {
+    this.world.emit(EventType.UI_UPDATE, {
+      component: "tanningClose",
+      data: _data,
     });
   };
 
@@ -3746,6 +3923,16 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.COMBAT_PROJECTILE_LAUNCHED, data);
   };
 
+  onCombatFaceTarget = (data: { playerId: string; targetId: string }) => {
+    // Forward to local event system so PlayerLocal rotates toward combat target
+    this.world.emit(EventType.COMBAT_FACE_TARGET, data);
+  };
+
+  onCombatClearFaceTarget = (data: { playerId: string }) => {
+    // Forward to local event system so PlayerLocal stops rotating toward target
+    this.world.emit(EventType.COMBAT_CLEAR_FACE_TARGET, data);
+  };
+
   onXpDrop = (data: {
     skill: string;
     xpGained: number;
@@ -3889,6 +4076,22 @@ export class ClientNetwork extends SystemBase {
           z: pos.z,
         });
 
+        // Update lerpPosition with teleport snap so PlayerRemote.update()
+        // doesn't revert to a stale position on the next frame
+        const remoteWithLerp = remotePlayer as {
+          lerpPosition?: {
+            pushArray: (arr: number[], teleport: number | null) => void;
+          };
+          teleport?: number;
+        };
+        if (remoteWithLerp.lerpPosition) {
+          remoteWithLerp.teleport = (remoteWithLerp.teleport || 0) + 1;
+          remoteWithLerp.lerpPosition.pushArray(
+            [pos.x, pos.y, pos.z],
+            remoteWithLerp.teleport,
+          );
+        }
+
         // Update their position directly
         if (remotePlayer.position) {
           remotePlayer.position.x = pos.x;
@@ -3899,6 +4102,20 @@ export class ClientNetwork extends SystemBase {
         // Also update node position if available
         if (remotePlayer.node) {
           remotePlayer.node.position.set(pos.x, pos.y, pos.z);
+        }
+
+        // Update base position + transform for immediate VRM visual update
+        const remoteWithBase = remotePlayer as {
+          base?: {
+            position: { set: (x: number, y: number, z: number) => void };
+            updateTransform?: () => void;
+          };
+        };
+        if (remoteWithBase.base?.position) {
+          remoteWithBase.base.position.set(pos.x, pos.y, pos.z);
+          if (remoteWithBase.base.updateTransform) {
+            remoteWithBase.base.updateTransform();
+          }
         }
 
         // Apply rotation if provided

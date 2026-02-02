@@ -1103,7 +1103,8 @@ describe("Strict Door Entry Verification - Must Fail If Bypassed", () => {
     const isWalkable = createWalkabilityFn(collisionService, 0);
     let testedPaths = 0;
     let pathsWithDoor = 0;
-    let pathsWithoutDoor: Array<{ target: TileCoord; path: TileCoord[] }> = [];
+    const pathsWithoutDoor: Array<{ target: TileCoord; path: TileCoord[] }> =
+      [];
 
     // Test paths to 20 random interior tiles
     const testTargets = interiorTiles.slice(0, 20);
@@ -1159,7 +1160,6 @@ describe("Strict Door Entry Verification - Must Fail If Bypassed", () => {
    */
   it("CRITICAL: Walls must block all non-door crossings", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
-    const bbox = building.boundingBox;
     const floor0 = building.floors.find((f) => f.floorIndex === 0)!;
 
     // Get all wall segments that are NOT doors
@@ -1173,7 +1173,7 @@ describe("Strict Door Entry Verification - Must Fail If Bypassed", () => {
     );
 
     let blockedCount = 0;
-    let failedBlocks: Array<{
+    const failedBlocks: Array<{
       wall: (typeof solidWalls)[0];
       inside: TileCoord;
       outside: TileCoord;
@@ -1181,7 +1181,7 @@ describe("Strict Door Entry Verification - Must Fail If Bypassed", () => {
 
     for (const wall of solidWalls) {
       // Calculate inside and outside tiles for this wall segment
-      let insideTile: TileCoord = { x: wall.tileX, z: wall.tileZ };
+      const insideTile: TileCoord = { x: wall.tileX, z: wall.tileZ };
       let outsideTile: TileCoord;
 
       switch (wall.side) {

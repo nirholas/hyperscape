@@ -220,8 +220,8 @@ describe("AggroSystem", () => {
       expect(COMBAT_CONSTANTS.DEFAULTS.NPC.AGGRO_RANGE).toBe(4);
     });
 
-    it("has OSRS-accurate leashRange of 7", () => {
-      expect(COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE).toBe(7);
+    it("has extended leashRange of 42 for better gameplay", () => {
+      expect(COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE).toBe(42);
     });
 
     it("has OSRS-accurate attackSpeedTicks of 4", () => {
@@ -952,6 +952,170 @@ describe("AggroSystem", () => {
       // Update tolerance
       privateSystem.updatePlayerTolerance("player1", { x: 100, y: 0, z: 100 });
       expect(privateSystem.playerTolerance.has("player1")).toBe(true);
+    });
+  });
+
+  describe("spatial player indexing (playersByRegion)", () => {
+    it("indexes player by region when tolerance is updated", () => {
+      const privateSystem = system as unknown as {
+        playersByRegion: Map<string, Set<string>>;
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Update player tolerance at position (10, 0, 10)
+      // Region = floor(10/21):floor(10/21) = "0:0"
+      privateSystem.updatePlayerTolerance("player1", { x: 10, y: 0, z: 10 });
+
+      expect(privateSystem.playersByRegion.has("0:0")).toBe(true);
+      expect(privateSystem.playersByRegion.get("0:0")?.has("player1")).toBe(
+        true,
+      );
+    });
+
+    it("moves player between regions when position changes", () => {
+      const privateSystem = system as unknown as {
+        playersByRegion: Map<string, Set<string>>;
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // First position: region 0:0
+      privateSystem.updatePlayerTolerance("player1", { x: 10, y: 0, z: 10 });
+      expect(privateSystem.playersByRegion.get("0:0")?.has("player1")).toBe(
+        true,
+      );
+
+      // Move to new region: region 1:1 (position 25, 0, 25 -> tiles 25, 25 -> region floor(25/21)=1)
+      privateSystem.updatePlayerTolerance("player1", { x: 25, y: 0, z: 25 });
+
+      // Should be in new region
+      expect(privateSystem.playersByRegion.get("1:1")?.has("player1")).toBe(
+        true,
+      );
+
+      // Should NOT be in old region
+      expect(privateSystem.playersByRegion.has("0:0")).toBe(false); // Cleaned up empty set
+    });
+
+    it("cleans up empty region sets", () => {
+      const privateSystem = system as unknown as {
+        playersByRegion: Map<string, Set<string>>;
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Add player to region 0:0
+      privateSystem.updatePlayerTolerance("player1", { x: 10, y: 0, z: 10 });
+      expect(privateSystem.playersByRegion.has("0:0")).toBe(true);
+
+      // Move player to different region
+      privateSystem.updatePlayerTolerance("player1", { x: 50, y: 0, z: 50 });
+
+      // Old region set should be deleted (not just empty)
+      expect(privateSystem.playersByRegion.has("0:0")).toBe(false);
+    });
+
+    it("handles multiple players in same region", () => {
+      const privateSystem = system as unknown as {
+        playersByRegion: Map<string, Set<string>>;
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Add two players to same region
+      privateSystem.updatePlayerTolerance("player1", { x: 5, y: 0, z: 5 });
+      privateSystem.updatePlayerTolerance("player2", { x: 10, y: 0, z: 10 });
+
+      const region = privateSystem.playersByRegion.get("0:0");
+      expect(region?.size).toBe(2);
+      expect(region?.has("player1")).toBe(true);
+      expect(region?.has("player2")).toBe(true);
+    });
+
+    it("getRegionIdForPosition returns correct region", () => {
+      // Test public method
+      expect(system.getRegionIdForPosition({ x: 0, y: 0, z: 0 })).toBe("0:0");
+      expect(system.getRegionIdForPosition({ x: 21, y: 0, z: 21 })).toBe("1:1");
+      expect(system.getRegionIdForPosition({ x: 42, y: 0, z: 0 })).toBe("2:0");
+      expect(system.getRegionIdForPosition({ x: -1, y: 0, z: -1 })).toBe(
+        "-1:-1",
+      );
+    });
+
+    it("getNearbyPlayerCount returns correct count for 2x2 grid", () => {
+      const privateSystem = system as unknown as {
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Add players to region 0:0
+      privateSystem.updatePlayerTolerance("player1", { x: 5, y: 0, z: 5 });
+      privateSystem.updatePlayerTolerance("player2", { x: 10, y: 0, z: 10 });
+
+      // Add player to adjacent region 1:1 (part of 2x2 when querying from upper-right of 0:0)
+      // Position 15,15 is in upper-right half of region 0:0, so 2x2 includes 0:0, 1:0, 0:1, 1:1
+      privateSystem.updatePlayerTolerance("player3", { x: 25, y: 0, z: 25 });
+
+      // Query from upper-right of region 0:0 (tile 15,15) should find all 3
+      const count = system.getNearbyPlayerCount({ x: 15, y: 0, z: 15 });
+      expect(count).toBe(3);
+    });
+
+    it("getNearbyPlayerCount only includes 2x2 grid (42x42 tiles)", () => {
+      const privateSystem = system as unknown as {
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Add player to region 0:0
+      privateSystem.updatePlayerTolerance("player1", { x: 5, y: 0, z: 5 });
+
+      // Add player far away in region 3:3 (outside 2x2 grid from 0:0)
+      privateSystem.updatePlayerTolerance("player2", { x: 70, y: 0, z: 70 });
+
+      // Query from lower-left of region 0:0 should only find player1
+      // Position 5,5 is in lower-left, so 2x2 includes -1:-1, 0:-1, -1:0, 0:0
+      const count = system.getNearbyPlayerCount({ x: 5, y: 0, z: 5 });
+      expect(count).toBe(1);
+    });
+
+    it("handles negative tile coordinates correctly (positive modulo)", () => {
+      const privateSystem = system as unknown as {
+        updatePlayerTolerance: (
+          playerId: string,
+          position: { x: number; y: number; z: number },
+        ) => void;
+      };
+
+      // Add player in negative region -1:-1 (position -10, -10)
+      privateSystem.updatePlayerTolerance("player1", { x: -10, y: 0, z: -10 });
+
+      // Query from negative position should find the player
+      // Position -5,-5 is in region -1:-1, and -10,-10 is also in region -1:-1
+      // The positive modulo fix ensures quadrant selection works for negative coords
+      const count = system.getNearbyPlayerCount({ x: -5, y: 0, z: -5 });
+      expect(count).toBe(1);
+
+      // Also verify getRegionIdForPosition handles negatives correctly
+      expect(system.getRegionIdForPosition({ x: -10, y: 0, z: -10 })).toBe(
+        "-1:-1",
+      );
+      expect(system.getRegionIdForPosition({ x: -22, y: 0, z: -22 })).toBe(
+        "-2:-2",
+      );
     });
   });
 });

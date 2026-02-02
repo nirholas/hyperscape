@@ -2004,6 +2004,40 @@ export class TileMovementManager {
   }
 
   /**
+   * Stop a player's current movement immediately.
+   * Clears their path and sends tileMovementEnd so the client's TileInterpolator
+   * stops interpolating along the old path.
+   * Used when starting actions like firemaking that require the player to stand still.
+   */
+  stopPlayer(playerId: string): void {
+    const state = this.playerStates.get(playerId);
+    if (!state || state.path.length === 0) return;
+
+    state.path.length = 0;
+    state.pathIndex = 0;
+    state.moveSeq = (state.moveSeq || 0) + 1;
+
+    const entity = this.world.entities.get(playerId);
+    if (entity?.data) {
+      entity.data.tileMovementActive = false;
+    }
+
+    // Send tileMovementEnd so the client's TileInterpolator stops
+    const worldPos = tileToWorld(state.currentTile);
+    if (entity?.position) {
+      worldPos.y = entity.position.y;
+    }
+
+    this.sendFn("tileMovementEnd", {
+      id: playerId,
+      tile: state.currentTile,
+      worldPos: [worldPos.x, worldPos.y, worldPos.z],
+      moveSeq: state.moveSeq,
+      emote: "idle",
+    });
+  }
+
+  /**
    * Check if a player is currently moving
    */
   isMoving(playerId: string): boolean {

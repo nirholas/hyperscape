@@ -157,18 +157,18 @@ export const SkillTooltip = memo(function SkillTooltip({
 }: SkillTooltipProps): React.ReactElement | null {
   const theme = useTheme();
 
-  if (!visible) return null;
-
   const state = progress?.state ?? "locked";
   const currentRank = progress?.currentRank ?? 0;
   const stateColor = getStateColor(state, theme);
 
-  // Get cost for next rank
+  // Get cost for next rank - must be before any conditional returns
   const nextCost = useMemo(() => {
     if (currentRank >= node.maxRank) return null;
     const costIndex = Math.min(currentRank, node.costs.length - 1);
     return node.costs[costIndex] || null;
   }, [currentRank, node.maxRank, node.costs]);
+
+  if (!visible) return null;
 
   // Container positioning
   const containerStyle: CSSProperties = {

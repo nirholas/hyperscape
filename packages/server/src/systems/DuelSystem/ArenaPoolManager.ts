@@ -202,6 +202,13 @@ export class ArenaPoolManager {
   }
 
   /**
+   * Get total number of arenas in the pool
+   */
+  get totalArenas(): number {
+    return this.arenas.size;
+  }
+
+  /**
    * Get all arena IDs
    */
   getAllArenaIds(): number[] {

@@ -133,6 +133,15 @@ export class PlayerRepository extends BaseRepository {
     if (data.agilityLevel !== undefined) {
       updateData.agilityLevel = data.agilityLevel;
     }
+    if (data.craftingLevel !== undefined) {
+      updateData.craftingLevel = data.craftingLevel;
+    }
+    if (data.fletchingLevel !== undefined) {
+      updateData.fletchingLevel = data.fletchingLevel;
+    }
+    if (data.runecraftingLevel !== undefined) {
+      updateData.runecraftingLevel = data.runecraftingLevel;
+    }
     // XP fields
     if (data.attackXp !== undefined) {
       updateData.attackXp = data.attackXp;
@@ -172,6 +181,15 @@ export class PlayerRepository extends BaseRepository {
     }
     if (data.agilityXp !== undefined) {
       updateData.agilityXp = data.agilityXp;
+    }
+    if (data.craftingXp !== undefined) {
+      updateData.craftingXp = data.craftingXp;
+    }
+    if (data.fletchingXp !== undefined) {
+      updateData.fletchingXp = data.fletchingXp;
+    }
+    if (data.runecraftingXp !== undefined) {
+      updateData.runecraftingXp = data.runecraftingXp;
     }
     if (data.health !== undefined) {
       updateData.health = data.health;

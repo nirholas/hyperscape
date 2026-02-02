@@ -33,6 +33,9 @@ import { StorePanel } from "../../game/panels/StorePanel";
 import { DialoguePanel } from "../../game/panels/DialoguePanel";
 import { SmeltingPanel } from "../../game/panels/SmeltingPanel";
 import { SmithingPanel } from "../../game/panels/SmithingPanel";
+import { CraftingPanel } from "../../game/panels/CraftingPanel";
+import { FletchingPanel } from "../../game/panels/FletchingPanel";
+import { TanningPanel } from "../../game/panels/TanningPanel";
 import { LootWindowPanel } from "../../game/panels/LootWindowPanel";
 import { QuestStartPanel } from "../../game/panels/QuestStartPanel";
 import { QuestCompletePanel } from "../../game/panels/QuestCompletePanel";
@@ -99,6 +102,9 @@ export function MobileInterfaceManager({
     dialogueData,
     smeltingData,
     smithingData,
+    craftingData,
+    fletchingData,
+    tanningData,
     questStartData,
     questCompleteData,
     xpLampData,
@@ -108,6 +114,9 @@ export function MobileInterfaceManager({
     setDialogueData,
     setSmeltingData,
     setSmithingData,
+    setCraftingData,
+    setFletchingData,
+    setTanningData,
     setQuestStartData,
     setQuestCompleteData,
     setXpLampData,
@@ -658,6 +667,55 @@ export function MobileInterfaceManager({
             anvilId={smithingData.anvilId}
             availableRecipes={smithingData.availableRecipes}
             onClose={() => setSmithingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {craftingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setCraftingData(null)}
+          title="Crafting"
+          maxWidth="90vw"
+          maxHeight="80vh"
+        >
+          <CraftingPanel
+            world={world}
+            availableRecipes={craftingData.availableRecipes}
+            station={craftingData.station}
+            onClose={() => setCraftingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {fletchingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setFletchingData(null)}
+          title="Fletching"
+          maxWidth="90vw"
+          maxHeight="80vh"
+        >
+          <FletchingPanel
+            world={world}
+            availableRecipes={fletchingData.availableRecipes}
+            onClose={() => setFletchingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {tanningData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setTanningData(null)}
+          title="Tanning"
+          maxWidth="90vw"
+          maxHeight="80vh"
+        >
+          <TanningPanel
+            world={world}
+            availableRecipes={tanningData.availableRecipes}
+            onClose={() => setTanningData(null)}
           />
         </ModalWindow>
       )}

@@ -22,7 +22,8 @@ import { COLORS } from "../../constants";
 import { InventoryPanel } from "./InventoryPanel";
 import { useWindowStore, useThemeStore, useMobileLayout } from "@/ui";
 import { getItem } from "@hyperscape/shared";
-import { getItemIcon, formatItemName, formatPrice } from "@/utils";
+import { formatItemName, formatPrice } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 interface StoreItem {
   id: string;
@@ -529,8 +530,8 @@ export function StorePanel({
                       "rgba(242, 208, 138, 0.3)";
                   }}
                 >
-                  <span className="text-xl select-none">
-                    {getItemIcon(item.itemId)}
+                  <span className="select-none">
+                    <ItemIcon itemId={item.itemId} size={44} />
                   </span>
                   {/* Price */}
                   <span

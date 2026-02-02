@@ -6,9 +6,8 @@
  * @packageDocumentation
  */
 
-/* eslint-disable no-undef, no-redeclare */
-// DOM types (Window, Document, HTMLElement, etc.) are browser globals
-// Function overloads are valid TypeScript but trigger no-redeclare
+// Note: DOM types (Window, Document, HTMLElement, etc.) and function overloads
+// are handled by TypeScript. ESLint config disables no-undef and no-redeclare for this file.
 
 import { useEffect, useRef } from "react";
 

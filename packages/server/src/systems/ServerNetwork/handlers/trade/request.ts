@@ -86,6 +86,19 @@ export function handleTradeRequest(
     return;
   }
 
+  // Duel blocking check - can't trade while in a duel
+  const duelSystem = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystem?.isPlayerInDuel?.(playerId)) {
+    sendTradeError(socket, "You can't trade while in a duel", "IN_DUEL");
+    return;
+  }
+  if (duelSystem?.isPlayerInDuel?.(targetPlayerId)) {
+    sendTradeError(socket, "That player is in a duel", "TARGET_IN_DUEL");
+    return;
+  }
+
   // Function to actually send the trade request (called when in range)
   const sendTradeRequestToTarget = (): void => {
     // Re-validate target is still online and available
@@ -96,6 +109,16 @@ export function handleTradeRequest(
 
     if (hasActiveInterfaceSession(world, targetPlayerId)) {
       sendTradeError(socket, "That player is busy", "PLAYER_BUSY");
+      return;
+    }
+
+    // Re-check duel status (could have changed while walking)
+    if (duelSystem?.isPlayerInDuel?.(playerId)) {
+      sendTradeError(socket, "You can't trade while in a duel", "IN_DUEL");
+      return;
+    }
+    if (duelSystem?.isPlayerInDuel?.(targetPlayerId)) {
+      sendTradeError(socket, "That player is in a duel", "TARGET_IN_DUEL");
       return;
     }
 

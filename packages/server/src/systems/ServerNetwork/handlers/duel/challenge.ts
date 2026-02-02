@@ -29,6 +29,8 @@ import {
   isInDuelArenaLobby,
   arePlayersInChallengeRange,
   arePlayersAdjacent,
+  withDuelAuth,
+  DUEL_PACKETS,
 } from "./helpers";
 
 // ============================================================================
@@ -225,7 +227,7 @@ export function handleDuelChallenge(
         type: "duel_challenge" as const,
         challengeId: result.challengeId,
       };
-      sendToSocket(targetSocket, "chatAdded", chatMessage);
+      sendToSocket(targetSocket, DUEL_PACKETS.CHAT_ADDED, chatMessage);
 
       // Send structured challenge data for UI modal
       sendToSocket(targetSocket, "duelChallengeIncoming", {
@@ -245,7 +247,7 @@ export function handleDuelChallenge(
     }
 
     // Send confirmation to challenger
-    sendToSocket(socket, "duelChallengeSent", {
+    sendToSocket(socket, DUEL_PACKETS.CHALLENGE_SENT, {
       challengeId: result.challengeId,
       targetPlayerId,
       targetPlayerName: targetName,
@@ -261,7 +263,7 @@ export function handleDuelChallenge(
       createdAt: new Date().toISOString(),
       type: "system" as const,
     };
-    sendToSocket(socket, "chatAdded", challengerChatMessage);
+    sendToSocket(socket, DUEL_PACKETS.CHAT_ADDED, challengerChatMessage);
   };
 
   // Check if already adjacent - if so, send challenge immediately
@@ -311,17 +313,9 @@ export function handleDuelChallengeRespond(
   data: { challengeId: string; accept: boolean },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   const { challengeId, accept } = data;
 
@@ -377,7 +371,7 @@ export function handleDuelChallengeRespond(
     // Notify both players to open duel interface
 
     // Notify target (responder)
-    sendToSocket(socket, "duelSessionStarted", {
+    sendToSocket(socket, DUEL_PACKETS.SESSION_STARTED, {
       duelId: result.duelId,
       opponentId: challenge.challengerId,
       opponentName: challenge.challengerName,
@@ -386,7 +380,7 @@ export function handleDuelChallengeRespond(
 
     // Notify challenger
     if (challengerSocket) {
-      sendToSocket(challengerSocket, "duelSessionStarted", {
+      sendToSocket(challengerSocket, DUEL_PACKETS.SESSION_STARTED, {
         duelId: result.duelId,
         opponentId: challenge.targetId,
         opponentName: challenge.targetName,
@@ -403,7 +397,11 @@ export function handleDuelChallengeRespond(
         createdAt: new Date().toISOString(),
         type: "system" as const,
       };
-      sendToSocket(challengerSocket, "chatAdded", acceptChatMessage);
+      sendToSocket(
+        challengerSocket,
+        DUEL_PACKETS.CHAT_ADDED,
+        acceptChatMessage,
+      );
     }
   } else {
     // Challenge declined
@@ -429,7 +427,11 @@ export function handleDuelChallengeRespond(
         createdAt: new Date().toISOString(),
         type: "system" as const,
       };
-      sendToSocket(challengerSocket, "chatAdded", declineChatMessage);
+      sendToSocket(
+        challengerSocket,
+        DUEL_PACKETS.CHAT_ADDED,
+        declineChatMessage,
+      );
     }
   }
 }

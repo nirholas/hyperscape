@@ -1,6 +1,7 @@
 import js from "@eslint/js";
 import typescript from "@typescript-eslint/eslint-plugin";
 import typescriptParser from "@typescript-eslint/parser";
+import reactHooks from "eslint-plugin-react-hooks";
 
 export default [
   js.configs.recommended,
@@ -138,6 +139,10 @@ export default [
         HTMLAnchorElement: "readonly",
         HTMLFormElement: "readonly",
         HTMLSelectElement: "readonly",
+        HTMLIFrameElement: "readonly",
+        alert: "readonly",
+        confirm: "readonly",
+        prompt: "readonly",
         ImageBitmap: "readonly",
         FileReader: "readonly",
         TexImageSource: "readonly",
@@ -198,6 +203,7 @@ export default [
     },
     plugins: {
       "@typescript-eslint": typescript,
+      "react-hooks": reactHooks,
     },
     rules: {
       // TypeScript rules
@@ -221,6 +227,10 @@ export default [
         },
       ],
 
+      // React hooks - disabled as Three.js scenes intentionally omit deps
+      "react-hooks/exhaustive-deps": "off",
+      "react-hooks/rules-of-hooks": "error",
+
       // JavaScript rules
       "no-unused-vars": "off", // Handled by TypeScript
       "no-dupe-class-members": "off", // Handled by TypeScript - allows method overloads
@@ -229,6 +239,10 @@ export default [
       "no-var": "warn",
       "no-console": "off", // Allow console in this project
       "no-empty": ["warn", { allowEmptyCatch: true }],
+      // TypeScript handles const+type pattern with same name
+      "no-redeclare": "off",
+      // Intentional regex for security validation (matching control characters)
+      "no-control-regex": "off",
 
       // Common issues
       "no-constant-condition": "warn",
@@ -263,6 +277,20 @@ export default [
       "no-undef": "off",
       "prefer-const": "off",
       "no-var": "off",
+    },
+  },
+  {
+    // DOM types in generics trigger no-undef in ESLint (TypeScript handles these)
+    files: ["**/useEventListener.ts"],
+    rules: {
+      "no-undef": "off",
+    },
+  },
+  {
+    // Test files can use require() for JSON imports
+    files: ["**/*.test.ts", "**/*.test.tsx", "**/__tests__/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
     },
   },
 ];

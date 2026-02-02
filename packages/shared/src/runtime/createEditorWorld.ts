@@ -22,6 +22,7 @@ import { VegetationSystem } from "../systems/shared/world/VegetationSystem";
 import { ProceduralGrassSystem } from "../systems/shared/world/ProceduralGrass";
 import { ProceduralFlowerSystem } from "../systems/shared/world/ProceduralFlowers";
 import { BuildingRenderingSystem } from "../systems/shared/world/BuildingRenderingSystem";
+import { ProceduralTownLandmarksSystem } from "../systems/shared/world/ProceduralTownLandmarks";
 
 // Editor-specific systems
 import { EditorCameraSystem } from "../systems/editor/EditorCameraSystem";
@@ -41,6 +42,7 @@ export interface EditorWorldOptions {
   enableTowns?: boolean;
   enableRoads?: boolean;
   enableBuildings?: boolean;
+  enableTownLandmarks?: boolean;
   enableWater?: boolean;
   cameraPosition?: { x: number; y: number; z: number };
   cameraTarget?: { x: number; y: number; z: number };
@@ -69,6 +71,7 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
     enableTowns: options.enableTowns ?? true,
     enableRoads: options.enableRoads ?? true,
     enableBuildings: options.enableBuildings ?? true,
+    enableTownLandmarks: options.enableTownLandmarks ?? true,
     enableWater: options.enableWater ?? false,
   };
 
@@ -90,6 +93,8 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   if (cfg.enableRoads) world.register("roads", RoadNetworkSystem);
   if (cfg.enableBuildings)
     world.register("building-rendering", BuildingRenderingSystem);
+  if (cfg.enableTownLandmarks)
+    world.register("town-landmarks", ProceduralTownLandmarksSystem);
   if (cfg.enableGrass) world.register("grass", ProceduralGrassSystem);
   if (cfg.enableFlowers) world.register("flowers", ProceduralFlowerSystem);
 

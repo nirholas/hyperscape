@@ -1601,6 +1601,12 @@ function generateTown(): void {
           color = 0x3a6a3a;
           height = 4;
           break; // Tree green
+        case "fence_post":
+          color = 0x6a5030;
+          break; // Rustic wood brown
+        case "fence_gate":
+          color = 0x7a6040;
+          break; // Lighter wood for gate
       }
 
       const landmarkGeo = new THREE.BoxGeometry(

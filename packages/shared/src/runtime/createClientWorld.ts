@@ -76,6 +76,7 @@ import { ProceduralGrassSystem } from "../systems/shared";
 import { ProceduralFlowerSystem } from "../systems/shared";
 import { ProceduralDocks } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
+import { ProceduralTownLandmarksSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
 // Tree cache pre-warming for faster world loading
@@ -238,6 +239,13 @@ export function createClientWorld() {
   // Procedural building mesh rendering for towns
   // Must be registered after towns system as it depends on town data
   world.register("building-rendering", BuildingRenderingSystem);
+
+  // ============================================================================
+  // TOWN LANDMARKS SYSTEM
+  // ============================================================================
+  // Procedural town landmarks (fences, lampposts, wells, signposts)
+  // Must be registered after towns and roads as it depends on both
+  world.register("town-landmarks", ProceduralTownLandmarksSystem);
 
   // ============================================================================
   // VISUAL EFFECTS SYSTEMS

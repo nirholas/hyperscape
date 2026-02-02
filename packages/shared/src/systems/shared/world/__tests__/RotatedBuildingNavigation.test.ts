@@ -221,8 +221,7 @@ describe("Rotated Building Navigation", () => {
       });
 
       it("should allow path from outside to inside through door", () => {
-        const building = collisionService.getBuilding(BUILDING_ID)!;
-        const bbox = building.boundingBox;
+        collisionService.getBuilding(BUILDING_ID)!;
 
         const closestDoor = collisionService.findClosestDoorTile(
           BUILDING_ID,

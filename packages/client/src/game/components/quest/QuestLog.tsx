@@ -627,11 +627,14 @@ const QuestListItem = memo(function QuestListItem({
     padding: shouldUseMobileUI ? "8px 12px" : "4px 8px",
     cursor: "pointer",
     backgroundColor: isSelected
-      ? (theme.colors.slot.selected ?? `${theme.colors.accent.primary}20`)
+      ? `${theme.colors.accent.primary}30`
       : isHovered
         ? theme.colors.slot.hover
         : "transparent",
-    transition: "background-color 0.1s ease",
+    borderLeft: isSelected
+      ? `3px solid ${theme.colors.accent.primary}`
+      : "3px solid transparent",
+    transition: "background-color 0.1s ease, border-color 0.1s ease",
     minHeight: shouldUseMobileUI ? "44px" : "28px",
   };
 
@@ -1067,7 +1070,7 @@ export const QuestLog = memo(function QuestLog({
   const containerStyle: CSSProperties = {
     display: "flex",
     flexDirection: "column",
-    backgroundColor: "transparent",
+    backgroundColor: theme.colors.background.panelSecondary,
     overflow: "hidden",
     height: "100%",
     ...style,

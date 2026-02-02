@@ -24,7 +24,6 @@ import type {
 import {
   DockGenerator,
   DEFAULT_DOCK_PARAMS,
-  createSimpleDockMaterial,
   type GeneratedDock,
   type DockRecipe,
 } from "@hyperscape/procgen/items/dock";
@@ -258,16 +257,13 @@ interface StageSystemInterface {
 export class ProceduralDocks extends System {
   private docks: Map<string, DockInstance> = new Map();
   private generator: DockGenerator;
-  private material: THREE.Material;
   private terrainSystem: TerrainSystemInterface | null = null;
   private scene: THREE.Scene | null = null;
   private docksGenerated = false;
-  private generationInProgress = false;
 
   constructor(world: World) {
     super(world);
     this.generator = new DockGenerator();
-    this.material = createSimpleDockMaterial() as THREE.Material;
   }
 
   /**
@@ -321,7 +317,7 @@ export class ProceduralDocks extends System {
    * Generate docks for the island pond
    * Called automatically when terrain is ready
    */
-  async generateDocks(seed: string = "island-docks"): Promise<void> {
+  generateDocks(seed: string = "island-docks"): void {
     if (!this.terrainSystem || !this.scene) {
       console.warn(
         "[ProceduralDocks] Systems not ready, cannot generate docks",
@@ -337,7 +333,7 @@ export class ProceduralDocks extends System {
     console.log("[ProceduralDocks] Generating docks for island pond...");
 
     // Generate dock for the main island pond
-    const dock = await this.generateDockForWaterBody(ISLAND_POND, seed);
+    const dock = this.generateDockForWaterBody(ISLAND_POND, seed);
 
     if (dock) {
       console.log(
@@ -352,10 +348,10 @@ export class ProceduralDocks extends System {
   /**
    * Generate a dock for a specific water body
    */
-  async generateDockForWaterBody(
+  generateDockForWaterBody(
     waterBody: WaterBody,
     seed: string,
-  ): Promise<GeneratedDock | null> {
+  ): GeneratedDock | null {
     if (!this.terrainSystem || !this.scene) return null;
 
     // Create terrain height getter
@@ -444,15 +440,7 @@ export class ProceduralDocks extends System {
       waterFloorDepth: 3.0,
     });
 
-    // Apply material to all meshes
-    dock.mesh.traverse((child) => {
-      if (child instanceof THREE.Mesh) {
-        child.material = this.material;
-        child.castShadow = true;
-        child.receiveShadow = true;
-      }
-    });
-
+    // DockGenerator now applies WebGPU TSL material internally
     // Add to scene
     this.scene.add(dock.mesh);
 
@@ -545,7 +533,6 @@ export class ProceduralDocks extends System {
       });
     }
     this.docks.clear();
-    this.material.dispose();
   }
 
   private hashString(str: string): number {
@@ -560,20 +547,12 @@ export class ProceduralDocks extends System {
 
   update(_deltaTime: number): void {
     // Check if we should generate docks (terrain became ready)
-    // Use generationInProgress to prevent race condition
-    if (
-      !this.docksGenerated &&
-      !this.generationInProgress &&
-      this.isTerrainReady()
-    ) {
-      this.generationInProgress = true;
-      this.generateDocks()
-        .catch((err) => {
-          console.error("[ProceduralDocks] Error generating docks:", err);
-        })
-        .finally(() => {
-          this.generationInProgress = false;
-        });
+    if (!this.docksGenerated && this.isTerrainReady()) {
+      try {
+        this.generateDocks();
+      } catch (err) {
+        console.error("[ProceduralDocks] Error generating docks:", err);
+      }
     }
   }
 }

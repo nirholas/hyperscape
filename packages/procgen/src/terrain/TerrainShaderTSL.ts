@@ -1,4 +1,3 @@
-// @ts-nocheck - TSL functions use dynamic typing that TypeScript doesn't support
 /**
  * TerrainShaderTSL - Game-accurate terrain material for TSL/WebGPU
  *
@@ -38,6 +37,7 @@ import {
   sin,
   cos,
 } from "three/tsl";
+import type Node from "three/src/nodes/core/Node.js";
 
 // ============================================================================
 // TERRAIN CONSTANTS - Shared between all terrain systems
@@ -470,7 +470,7 @@ export function createTerrainMaterial(
 
   // === ROAD OVERLAY (optional) ===
   // Roads are compacted dirt paths - use same dirt colors as terrain for consistency
-  let colorWithRoads = variedColor;
+  let colorWithRoads: Node = variedColor;
   if (includeRoadOverlay) {
     const roadInfluence = attribute("roadInfluence", "float");
 

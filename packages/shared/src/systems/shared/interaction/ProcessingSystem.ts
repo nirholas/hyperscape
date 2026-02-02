@@ -30,6 +30,8 @@ import {
 import { SystemBase } from "../infrastructure/SystemBase";
 import type { World } from "../../../types/index";
 import { getTargetValidator } from "./TargetValidator";
+import { modelCache } from "../../../utils/rendering/ModelCache";
+import type { GroundItemSystem } from "../economy/GroundItemSystem";
 
 /**
  * Debug logging flag for processing system.
@@ -39,9 +41,65 @@ import { getTargetValidator } from "./TargetValidator";
 const DEBUG_PROCESSING = false;
 
 export class ProcessingSystem extends SystemBase {
+  // Fire visual constants
+  private static readonly FIRE_MODEL_SCALE = 0.35;
+
+  private static readonly FIRE_PARTICLE_SPAWN_Y = 0.1;
+  private static readonly FIRE_PLACEHOLDER_Y_OFFSET = 0.4;
+
+  // Shared fire particle resources (static, lazily initialized on client only)
+  private static fireParticleGeometry: THREE.CircleGeometry | null = null;
+  private static fireGlowTextures: Map<number, THREE.DataTexture> | null = null;
+
+  private static getFireParticleGeometry(): THREE.CircleGeometry {
+    if (!ProcessingSystem.fireParticleGeometry) {
+      ProcessingSystem.fireParticleGeometry = new THREE.CircleGeometry(0.7, 12);
+    }
+    return ProcessingSystem.fireParticleGeometry;
+  }
+
+  private static getOrCreateGlowTexture(colorHex: number): THREE.DataTexture {
+    if (!ProcessingSystem.fireGlowTextures) {
+      ProcessingSystem.fireGlowTextures = new Map();
+    }
+    const cached = ProcessingSystem.fireGlowTextures.get(colorHex);
+    if (cached) return cached;
+
+    const size = 64;
+    const sharpness = 2.0;
+    const r = (colorHex >> 16) & 0xff;
+    const g = (colorHex >> 8) & 0xff;
+    const b = colorHex & 0xff;
+    const data = new Uint8Array(size * size * 4);
+    const half = size / 2;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = (x + 0.5 - half) / half;
+        const dy = (y + 0.5 - half) / half;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const falloff = Math.max(0, 1 - dist);
+        const strength = Math.pow(falloff, sharpness);
+        const idx = (y * size + x) * 4;
+        data[idx] = Math.round(r * strength);
+        data[idx + 1] = Math.round(g * strength);
+        data[idx + 2] = Math.round(b * strength);
+        data[idx + 3] = Math.round(255 * strength);
+      }
+    }
+
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    ProcessingSystem.fireGlowTextures.set(colorHex, tex);
+    return tex;
+  }
+
   private activeFires = new Map<string, Fire>();
   private activeProcessing = new Map<string, ProcessingAction>();
   private fireCleanupTimers = new Map<string, NodeJS.Timeout>();
+  private pendingFireModels = new Map<string, THREE.Object3D>();
   private playerSkills = new Map<
     string,
     Record<string, { level: number; xp: number }>
@@ -122,6 +180,7 @@ export class ProcessingSystem extends SystemBase {
       action.playerId = "";
       action.targetItem = undefined;
       action.targetFire = undefined;
+      action.startPosition = undefined;
       this.actionPool.push(action);
     }
   }
@@ -256,13 +315,29 @@ export class ProcessingSystem extends SystemBase {
               data,
             );
           }
-          const fire = this.activeFires.get(data.fireId);
-          if (fire) {
-            fire.isActive = false;
-            if (fire.mesh) {
-              this.world.stage.scene.remove(fire.mesh);
-            }
-            this.activeFires.delete(data.fireId);
+          this.extinguishFire(data.fireId);
+        },
+      );
+
+      // Load fire model when lighting starts (before fire is officially created)
+      this.subscribe(
+        EventType.FIRE_LIGHTING_STARTED,
+        (data: {
+          playerId: string;
+          position: { x: number; y: number; z: number };
+        }) => {
+          this.loadFireModelForLighting(data.playerId, data.position);
+        },
+      );
+
+      // Clean up preloaded fire model when lighting is cancelled (player moved)
+      this.subscribe(
+        EventType.FIRE_LIGHTING_CANCELLED,
+        (data: { playerId: string }) => {
+          const pendingModel = this.pendingFireModels.get(data.playerId);
+          if (pendingModel) {
+            this.world.stage.scene.remove(pendingModel);
+            this.pendingFireModels.delete(data.playerId);
           }
         },
       );
@@ -427,6 +502,28 @@ export class ProcessingSystem extends SystemBase {
     // OSRS: Player squats/crouches while lighting fire
     this.setProcessingEmote(playerId);
 
+    // Cache player start position for movement detection and fire placement
+    const player = this.world.getPlayer(playerId);
+    if (!player?.node?.position) {
+      this.activeProcessing.delete(playerId);
+      this.releaseAction(processingAction);
+      this.resetPlayerEmote(playerId);
+      return;
+    }
+
+    const startPosition = {
+      x: player.node.position.x,
+      y: player.node.position.y,
+      z: player.node.position.z,
+    };
+    processingAction.startPosition = startPosition;
+
+    // Notify clients to show fire model during lighting animation
+    this.emitTypedEvent(EventType.FIRE_LIGHTING_STARTED, {
+      playerId,
+      position: startPosition,
+    });
+
     // Complete after duration
     setTimeout(() => {
       // Re-fetch player at callback time - they may have disconnected
@@ -453,12 +550,27 @@ export class ProcessingSystem extends SystemBase {
         return;
       }
 
-      this.completeFiremaking(playerId, processingAction, {
-        x: currentPlayer.node.position.x,
-        y: currentPlayer.node.position.y,
-        z: currentPlayer.node.position.z,
-      });
+      // Use cached start position - fire spawns where lighting began
+      this.completeFiremaking(playerId, processingAction, startPosition);
     }, this.FIREMAKING_TIME);
+  }
+
+  /**
+   * Cancel firemaking when the player moves during the lighting animation.
+   * Cleans up the active action, resets emote, and notifies clients.
+   */
+  private cancelFiremaking(playerId: string, action: ProcessingAction): void {
+    this.activeProcessing.delete(playerId);
+    this.releaseAction(action);
+    this.resetPlayerEmote(playerId);
+
+    this.emitTypedEvent(EventType.FIRE_LIGHTING_CANCELLED, { playerId });
+
+    this.emitTypedEvent(EventType.UI_MESSAGE, {
+      playerId,
+      message: "You move and stop trying to light the fire.",
+      type: "info",
+    });
   }
 
   private completeFiremaking(
@@ -1030,26 +1142,241 @@ export class ProcessingSystem extends SystemBase {
     return Math.max(0, Math.min(maxBurnChance, burnChance));
   }
 
-  private createFireVisual(fire: Fire): void {
+  private async createFireVisual(fire: Fire): Promise<void> {
     // Only create visuals on client
     if (!this.world.isClient) return;
 
     if (DEBUG_PROCESSING) {
-      console.log(
-        "[ProcessingSystem] 🔥 createFireVisual called for:",
-        fire.id,
-      );
-      console.log(
-        "[ProcessingSystem] 🔥 Scene available:",
-        !!this.world.stage?.scene,
-      );
+      console.log("[ProcessingSystem] createFireVisual called for:", fire.id);
     }
 
-    // Create fire mesh - orange glowing cube for now
-    // Use MeshBasicNodeMaterial for WebGPU compatibility
+    let model: THREE.Object3D | null = null;
+
+    // Check if we already loaded the model during the lighting phase
+    const pending = this.pendingFireModels.get(fire.playerId);
+    if (pending) {
+      model = pending;
+      this.pendingFireModels.delete(fire.playerId);
+    } else {
+      // Load model fresh (late join / missed lighting event)
+      try {
+        const result = await modelCache.loadModel(
+          "asset://models/firemaking-fire/firemaking-fire.glb",
+          this.world,
+        );
+        model = result.scene;
+        const s = ProcessingSystem.FIRE_MODEL_SCALE;
+        model.scale.set(s, s, s);
+        // Bbox-snap: place model bottom on terrain
+        const bbox = new THREE.Box3().setFromObject(model);
+        model.position.set(
+          fire.position.x,
+          fire.position.y - bbox.min.y,
+          fire.position.z,
+        );
+        this.world.stage.scene.add(model);
+      } catch (err) {
+        console.warn(
+          "[ProcessingSystem] Failed to load fire model, using placeholder:",
+          err,
+        );
+        this.createPlaceholderFireMesh(fire);
+        return;
+      }
+    }
+
+    // Guard: fire may have been extinguished during async model load
+    if (!fire.isActive) {
+      this.world.stage.scene.remove(model);
+      return;
+    }
+
+    model.name = `Fire_${fire.id}`;
+    model.userData = {
+      type: "fire",
+      entityId: fire.id,
+      fireId: fire.id,
+      playerId: fire.playerId,
+      name: "Fire",
+    };
+    model.traverse((child: THREE.Object3D) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.layers.set(1);
+      }
+    });
+
+    fire.mesh = model;
+
+    // Spawn particle fire effect rising from center of model
+    this.createFireParticles(fire);
+  }
+
+  /**
+   * Load fire GLB model during the 3s lighting animation (client-only).
+   */
+  private async loadFireModelForLighting(
+    playerId: string,
+    position: { x: number; y: number; z: number },
+  ): Promise<void> {
+    try {
+      const result = await modelCache.loadModel(
+        "asset://models/firemaking-fire/firemaking-fire.glb",
+        this.world,
+      );
+
+      const model = result.scene;
+      model.name = `FireLighting_${playerId}`;
+      const s = ProcessingSystem.FIRE_MODEL_SCALE;
+      model.scale.set(s, s, s);
+      // Bbox-snap: place model bottom on terrain
+      const bbox = new THREE.Box3().setFromObject(model);
+      model.position.set(position.x, position.y - bbox.min.y, position.z);
+      model.userData = { type: "fireLighting", playerId };
+      model.traverse((child: THREE.Object3D) => {
+        if ((child as THREE.Mesh).isMesh) {
+          child.layers.set(1);
+        }
+      });
+
+      this.world.stage.scene.add(model);
+      this.pendingFireModels.set(playerId, model);
+    } catch (err) {
+      console.warn(
+        "[ProcessingSystem] Failed to load fire model for lighting:",
+        err,
+      );
+    }
+  }
+
+  /**
+   * Create billboard fire particle effect (client-only).
+   * Uses manual billboard meshes with baked glow textures (same pattern as RunecraftingAltarEntity).
+   */
+  private createFireParticles(fire: Fire): void {
+    if (!this.world.isClient) return;
+
+    const PARTICLE_COUNT = 18;
+    const meshes: THREE.Mesh[] = [];
+    const geom = ProcessingSystem.getFireParticleGeometry();
+    const colors = [0xff4400, 0xff6600, 0xff8800, 0xffaa00, 0xffcc00];
+
+    // Per-particle state
+    const ages = new Float32Array(PARTICLE_COUNT);
+    const lifetimes = new Float32Array(PARTICLE_COUNT);
+    const speeds = new Float32Array(PARTICLE_COUNT);
+    const offsetsX = new Float32Array(PARTICLE_COUNT);
+    const offsetsZ = new Float32Array(PARTICLE_COUNT);
+    const baseScales = new Float32Array(PARTICLE_COUNT);
+
+    for (let i = 0; i < PARTICLE_COUNT; i++) {
+      lifetimes[i] = 0.5 + Math.random() * 0.7;
+      ages[i] = Math.random() * lifetimes[i]; // stagger
+      speeds[i] = 0.6 + Math.random() * 0.8;
+      offsetsX[i] = (Math.random() - 0.5) * 0.25;
+      offsetsZ[i] = (Math.random() - 0.5) * 0.25;
+      baseScales[i] = 0.18 + Math.random() * 0.22;
+
+      const colorIdx = Math.floor(Math.random() * colors.length);
+      // Use MeshBasicNodeMaterial for WebGPU compatibility
+      const mat = new MeshBasicNodeMaterial();
+      mat.map = ProcessingSystem.getOrCreateGlowTexture(colors[colorIdx]);
+      mat.transparent = true;
+      mat.opacity = 0.7;
+      mat.blending = THREE.AdditiveBlending;
+      mat.depthWrite = false;
+      mat.depthTest = true;
+      mat.side = THREE.DoubleSide;
+      mat.fog = false;
+
+      const particle = new THREE.Mesh(geom, mat);
+      particle.renderOrder = 999;
+      particle.frustumCulled = false;
+      particle.layers.set(1);
+      this.world.stage.scene.add(particle);
+      meshes.push(particle);
+    }
+
+    // Animation loop
+    let lastTime = Date.now();
+    let animFrameId: number | null = null;
+    const camera = (this.world as { camera?: THREE.Camera }).camera;
+
+    const animate = () => {
+      if (!fire.isActive) {
+        animFrameId = null;
+        return;
+      }
+
+      const now = Date.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+
+      for (let i = 0; i < PARTICLE_COUNT; i++) {
+        ages[i] += dt;
+        if (ages[i] >= lifetimes[i]) {
+          ages[i] = 0;
+          offsetsX[i] = (Math.random() - 0.5) * 0.25;
+          offsetsZ[i] = (Math.random() - 0.5) * 0.25;
+        }
+
+        const t = ages[i] / lifetimes[i]; // 0..1
+        const rise = t * speeds[i] * 0.7;
+
+        meshes[i].position.set(
+          fire.position.x + offsetsX[i] * (1 + t * 0.5),
+          fire.position.y + ProcessingSystem.FIRE_PARTICLE_SPAWN_Y + rise,
+          fire.position.z + offsetsZ[i] * (1 + t * 0.5),
+        );
+
+        // Fade in fast, fade out near end
+        const fadeIn = Math.min(t * 6, 1);
+        const fadeOut = Math.pow(1 - t, 1.5);
+        (meshes[i].material as MeshBasicNodeMaterial).opacity =
+          0.75 * fadeIn * fadeOut;
+
+        // Shrink as particle rises
+        const scale = baseScales[i] * (1 - t * 0.4);
+        meshes[i].scale.set(scale, scale * 1.3, scale);
+
+        // Billboard: face camera
+        if (camera) {
+          meshes[i].quaternion.copy(camera.quaternion);
+        }
+      }
+
+      animFrameId = requestAnimationFrame(animate);
+    };
+
+    if (typeof requestAnimationFrame !== "undefined") {
+      animate();
+    }
+
+    // Store cleanup function and mesh references on fire object
+    const fireExt = fire as {
+      fireParticleMeshes?: THREE.Mesh[];
+      cancelFireParticles?: () => void;
+    };
+    fireExt.fireParticleMeshes = meshes;
+    fireExt.cancelFireParticles = () => {
+      if (animFrameId !== null) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      for (const mesh of meshes) {
+        this.world.stage.scene.remove(mesh);
+        (mesh.material as THREE.Material).dispose();
+      }
+    };
+  }
+
+  /**
+   * Fallback placeholder fire mesh (orange box) when GLB model fails to load.
+   * Uses MeshBasicNodeMaterial for WebGPU compatibility.
+   */
+  private createPlaceholderFireMesh(fire: Fire): void {
     const fireGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.5);
     const fireMaterial = new MeshBasicNodeMaterial();
-    fireMaterial.color = new THREE.Color(0xff4500); // Orange red
+    fireMaterial.color = new THREE.Color(0xff4500);
     fireMaterial.transparent = true;
     fireMaterial.opacity = 0.8;
 
@@ -1057,36 +1384,31 @@ export class ProcessingSystem extends SystemBase {
     fireMesh.name = `Fire_${fire.id}`;
     fireMesh.position.set(
       fire.position.x,
-      fire.position.y + 0.4,
+      fire.position.y + ProcessingSystem.FIRE_PLACEHOLDER_Y_OFFSET,
       fire.position.z,
     );
     fireMesh.userData = {
       type: "fire",
-      entityId: fire.id, // RaycastService looks for entityId
-      fireId: fire.id, // Keep for backwards compatibility
+      entityId: fire.id,
+      fireId: fire.id,
       playerId: fire.playerId,
       name: "Fire",
     };
-    // Set layer 1 for raycasting (entities are on layer 1, matching other entities)
     fireMesh.layers.set(1);
 
-    // Add flickering animation with proper cleanup (browser only)
     let animationFrameId: number | null = null;
-
     if (typeof requestAnimationFrame !== "undefined") {
       const animate = () => {
         if (fire.isActive && fire.mesh) {
           fireMaterial.opacity = 0.6 + Math.sin(Date.now() * 0.01) * 0.2;
           animationFrameId = requestAnimationFrame(animate);
         } else {
-          // Animation stopped - null out reference
           animationFrameId = null;
         }
       };
       animate();
     }
 
-    // Store cancel function on fire object for cleanup in extinguishFire()
     (fire as { cancelAnimation?: () => void }).cancelAnimation = () => {
       if (animationFrameId !== null) {
         window.cancelAnimationFrame(animationFrameId);
@@ -1095,19 +1417,7 @@ export class ProcessingSystem extends SystemBase {
     };
 
     fire.mesh = fireMesh as THREE.Object3D;
-
-    // Add to scene - on client, scene MUST exist
     this.world.stage.scene.add(fireMesh);
-
-    if (DEBUG_PROCESSING) {
-      console.log("[ProcessingSystem] 🔥 Fire mesh added to scene:", {
-        fireId: fire.id,
-        position: fireMesh.position.toArray(),
-        layers: fireMesh.layers.mask,
-        userData: fireMesh.userData,
-        inScene: this.world.stage.scene.children.includes(fireMesh),
-      });
-    }
   }
 
   private extinguishFire(fireId: string): void {
@@ -1132,25 +1442,48 @@ export class ProcessingSystem extends SystemBase {
     const fireWithAnimation = fire as { cancelAnimation?: () => void };
     fireWithAnimation.cancelAnimation?.();
 
+    // Destroy fire particle meshes
+    const fireWithParticles = fire as { cancelFireParticles?: () => void };
+    if (fireWithParticles.cancelFireParticles) {
+      fireWithParticles.cancelFireParticles();
+      fireWithParticles.cancelFireParticles = undefined;
+    }
+
     // Remove visual and dispose THREE.js resources (only exists on client)
     if (fire.mesh && this.world.isClient) {
       this.world.stage.scene.remove(fire.mesh);
 
-      // Dispose THREE.js resources to prevent GPU memory leak
-      const mesh = fire.mesh as THREE.Mesh;
-      if (mesh.geometry) {
-        mesh.geometry.dispose();
-      }
-      if (mesh.material) {
-        if (Array.isArray(mesh.material)) {
-          mesh.material.forEach((mat) => mat.dispose());
-        } else {
-          (mesh.material as THREE.Material).dispose();
+      // Traverse and dispose all geometries and materials (GLB models have multiple children)
+      fire.mesh.traverse((child: THREE.Object3D) => {
+        const mesh = child as THREE.Mesh;
+        if (mesh.isMesh) {
+          if (mesh.geometry) mesh.geometry.dispose();
+          if (mesh.material) {
+            const materials = Array.isArray(mesh.material)
+              ? mesh.material
+              : [mesh.material];
+            for (const mat of materials) {
+              if (!modelCache.isManagedMaterial(mat as THREE.Material)) {
+                (mat as THREE.Material).dispose();
+              }
+            }
+          }
         }
-      }
+      });
 
       // Clear reference for GC
       fire.mesh = undefined;
+    }
+
+    // Spawn ashes at fire position (server-only, OSRS: fires leave ashes when they burn out)
+    if (this.world.isServer) {
+      const groundItems =
+        this.world.getSystem<GroundItemSystem>("ground-items");
+      if (groundItems) {
+        groundItems.spawnGroundItem("ashes", 1, fire.position, {
+          despawnTime: 120000, // 2 minutes
+        });
+      }
     }
 
     this.activeFires.delete(fireId);
@@ -1172,6 +1505,13 @@ export class ProcessingSystem extends SystemBase {
     const action = this.activeProcessing.get(playerId);
     this.activeProcessing.delete(playerId);
     if (action) this.releaseAction(action);
+
+    // Remove pending fire model (cancelled during lighting)
+    const pendingModel = this.pendingFireModels.get(playerId);
+    if (pendingModel && this.world.isClient) {
+      this.world.stage.scene.remove(pendingModel);
+      this.pendingFireModels.delete(playerId);
+    }
 
     // Extinguish player's fires
     for (const [fireId, fire] of this.activeFires.entries()) {
@@ -1311,6 +1651,14 @@ export class ProcessingSystem extends SystemBase {
       this.extinguishFire(fireId);
     }
 
+    // Clean up pending fire models
+    if (this.world.isClient) {
+      for (const model of this.pendingFireModels.values()) {
+        this.world.stage.scene.remove(model);
+      }
+    }
+    this.pendingFireModels.clear();
+
     // Clear timers
     this.fireCleanupTimers.forEach((timer) => clearTimeout(timer));
 
@@ -1318,15 +1666,32 @@ export class ProcessingSystem extends SystemBase {
     this.fireCleanupTimers.clear();
   }
 
+  // Movement threshold squared (0.5 units) for cancelling firemaking
+  private static readonly FIREMAKING_MOVE_THRESHOLD_SQ = 0.25;
+
   // Required System lifecycle methods
   update(_dt: number): void {
-    // Check for expired processing actions
+    // Check for expired processing actions and movement cancellation
     const now = Date.now();
     for (const [playerId, action] of this.activeProcessing.entries()) {
       if (now - action.startTime > action.duration + 1000) {
         // 1 second grace period - release action back to pool
         this.activeProcessing.delete(playerId);
         this.releaseAction(action);
+        continue;
+      }
+
+      // Cancel firemaking if player moved from start position
+      if (action.actionType === "firemaking" && action.startPosition) {
+        const player = this.world.getPlayer(playerId);
+        if (player?.node?.position) {
+          const dx = player.node.position.x - action.startPosition.x;
+          const dz = player.node.position.z - action.startPosition.z;
+          const distSq = dx * dx + dz * dz;
+          if (distSq > ProcessingSystem.FIREMAKING_MOVE_THRESHOLD_SQ) {
+            this.cancelFiremaking(playerId, action);
+          }
+        }
       }
     }
   }

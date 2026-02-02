@@ -1,4 +1,3 @@
-// @ts-nocheck - TSL functions use dynamic typing that TypeScript doesn't support
 /**
  * Rock Material TSL - WebGPU Triplanar Material for Procedural Rocks
  *
@@ -85,8 +84,9 @@ const tslHash = Fn(([p]: [ReturnType<typeof vec2>]) => {
 
 /**
  * Hash function for vec3 input
+ * @remarks Exported for use in custom rock patterns (cellular, etc.)
  */
-const _tslHash3 = Fn(([p]: [ReturnType<typeof vec3>]) => {
+export const tslHash3 = Fn(([p]: [ReturnType<typeof vec3>]) => {
   const p2 = vec2(
     dot(p, vec3(127.1, 311.7, 74.7)),
     dot(p, vec3(269.5, 183.3, 246.1)),
@@ -138,8 +138,9 @@ const tslFBM = Fn(([p]: [ReturnType<typeof vec2>]) => {
 
 /**
  * Ridged noise for cracks/crevices (TSL)
+ * @remarks Exported for use in custom cracked rock patterns
  */
-const _tslRidgedNoise = Fn(([p]: [ReturnType<typeof vec2>]) => {
+export const tslRidgedNoise = Fn(([p]: [ReturnType<typeof vec2>]) => {
   const value = float(0.0).toVar();
   const amplitude = float(0.5).toVar();
   const frequency = float(1.0).toVar();

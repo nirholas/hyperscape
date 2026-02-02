@@ -1,1 +1,7 @@
+---
+alwaysApply: true
+---
+
 This app is made with three.js and WebGPU, using three shader language (TSL). DO NOT USE WEBGL. DO NOT BE LAZY AND FALL BACK. Always focus on making working WebGL solutions with TSL. Thoroughly research instead of guessing.
+
+Always use node shader materials with TSL unless it otherwise doesn't make sense. When implementing something, focus on WebGPU, parallelizaiton, simd, performance, AAA quality but something that scales from mobile to a gaming PC. Don't simplify, skimp, offer a simpler version than what the best possible version would be. Always implement the best possible version -- best being a tradeoff of performance to quality erring toward performance, with optimizations wherever possible.

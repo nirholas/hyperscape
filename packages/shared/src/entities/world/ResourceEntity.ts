@@ -84,6 +84,11 @@ import {
   removeTreeInstance,
   setProcgenTreeWorld,
 } from "../../systems/shared/world/ProcgenTreeCache";
+import {
+  addStumpInstance,
+  removeStumpInstance,
+  setProcgenStumpWorld,
+} from "../../systems/shared/world/ProcgenStumpInstancer";
 
 /**
  * NOTE: LOD1 models are PRE-BAKED offline using scripts/bake-lod.sh (Blender).
@@ -507,6 +512,11 @@ export class ResourceEntity extends InteractableEntity {
         depleted: true,
       };
 
+      // Align depleted model to ground (same as createMesh)
+      const bbox = new THREE.Box3().setFromObject(this.mesh);
+      const minY = bbox.min.y;
+      this.mesh.position.set(0, -minY, 0);
+
       this.node.add(this.mesh);
     } catch (_error) {
       // Fallback: just hide the original mesh
@@ -748,6 +758,12 @@ export class ResourceEntity extends InteractableEntity {
   private _useInstancedTree = false;
   /** Current instanced LOD level */
   private _instancedLOD = 0;
+  /** Flag to track if currently showing as stump */
+  private _showingStump = false;
+  /** Stored scale for stump creation */
+  private _instancedScale = 1.0;
+  /** Stored rotation for stump creation */
+  private _instancedRotation = 0;
 
   /**
    * Create a procedurally generated tree using INSTANCED RENDERING.
@@ -791,6 +807,9 @@ export class ResourceEntity extends InteractableEntity {
       if (success) {
         this._useInstancedTree = true;
         this._instancedLOD = 0;
+        // Store scale and rotation for stump creation
+        this._instancedScale = finalScale;
+        this._instancedRotation = rotation;
 
         // Create invisible collision proxy for interactions
         this.createTreeCollisionProxy(finalScale);

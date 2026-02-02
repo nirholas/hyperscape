@@ -89,8 +89,9 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
     mobSpawns: [],
   },
   // Duel Arena - PvP dueling area with 6 arena platforms, lobby, and hospital
-  // Flat zones are REQUIRED for terrain walkability on elevated platforms
-  // Without flat zones, the tile-based movement system blocks these tiles
+  // NOTE: Flat zones REMOVED - terrain now shows natural procedural height.
+  // The DuelArenaVisualsSystem creates floor meshes with physics collision bodies
+  // on top of the terrain, so walkability is handled by floor collision, not terrain height.
   duel_arena: {
     id: "duel_arena",
     name: "Duel Arena",
@@ -110,91 +111,7 @@ export const ALL_WORLD_AREAS: Record<string, WorldArea> = {
     npcs: [],
     resources: [],
     mobSpawns: [],
-    // Flat zones for terrain flattening - CRITICAL for tile-based walkability
-    // These make TerrainSystem return flat heights so isPositionWalkable() passes
-    // Height 0.4 is slightly above ground level, matching building floor offsets
-    flatZones: [
-      // Lobby floor (where players wait and challenge each other)
-      {
-        id: "duel_lobby",
-        centerX: 105,
-        centerZ: 62,
-        width: 40,
-        depth: 25,
-        height: 0.4,
-        blendRadius: 3,
-      },
-      // Hospital floor (where defeated players respawn)
-      {
-        id: "duel_hospital",
-        centerX: 65,
-        centerZ: 62,
-        width: 30,
-        depth: 25,
-        height: 0.4,
-        blendRadius: 3,
-      },
-      // Arena 1 (row 0, col 0)
-      {
-        id: "duel_arena_1",
-        centerX: 70,
-        centerZ: 92,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-      // Arena 2 (row 0, col 1)
-      {
-        id: "duel_arena_2",
-        centerX: 84,
-        centerZ: 92,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-      // Arena 3 (row 1, col 0)
-      {
-        id: "duel_arena_3",
-        centerX: 70,
-        centerZ: 120,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-      // Arena 4 (row 1, col 1)
-      {
-        id: "duel_arena_4",
-        centerX: 84,
-        centerZ: 120,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-      // Arena 5 (row 2, col 0)
-      {
-        id: "duel_arena_5",
-        centerX: 70,
-        centerZ: 148,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-      // Arena 6 (row 2, col 1)
-      {
-        id: "duel_arena_6",
-        centerX: 84,
-        centerZ: 148,
-        width: 20,
-        depth: 24,
-        height: 0.4,
-        blendRadius: 2,
-      },
-    ],
+    // No flatZones - terrain shows natural height, platforms are visual/physical floor meshes
   },
 };
 

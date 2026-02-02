@@ -387,6 +387,7 @@ export const createProcgenRoutes = (presetService: ProcgenPresetService) => {
                   plants: t.Optional(t.Array(t.Any())),
                   buildings: t.Optional(t.Array(t.Any())),
                   terrain: t.Optional(t.Array(t.Any())),
+                  roads: t.Optional(t.Array(t.Any())),
                 }),
               ),
               generatedAssets: t.Optional(t.Array(t.Any())),

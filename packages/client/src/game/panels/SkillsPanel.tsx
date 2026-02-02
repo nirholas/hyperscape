@@ -6,7 +6,7 @@
  * Uses shared SKILL_DEFINITIONS for data-driven skill display
  */
 
-import React, { useState, useRef, useMemo, memo } from "react";
+import React, { useState, useRef, useMemo, useCallback, memo } from "react";
 import { createPortal } from "react-dom";
 import { useDraggable } from "@dnd-kit/core";
 import {
@@ -17,7 +17,12 @@ import {
 import { zIndex, MOBILE_SKILLS } from "../../constants";
 import { useTooltipSize } from "../../hooks";
 import type { PlayerStats, Skills } from "../../types";
-import { SKILL_DEFINITIONS, type SkillDefinition } from "@hyperscape/shared";
+import {
+  SKILL_DEFINITIONS,
+  getUnlocksForSkill,
+  type SkillDefinition,
+} from "@hyperscape/shared";
+import { SkillGuidePanel } from "./SkillGuidePanel";
 
 interface SkillsPanelProps {
   stats: PlayerStats | null;
@@ -56,6 +61,7 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
   skill,
   isHovered,
   isMobile,
+  onClick,
   onMouseEnter,
   onMouseMove,
   onMouseLeave,
@@ -63,11 +69,34 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
   skill: Skill;
   isHovered: boolean;
   isMobile: boolean;
+  onClick: (skill: Skill) => void;
   onMouseEnter: (e: React.MouseEvent) => void;
   onMouseMove: (e: React.MouseEvent) => void;
   onMouseLeave: () => void;
 }) {
   const theme = useThemeStore((s) => s.theme);
+
+  // Track pointer position to distinguish clicks from drags
+  const pointerStart = useRef<{ x: number; y: number } | null>(null);
+
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    pointerStart.current = { x: e.clientX, y: e.clientY };
+  }, []);
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent) => {
+      if (!pointerStart.current) return;
+      const dx = e.clientX - pointerStart.current.x;
+      const dy = e.clientY - pointerStart.current.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      pointerStart.current = null;
+      // Only treat as click if pointer barely moved (not a drag)
+      if (distance < 5) {
+        onClick(skill);
+      }
+    },
+    [onClick, skill],
+  );
 
   // Make skill draggable for action bar
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -109,6 +138,8 @@ const DraggableSkillCard = memo(function DraggableSkillCard({
       ref={setNodeRef}
       className="relative"
       style={cardStyle}
+      onPointerDownCapture={handlePointerDown}
+      onPointerUpCapture={handlePointerUp}
       onMouseEnter={onMouseEnter}
       onMouseMove={onMouseMove}
       onMouseLeave={onMouseLeave}
@@ -195,6 +226,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
   const [hoveredSkill, setHoveredSkill] = useState<Skill | null>(null);
   const [hoveredTotalLevel, setHoveredTotalLevel] = useState(false);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [guideSkill, setGuideSkill] = useState<Skill | null>(null);
   const skillTooltipRef = useRef<HTMLDivElement>(null);
   const totalLevelTooltipRef = useRef<HTMLDivElement>(null);
 
@@ -260,6 +292,7 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               skill={skill}
               isHovered={hoveredSkill?.key === skill.key}
               isMobile={shouldUseMobileUI}
+              onClick={setGuideSkill}
               onMouseEnter={(e) => {
                 setHoveredSkill(skill);
                 setMousePos({ x: e.clientX, y: e.clientY });
@@ -513,6 +546,21 @@ export function SkillsPanel({ stats }: SkillsPanelProps) {
               </div>
             );
           })(),
+          document.body,
+        )}
+
+      {/* Skill Guide Modal — portaled to body so it renders center-screen */}
+      {guideSkill &&
+        createPortal(
+          <SkillGuidePanel
+            visible={true}
+            skillLabel={guideSkill.label}
+            skillIcon={guideSkill.icon}
+            playerLevel={guideSkill.level}
+            unlocks={getUnlocksForSkill(guideSkill.key)}
+            isLoading={false}
+            onClose={() => setGuideSkill(null)}
+          />,
           document.body,
         )}
     </div>

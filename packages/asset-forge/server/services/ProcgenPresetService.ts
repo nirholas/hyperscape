@@ -17,10 +17,6 @@ import type {
   TerrainPreset,
   ProcgenPresetManifest,
   GeneratedProcgenAsset,
-  BatchGenerationRequest,
-  BatchGenerationResult,
-  createPresetId,
-  createAssetId,
 } from "../../src/types/ProcgenPresets";
 
 // Manifest file path
@@ -49,8 +45,22 @@ const DEFAULT_MANIFEST: ProcgenPresetManifest = {
     plants: [],
     buildings: [],
     terrain: [],
+    roads: [],
   },
   generatedAssets: [],
+};
+
+// Map category names to their manifest keys
+const CATEGORY_TO_KEY: Record<
+  ProcgenCategory,
+  keyof ProcgenPresetManifest["presets"]
+> = {
+  tree: "trees",
+  rock: "rocks",
+  plant: "plants",
+  building: "buildings",
+  terrain: "terrain",
+  roads: "roads",
 };
 
 export class ProcgenPresetService {
@@ -77,6 +87,7 @@ export class ProcgenPresetService {
       "plant",
       "building",
       "terrain",
+      "roads",
     ];
     for (const category of categories) {
       const categoryPath = path.join(this.assetsPath, category);
@@ -122,7 +133,7 @@ export class ProcgenPresetService {
    */
   listPresets(category?: ProcgenCategory): ProcgenPreset[] {
     if (category) {
-      const categoryKey = `${category}s` as keyof typeof this.manifest.presets;
+      const categoryKey = CATEGORY_TO_KEY[category];
       return this.manifest.presets[categoryKey] as ProcgenPreset[];
     }
 
@@ -132,6 +143,7 @@ export class ProcgenPresetService {
       ...this.manifest.presets.plants,
       ...this.manifest.presets.buildings,
       ...this.manifest.presets.terrain,
+      ...this.manifest.presets.roads,
     ];
   }
 
@@ -160,8 +172,7 @@ export class ProcgenPresetService {
     } as ProcgenPreset;
 
     // Add to appropriate category
-    const categoryKey =
-      `${preset.category}s` as keyof typeof this.manifest.presets;
+    const categoryKey = CATEGORY_TO_KEY[preset.category];
     (this.manifest.presets[categoryKey] as ProcgenPreset[]).push(newPreset);
 
     this.saveManifest();
@@ -178,8 +189,7 @@ export class ProcgenPresetService {
     const preset = this.getPreset(id);
     if (!preset) return null;
 
-    const categoryKey =
-      `${preset.category}s` as keyof typeof this.manifest.presets;
+    const categoryKey = CATEGORY_TO_KEY[preset.category];
     const presets = this.manifest.presets[categoryKey] as ProcgenPreset[];
     const index = presets.findIndex((p) => p.id === id);
 
@@ -203,8 +213,7 @@ export class ProcgenPresetService {
     const preset = this.getPreset(id);
     if (!preset) return false;
 
-    const categoryKey =
-      `${preset.category}s` as keyof typeof this.manifest.presets;
+    const categoryKey = CATEGORY_TO_KEY[preset.category];
     const presets = this.manifest.presets[categoryKey] as ProcgenPreset[];
     const index = presets.findIndex((p) => p.id === id);
 
@@ -371,6 +380,7 @@ export class ProcgenPresetService {
           "plants",
           "buildings",
           "terrain",
+          "roads",
         ] as const) {
           const importedPresets = imported.presets[category] ?? [];
           const existingIds = new Set(

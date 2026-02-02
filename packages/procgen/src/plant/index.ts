@@ -42,6 +42,11 @@ export {
   generateAndExportPlant,
   type PlantGLBExportOptions,
   type PlantGLBExportResult,
+  // Stump generation
+  generateStumpMesh,
+  generateStumpFromParams,
+  STUMP_HEIGHT,
+  type StumpGenerationResult,
   // Math/geometry helpers (for testing)
   shapeScaleAtPercent,
   trunkShapeScaleAtPercent,

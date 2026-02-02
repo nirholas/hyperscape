@@ -1228,6 +1228,7 @@ export class TownGenerator {
   private generateLandmarks(town: GeneratedTown): TownLandmark[] {
     const landmarks: TownLandmark[] = [];
     let landmarkIndex = 0;
+    const landmarkConfig = this.config.landmarks;
 
     // Central well or fountain
     const centerLandmark = this.generateCenterLandmark(town, landmarkIndex++);
@@ -1245,23 +1246,35 @@ export class TownGenerator {
       landmarkIndex += benches.length;
     }
 
-    // Lampposts along main street (towns only)
-    if (town.size === "town") {
+    // Lampposts along roads (towns always, villages if enabled)
+    const enableLampposts =
+      town.size === "town" ||
+      (town.size === "village" && landmarkConfig.lamppostsInVillages);
+    if (enableLampposts) {
       const lampposts = this.generateLampposts(town, landmarkIndex);
       landmarks.push(...lampposts);
       landmarkIndex += lampposts.length;
     }
 
     // Market stalls (towns only, along main street)
-    if (town.size === "town") {
+    if (town.size === "town" && landmarkConfig.marketStallsEnabled) {
       const stalls = this.generateMarketStalls(town, landmarkIndex);
       landmarks.push(...stalls);
       landmarkIndex += stalls.length;
     }
 
+    // Fences around building lots (villages and towns, if enabled)
+    if (town.size !== "hamlet" && landmarkConfig.fencesEnabled) {
+      const fences = this.generateFences(town, landmarkIndex);
+      landmarks.push(...fences);
+      landmarkIndex += fences.length;
+    }
+
     // Decorative elements (barrels, crates, planters)
-    const decorations = this.generateDecorations(town, landmarkIndex);
-    landmarks.push(...decorations);
+    if (landmarkConfig.decorationsEnabled) {
+      const decorations = this.generateDecorations(town, landmarkIndex);
+      landmarks.push(...decorations);
+    }
 
     return landmarks;
   }
@@ -1276,8 +1289,8 @@ export class TownGenerator {
     const type: TownLandmarkType = town.size === "town" ? "fountain" : "well";
     const size =
       type === "fountain"
-        ? { width: 4, depth: 4, height: 2.5 }
-        : { width: 2, depth: 2, height: 3 };
+        ? { width: 4.2, depth: 4.2, height: 2.5 } // 4m diameter fountain
+        : { width: 2.2, depth: 2.2, height: 3 }; // 2m diameter well with roof
 
     return {
       id: `${town.id}_landmark_${index}`,
@@ -1313,7 +1326,12 @@ export class TownGenerator {
           type: "signpost",
           position: { x, y, z },
           rotation: entry.angle + Math.PI, // Face outward
-          size: { width: 0.5, depth: 0.5, height: 2.5 },
+          size: { width: 0.5, depth: 0.5, height: 2.6 },
+          // Metadata will be populated with destination after roads are generated
+          // Store entry point index for later matching with road connections
+          metadata: {
+            cornerIndex: i, // Entry point index for road matching
+          },
         });
       }
     }
@@ -1371,46 +1389,69 @@ export class TownGenerator {
   ): TownLandmark[] {
     const lampposts: TownLandmark[] = [];
     const roads = town.internalRoads ?? [];
-    const mainRoad = roads.find((r) => r.isMain);
-    if (!mainRoad) return lampposts;
+    const landmarkConfig = this.config.landmarks;
+
+    // Get all roads to place lampposts on (main road for villages, all roads for towns)
+    const roadsToLight =
+      town.size === "town" ? roads : roads.filter((r) => r.isMain);
+
+    if (roadsToLight.length === 0) return lampposts;
 
     const roadWidth = 5;
-    const lampSpacing = 15;
+    // Adjust spacing based on town size (villages get sparser lampposts)
+    const baseSpacing = landmarkConfig.lamppostSpacing;
+    const lampSpacing =
+      town.size === "village" ? baseSpacing * 1.5 : baseSpacing;
     const lampOffset = roadWidth / 2 + 1;
 
-    const dx = mainRoad.end.x - mainRoad.start.x;
-    const dz = mainRoad.end.z - mainRoad.start.z;
-    const length = Math.sqrt(dx * dx + dz * dz);
-    const dirX = dx / length;
-    const dirZ = dz / length;
-    const perpX = -dirZ;
-    const perpZ = dirX;
-
-    const numLamps = Math.floor(length / lampSpacing);
     let lampIndex = 0;
 
-    for (let i = 1; i < numLamps; i++) {
-      const t = i * lampSpacing;
-      const baseX = mainRoad.start.x + dirX * t;
-      const baseZ = mainRoad.start.z + dirZ * t;
+    for (const road of roadsToLight) {
+      const dx = road.end.x - road.start.x;
+      const dz = road.end.z - road.start.z;
+      const length = Math.sqrt(dx * dx + dz * dz);
 
-      // Skip lamps too close to center
-      if (dist2D(baseX, baseZ, town.position.x, town.position.z) < 8) continue;
+      if (length < lampSpacing) continue;
 
-      // Alternate sides
-      const side = i % 2 === 0 ? 1 : -1;
-      const x = baseX + perpX * lampOffset * side;
-      const z = baseZ + perpZ * lampOffset * side;
-      const y = this.terrain.getHeightAt(x, z);
+      const dirX = dx / length;
+      const dirZ = dz / length;
+      const perpX = -dirZ;
+      const perpZ = dirX;
 
-      lampposts.push({
-        id: `${town.id}_landmark_${startIndex + lampIndex}`,
-        type: "lamppost",
-        position: { x, y, z },
-        rotation: 0,
-        size: { width: 0.3, depth: 0.3, height: 3.5 },
-      });
-      lampIndex++;
+      const numLamps = Math.floor(length / lampSpacing);
+
+      for (let i = 1; i < numLamps; i++) {
+        const t = i * lampSpacing;
+        const baseX = road.start.x + dirX * t;
+        const baseZ = road.start.z + dirZ * t;
+
+        // Skip lamps too close to center (plaza area)
+        const centerDist = dist2D(
+          baseX,
+          baseZ,
+          town.position.x,
+          town.position.z,
+        );
+        if (centerDist < 8) continue;
+
+        // For villages, skip some lamps for a sparser feel
+        if (town.size === "village" && this.random() > 0.7) continue;
+
+        // Alternate sides
+        const side = i % 2 === 0 ? 1 : -1;
+        const x = baseX + perpX * lampOffset * side;
+        const z = baseZ + perpZ * lampOffset * side;
+        const y = this.terrain.getHeightAt(x, z);
+
+        lampposts.push({
+          id: `${town.id}_landmark_${startIndex + lampIndex}`,
+          type: "lamppost",
+          position: { x, y, z },
+          rotation: 0,
+          size: { width: 0.35, depth: 0.35, height: 4.1 },
+        });
+        lampIndex++;
+      }
     }
 
     return lampposts;
@@ -1454,7 +1495,7 @@ export class TownGenerator {
         type: "market_stall",
         position: { x, y, z },
         rotation: angle + Math.PI, // Face plaza
-        size: { width: 3, depth: 2, height: 2.5 },
+        size: { width: 3.2, depth: 1.4, height: 2.4 },
       });
       stallIndex++;
     }
@@ -1496,10 +1537,10 @@ export class TownGenerator {
         decorTypes[Math.floor(this.random() * decorTypes.length)];
       const size =
         decorType === "planter"
-          ? { width: 0.8, depth: 0.8, height: 0.6 }
+          ? { width: 0.75, depth: 0.75, height: 0.8 } // Planter with flowers
           : decorType === "barrel"
-            ? { width: 0.6, depth: 0.6, height: 1 }
-            : { width: 0.8, depth: 0.6, height: 0.6 };
+            ? { width: 0.58, depth: 0.58, height: 1.0 } // Wooden barrel
+            : { width: 0.72, depth: 0.58, height: 0.58 }; // Wooden crate
 
       decorations.push({
         id: `${town.id}_landmark_${startIndex + decorIndex}`,
@@ -1512,6 +1553,156 @@ export class TownGenerator {
     }
 
     return decorations;
+  }
+
+  /**
+   * Generate fence posts around building lots
+   * Fences are placed at the corners and edges of building properties
+   */
+  private generateFences(
+    town: GeneratedTown,
+    startIndex: number,
+  ): TownLandmark[] {
+    const fences: TownLandmark[] = [];
+    const roads = town.internalRoads ?? [];
+    const paths = town.paths ?? [];
+    const landmarkConfig = this.config.landmarks;
+    const fencePostHeight = landmarkConfig.fencePostHeight;
+    const fenceDensity = landmarkConfig.fenceDensity;
+
+    let fenceIndex = 0;
+
+    // For each building, place fence posts around its lot boundary
+    for (const building of town.buildings) {
+      // Get building dimensions with some padding for the "lot"
+      const lotPadding = 2; // 2m padding around building for lot boundary
+      const halfWidth = building.size.width / 2 + lotPadding;
+      const halfDepth = building.size.depth / 2 + lotPadding;
+
+      // Calculate lot corners based on building rotation
+      const cos = Math.cos(building.rotation);
+      const sin = Math.sin(building.rotation);
+
+      // Define corner offsets (relative to building center)
+      const corners = [
+        { dx: -halfWidth, dz: -halfDepth }, // Back-left
+        { dx: halfWidth, dz: -halfDepth }, // Back-right
+        { dx: halfWidth, dz: halfDepth }, // Front-right
+        { dx: -halfWidth, dz: halfDepth }, // Front-left
+      ];
+
+      // Rotate corners to match building rotation
+      const worldCorners = corners.map((c) => ({
+        x: building.position.x + c.dx * cos - c.dz * sin,
+        z: building.position.z + c.dx * sin + c.dz * cos,
+      }));
+
+      // Place fence posts at corners (with probability based on density)
+      for (let i = 0; i < worldCorners.length; i++) {
+        const corner = worldCorners[i];
+        const nextCorner = worldCorners[(i + 1) % worldCorners.length];
+
+        // Skip posts near roads (front of building)
+        if (!this.isPositionClearOfRoads(corner.x, corner.z, roads, 5))
+          continue;
+
+        // Skip posts that would block paths
+        if (this.isPositionOnPath(corner.x, corner.z, paths, 2)) continue;
+
+        // Apply fence density probability
+        if (this.random() > fenceDensity) continue;
+
+        const y = this.terrain.getHeightAt(corner.x, corner.z);
+
+        // Calculate rotation to face along fence line
+        const dx = nextCorner.x - corner.x;
+        const dz = nextCorner.z - corner.z;
+        const fenceAngle = Math.atan2(dx, dz);
+
+        fences.push({
+          id: `${town.id}_landmark_${startIndex + fenceIndex}`,
+          type: "fence_post",
+          position: { x: corner.x, y, z: corner.z },
+          rotation: fenceAngle,
+          size: { width: 0.15, depth: 0.15, height: fencePostHeight },
+          metadata: {
+            lotBuildingId: building.id,
+            cornerIndex: i,
+          },
+        });
+        fenceIndex++;
+
+        // Add intermediate fence posts along edges (not front edge near road)
+        // Only for side and back edges
+        const edgeLength = dist2D(
+          corner.x,
+          corner.z,
+          nextCorner.x,
+          nextCorner.z,
+        );
+        const postSpacing = 3; // 3m between posts
+
+        if (edgeLength > postSpacing * 1.5) {
+          const numIntermediatePosts = Math.floor(edgeLength / postSpacing) - 1;
+          for (let j = 1; j <= numIntermediatePosts; j++) {
+            const t = j / (numIntermediatePosts + 1);
+            const px = corner.x + dx * t;
+            const pz = corner.z + dz * t;
+
+            // Check if this intermediate post would be clear of roads
+            if (!this.isPositionClearOfRoads(px, pz, roads, 5)) continue;
+            if (this.isPositionOnPath(px, pz, paths, 2)) continue;
+
+            // Apply density check for intermediate posts too
+            if (this.random() > fenceDensity) continue;
+
+            const py = this.terrain.getHeightAt(px, pz);
+
+            fences.push({
+              id: `${town.id}_landmark_${startIndex + fenceIndex}`,
+              type: "fence_post",
+              position: { x: px, y: py, z: pz },
+              rotation: fenceAngle,
+              size: { width: 0.15, depth: 0.15, height: fencePostHeight },
+              metadata: {
+                lotBuildingId: building.id,
+              },
+            });
+            fenceIndex++;
+          }
+        }
+      }
+
+      // Note: Gates are not placed at entrances because:
+      // 1. Fences only go on sides/back of lots (away from roads)
+      // 2. Building entrances face the road where there's no fence
+      // Gates could be added if side/back paths are implemented
+    }
+
+    return fences;
+  }
+
+  /**
+   * Check if a position is on or near a path
+   */
+  private isPositionOnPath(
+    x: number,
+    z: number,
+    paths: TownPath[],
+    minDistance: number,
+  ): boolean {
+    for (const path of paths) {
+      const dist = this.distanceToSegment(
+        x,
+        z,
+        path.start.x,
+        path.start.z,
+        path.end.x,
+        path.end.z,
+      );
+      if (dist < minDistance + path.width / 2) return true;
+    }
+    return false;
   }
 
   /**

@@ -66,17 +66,37 @@ if (fs.existsSync(physxSrc)) {
   console.log(`${colors.yellow}⚠️  PhysX package not found - run 'bun install' first${colors.reset}`)
 }
 
-// 3. Build shared package once before starting dev servers
-console.log(`${colors.blue}Building shared package...${colors.reset}`)
-try {
-  execSync('cd packages/shared && bun run build', {
-    stdio: 'inherit',
-    cwd: rootDir,
-    shell: true
-  })
-  console.log(`${colors.green}✓ Shared package built${colors.reset}`)
-} catch (e) {
-  console.log(`${colors.yellow}⚠️  Shared build failed (will retry in watch mode)${colors.reset}`)
+// 3. Build shared package once before starting dev servers (skip if already built)
+const sharedBuildPath = path.join(rootDir, 'packages/shared/build/framework.js')
+const sharedSrcPath = path.join(rootDir, 'packages/shared/src')
+
+// Check if build exists and is reasonably fresh (modified within last hour)
+let shouldBuild = true
+if (fs.existsSync(sharedBuildPath)) {
+  const buildStat = fs.statSync(sharedBuildPath)
+  const buildAge = Date.now() - buildStat.mtimeMs
+  const oneHour = 60 * 60 * 1000
+  
+  if (buildAge < oneHour) {
+    console.log(`${colors.green}✓ Shared package already built (${Math.round(buildAge / 1000 / 60)}m ago)${colors.reset}`)
+    console.log(`${colors.dim}  Run 'bun run build:shared' to force rebuild${colors.reset}`)
+    shouldBuild = false
+  }
+}
+
+if (shouldBuild) {
+  console.log(`${colors.blue}Building shared package...${colors.reset}`)
+  try {
+    // Use --no-typecheck for faster dev builds (types checked in watch mode)
+    execSync('cd packages/shared && bun scripts/build.mjs --no-typecheck', {
+      stdio: 'inherit',
+      cwd: rootDir,
+      shell: true
+    })
+    console.log(`${colors.green}✓ Shared package built${colors.reset}`)
+  } catch (e) {
+    console.log(`${colors.yellow}⚠️  Shared build failed (will retry in watch mode)${colors.reset}`)
+  }
 }
 
 // 4. Start CDN (non-blocking with timeout)

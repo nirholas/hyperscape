@@ -158,15 +158,19 @@ export const KeybindControl = memo(function KeybindControl({
       onListeningChange?.(false);
     };
 
+    // Capture ref value at time of effect for cleanup
+    const buttonElement = buttonRef.current;
+
     // Focus the button when listening
-    buttonRef.current?.focus();
+    buttonElement?.focus();
 
     window.addEventListener("keydown", handleKeyDown, true);
-    buttonRef.current?.addEventListener("blur", handleBlur);
+    buttonElement?.addEventListener("blur", handleBlur);
 
     return () => {
       window.removeEventListener("keydown", handleKeyDown, true);
-      buttonRef.current?.removeEventListener("blur", handleBlur);
+      // Use captured element to ensure correct cleanup
+      buttonElement?.removeEventListener("blur", handleBlur);
     };
   }, [isListening, onChange, setting.allowModifiers, onListeningChange]);
 

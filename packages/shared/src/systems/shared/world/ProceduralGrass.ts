@@ -1,4 +1,28 @@
-// @ts-nocheck - TSL functions use dynamic array destructuring that TypeScript doesn't support
+// @ts-nocheck -- TSL type definitions are incomplete for compute shaders and Fn() callbacks
+/**
+ * TypeScript checking disabled due to fundamental @types/three TSL limitations:
+ *
+ * 1. **Fn() callback signatures**: TSL's Fn() uses array destructuring `([a, b]) => {}`
+ *    which @types/three interprets as NodeBuilder iterator access
+ *
+ * 2. **Fn() call arity**: Fn() returns ShaderNodeFn<[ProxiedObject<...>]> expecting 1 arg,
+ *    but runtime API uses spread args: `this.setScale(data, value)` vs `this.setScale([data, value])`
+ *
+ * 3. **Node type narrowing**: Reassigning variables changes types (ConstNode → MathNode)
+ *    which TS incorrectly flags: `let x = float(0); x = x.add(1);` // MathNode not assignable to ConstNode
+ *
+ * 4. **Compute shader API**: `.compute()` method exists at runtime but not in @types/three
+ *
+ * 5. **Loop() callback types**: Loop expects `(inputs: { i: number })` but TSL passes `{ i: Node }`
+ *
+ * These are upstream @types/three issues. Fixes require either:
+ * - Upstream type definition improvements
+ * - A TSL type wrapper library
+ * - Runtime-accurate type overrides
+ *
+ * The code is correct and tested - only the static types are incompatible.
+ */
+
 /**
  * ProceduralGrass.ts - GPU Grass System
  *
@@ -54,7 +78,6 @@ import THREE, {
   sub,
   mul,
   Loop,
-  int,
 } from "../../../extras/three/three";
 import { SpriteNodeMaterial } from "three/webgpu";
 import { System } from "../infrastructure/System";
@@ -214,6 +237,9 @@ const uniforms = {
   // Terrain-based lighting parameters
   uTerrainLightAmbient: uniform(0.4), // Minimum ambient light
   uTerrainLightDiffuse: uniform(0.6), // Diffuse contribution
+  // Light intensity (shared with LOD1)
+  uLightIntensity: uniform(1.0),
+  uAmbientIntensity: uniform(0.4),
 };
 
 // LOD1 uniforms (grass cards at distance)
@@ -354,7 +380,7 @@ export function getGrassGridExclusionTexture() {
 // Road influence texture for grass culling on roads
 // IMPORTANT: Initialize with dummy 1x1 texture so shader includes road sampling code at build time
 const dummyRoadData = new Float32Array([0]); // 0 = no road influence
-let roadInfluenceTexture: THREE.DataTexture = new THREE.DataTexture(
+const roadInfluenceTexture: THREE.DataTexture = new THREE.DataTexture(
   dummyRoadData,
   1,
   1,
@@ -367,7 +393,7 @@ roadInfluenceTexture.minFilter = THREE.LinearFilter;
 roadInfluenceTexture.magFilter = THREE.LinearFilter;
 roadInfluenceTexture.needsUpdate = true;
 
-let roadInfluenceTextureNode: ReturnType<typeof texture> =
+const roadInfluenceTextureNode: ReturnType<typeof texture> =
   texture(roadInfluenceTexture);
 const uRoadInfluenceWorldSize = uniform(1000); // World size covered by road texture
 const uRoadInfluenceCenterX = uniform(0); // World center X (usually 0)
@@ -415,7 +441,7 @@ const EXCLUSION_WORLD_SIZE = 500; // World units covered by texture
 /** GPU exclusion texture (R8, 0=grass, 1=excluded) */
 // IMPORTANT: Initialize with dummy 1x1 texture so shader includes exclusion sampling code at build time
 const dummyExclusionData = new Float32Array([0]); // 0 = not excluded (grass ok)
-let exclusionTexture: THREE.DataTexture = new THREE.DataTexture(
+const exclusionTexture: THREE.DataTexture = new THREE.DataTexture(
   dummyExclusionData,
   1,
   1,
@@ -428,7 +454,7 @@ exclusionTexture.minFilter = THREE.LinearFilter;
 exclusionTexture.magFilter = THREE.LinearFilter;
 exclusionTexture.needsUpdate = true;
 
-let exclusionTextureNode: ReturnType<typeof texture> =
+const exclusionTextureNode: ReturnType<typeof texture> =
   texture(exclusionTexture);
 const uExclusionWorldSize = uniform(EXCLUSION_WORLD_SIZE);
 const uExclusionCenterX = uniform(0);
@@ -548,7 +574,6 @@ export function setCharacterBendingData(
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-// @ts-nocheck - TSL functions use dynamic typing that TypeScript can't understand
 class GrassSsbo {
   private buffer1: InstancedArrayBuffer;
   private buffer2: InstancedArrayBuffer;
@@ -613,16 +638,13 @@ class GrassSsbo {
   }
 
   // Unpacking functions
-  getWind: any = Fn(
-    // @ts-expect-error TSL array destructuring
-    ([data = vec4(0)]) => {
-      const x = tslUtils.unpackUnits(data.z, 0, 12, -2, 2);
-      const z = tslUtils.unpackUnits(data.z, 12, 12, -2, 2);
-      return vec2(x, z);
-    },
-  );
+  getWind = Fn(([data = vec4(0)]) => {
+    const x = tslUtils.unpackUnits(data.z, 0, 12, -2, 2);
+    const z = tslUtils.unpackUnits(data.z, 12, 12, -2, 2);
+    return vec2(x, z);
+  });
 
-  getScale: any = Fn(([data = vec4(0)]) => {
+  getScale = Fn(([data = vec4(0)]) => {
     return tslUtils.unpackUnits(
       data.w,
       0,
@@ -632,7 +654,7 @@ class GrassSsbo {
     );
   });
 
-  getOriginalScale: any = Fn(([data = vec4(0)]) => {
+  getOriginalScale = Fn(([data = vec4(0)]) => {
     return tslUtils.unpackUnits(
       data.w,
       8,
@@ -642,26 +664,26 @@ class GrassSsbo {
     );
   });
 
-  getVisibility: any = Fn(([data = vec4(0)]) => {
+  getVisibility = Fn(([data = vec4(0)]) => {
     return tslUtils.unpackFlag(data.w, 17);
   });
 
-  getWindNoise: any = Fn(([data = vec4(0)]) => {
+  getWindNoise = Fn(([data = vec4(0)]) => {
     return tslUtils.unpackUnit(data.w, 18, 6);
   });
 
-  getPositionNoise: any = Fn(([data = float(0)]) => {
+  getPositionNoise = Fn(([data = float(0)]) => {
     return tslUtils.unpackUnit(data, 0, 4);
   });
 
   // Packing functions
-  private setWind: any = Fn(([data = vec4(0), value = vec2(0)]) => {
+  private setWind = Fn(([data = vec4(0), value = vec2(0)]) => {
     data.z = tslUtils.packUnits(data.z, 0, 12, value.x, -2, 2);
     data.z = tslUtils.packUnits(data.z, 12, 12, value.y, -2, 2);
     return data;
   });
 
-  private setScale: any = Fn(([data = vec4(0), value = float(0)]) => {
+  private setScale = Fn(([data = vec4(0), value = float(0)]) => {
     data.w = tslUtils.packUnits(
       data.w,
       0,
@@ -673,7 +695,7 @@ class GrassSsbo {
     return data;
   });
 
-  private setOriginalScale: any = Fn(([data = vec4(0), value = float(0)]) => {
+  private setOriginalScale = Fn(([data = vec4(0), value = float(0)]) => {
     data.w = tslUtils.packUnits(
       data.w,
       8,
@@ -685,17 +707,17 @@ class GrassSsbo {
     return data;
   });
 
-  private setVisibility: any = Fn(([data = vec4(0), value = float(0)]) => {
+  private setVisibility = Fn(([data = vec4(0), value = float(0)]) => {
     data.w = tslUtils.packFlag(data.w, 17, value);
     return data;
   });
 
-  private setWindNoise: any = Fn(([data = vec4(0), value = float(0)]) => {
+  private setWindNoise = Fn(([data = vec4(0), value = float(0)]) => {
     data.w = tslUtils.packUnit(data.w, 18, 6, value);
     return data;
   });
 
-  private setPositionNoise: any = Fn(([data = float(0), value = float(0)]) => {
+  private setPositionNoise = Fn(([data = float(0), value = float(0)]) => {
     return tslUtils.packUnit(data, 0, 4, value);
   });
 
@@ -755,7 +777,7 @@ class GrassSsbo {
   }
 
   // Compute Wind
-  private computeWind: any = Fn(
+  private computeWind = Fn(
     ([prevWindXZ = vec2(0), worldPos = vec3(0), positionNoise = float(0)]) => {
       const intensity = smoothstep(0.2, 0.5, windManager.uIntensity);
       const dir = windManager.uDirection.negate();
@@ -806,7 +828,7 @@ class GrassSsbo {
   );
 
   // Compute Trail Scale - grass bends when player walks through
-  private computeTrailScale: any = Fn(
+  private computeTrailScale = Fn(
     ([
       originalScale = float(0),
       currentScale = float(0),
@@ -824,7 +846,7 @@ class GrassSsbo {
   );
 
   // Compute Stochastic Keep - Distance-based dithered thinning
-  private computeStochasticKeep: any = Fn(([distSq = float(0)]) => {
+  private computeStochasticKeep = Fn(([distSq = float(0)]) => {
     const R0 = uniforms.uR0;
     const R1 = uniforms.uR1;
     const pMin = uniforms.uPMin;
@@ -850,48 +872,51 @@ class GrassSsbo {
 
   // Compute Distance Fade - OLD SCHOOL BAYER DITHER
   // Creates retro ordered dithering pattern that fades grass into terrain
-  private computeDistanceFade: any = Fn(([distSq = float(0)]) => {
-    const fadeStartSq = uniforms.uFadeStart.mul(uniforms.uFadeStart);
-    const fadeEndSq = uniforms.uFadeEnd.mul(uniforms.uFadeEnd);
+  // @ts-expect-error TSL array destructuring
+  private computeDistanceFade: ReturnType<typeof Fn> = Fn(
+    ([distSq = float(0)]) => {
+      const fadeStartSq = uniforms.uFadeStart.mul(uniforms.uFadeStart);
+      const fadeEndSq = uniforms.uFadeEnd.mul(uniforms.uFadeEnd);
 
-    // Linear fade: 1.0 at fadeStart, 0.0 at fadeEnd
-    const linearFade = float(1.0).sub(
-      clamp(
-        distSq
-          .sub(fadeStartSq)
-          .div(max(fadeEndSq.sub(fadeStartSq), float(0.001))),
-        0.0,
-        1.0,
-      ),
-    );
+      // Linear fade: 1.0 at fadeStart, 0.0 at fadeEnd
+      const linearFade = float(1.0).sub(
+        clamp(
+          distSq
+            .sub(fadeStartSq)
+            .div(max(fadeEndSq.sub(fadeStartSq), float(0.001))),
+          0.0,
+          1.0,
+        ),
+      );
 
-    // OLD SCHOOL BAYER 8x8 ORDERED DITHERING
-    // Use instance index to create screen-like pattern (stable per-blade)
-    // This creates the classic retro dither look
-    const bayerX = float(instanceIndex).mod(8.0);
-    const bayerY = floor(float(instanceIndex).div(8.0)).mod(8.0);
+      // OLD SCHOOL BAYER 8x8 ORDERED DITHERING
+      // Use instance index to create screen-like pattern (stable per-blade)
+      // This creates the classic retro dither look
+      const bayerX = float(instanceIndex).mod(8.0);
+      const bayerY = floor(float(instanceIndex).div(8.0)).mod(8.0);
 
-    // Bayer 8x8 matrix threshold calculation (normalized 0-1)
-    // Uses bit interleaving pattern for proper Bayer sequence
-    const _x = bayerX.toInt();
-    const _y = bayerY.toInt();
+      // Bayer 8x8 matrix threshold calculation (normalized 0-1)
+      // Uses bit interleaving pattern for proper Bayer sequence
+      const _x = bayerX.toInt();
+      const _y = bayerY.toInt();
 
-    // Reconstruct Bayer pattern using bit operations
-    // bayer(x,y) = (bit_reverse(x XOR y) / 64)
-    // Simplified: use hash of position for deterministic per-pixel threshold
-    const bayerPattern = hash(bayerX.add(bayerY.mul(8.0)).add(0.123));
+      // Reconstruct Bayer pattern using bit operations
+      // bayer(x,y) = (bit_reverse(x XOR y) / 64)
+      // Simplified: use hash of position for deterministic per-pixel threshold
+      const bayerPattern = hash(bayerX.add(bayerY.mul(8.0)).add(0.123));
 
-    // Quantize to 8 levels for chunky retro look
-    const quantizedThreshold = floor(bayerPattern.mul(8.0)).div(8.0);
+      // Quantize to 8 levels for chunky retro look
+      const quantizedThreshold = floor(bayerPattern.mul(8.0)).div(8.0);
 
-    // Compare fade against Bayer threshold
-    // This creates the ordered dither pattern - grass either fully visible or culled
-    return step(quantizedThreshold, linearFade);
-  });
+      // Compare fade against Bayer threshold
+      // This creates the ordered dither pattern - grass either fully visible or culled
+      return step(quantizedThreshold, linearFade);
+    },
+  );
 
   // Compute Frustum Visibility for a single point
   // Uses generous padding to prevent popping at frustum edges
-  private computeVisibility: any = Fn(([worldPos = vec3(0)]) => {
+  private computeVisibility = Fn(([worldPos = vec3(0)]) => {
     const clipPos = uniforms.uCameraMatrix.mul(vec4(worldPos, 1.0));
     const ndc = clipPos.xyz.div(clipPos.w);
     // More generous padding - at least 0.15 NDC units + scaled radius
@@ -1112,7 +1137,7 @@ class GrassSsbo {
       let _notExcluded2: ReturnType<typeof float>;
       {
         // Grid-based exclusion (CollisionMatrix blocked tiles)
-        let gridNotExcluded = float(1.0);
+        const gridNotExcluded = float(1.0).toVar();
         if (useGridBasedExclusion && gridExclusionTextureNode) {
           const gridHalfWorld = uGridExclusionWorldSize.mul(0.5);
           const gridUvX = worldX
@@ -1144,7 +1169,9 @@ class GrassSsbo {
             .mul(float(1).sub(edgeSoftness))
             .mul(exclDitherRand.lessThan(0.35).select(1, 0))
             .mul(exclDitherRand2.mul(0.5).add(0.5));
-          gridNotExcluded = baseNotExcluded.add(softEdgeBonus).clamp(0, 1);
+          gridNotExcluded.assign(
+            baseNotExcluded.add(softEdgeBonus).clamp(0, 1),
+          );
         }
 
         // Legacy texture exclusion (buildings, duel arenas)
@@ -1166,10 +1193,6 @@ class GrassSsbo {
 
         // Smooth scale fade: 1.0 at exclusion 0, fading to 0 at exclusion 0.6
         // Grass within 0.1m of building footprint (exclusion > 0.6) has 0 scale
-        const legacyScaleFactor = float(1.0).sub(
-          smoothstep(float(0.1), float(0.6), legacyExclusionValue),
-        );
-
         // Hard cutoff with dithering for final cull (exclusion > 0.7 = always hidden)
         const legacyDitherRand = hash(float(instanceIndex).mul(11.45));
         const legacyNotExcluded = step(
@@ -1201,6 +1224,8 @@ class GrassSsbo {
         // Texture format: 64x2, row 0 = pos+radius, row 1 = vel+speed
         const maxContact = float(0).toVar();
         const texWidth = float(CHARACTER_TEXTURE_WIDTH);
+        // Store texture reference for use inside Loop (TypeScript narrowing workaround)
+        const bendingTexture = characterBendingTextureNode;
 
         // Loop through active characters via texture sampling
         // Use Loop with character count uniform
@@ -1210,7 +1235,7 @@ class GrassSsbo {
 
           // Sample position + radius (row 0, y = 0.25 for row center)
           const posUV = vec2(charU, float(0.25));
-          const posData = characterBendingTextureNode.sample(posUV);
+          const posData = bendingTexture.sample(posUV);
           const charX = posData.x;
           const charY = posData.y;
           const charZ = posData.z;
@@ -1218,7 +1243,7 @@ class GrassSsbo {
 
           // Sample velocity + speed (row 1, y = 0.75 for row center)
           const velUV = vec2(charU, float(0.75));
-          const velData = characterBendingTextureNode.sample(velUV);
+          const velData = bendingTexture.sample(velUV);
           const charSpeed = velData.w;
 
           // Skip if radius is 0 (unused slot)
@@ -1617,14 +1642,18 @@ class GrassCardsSsbo {
   }
 
   // Unpack visibility (bit 0)
-  getVisibility: any = Fn(([data = vec4(0)]) => {
+  // @ts-expect-error TSL array destructuring
+  getVisibility: ReturnType<typeof Fn> = Fn(([data = vec4(0)]) => {
     return tslUtils.unpackFlag(data.w, 0);
   });
 
-  private setVisibility: any = Fn(([data = vec4(0), value = float(0)]) => {
-    data.w = tslUtils.packFlag(data.w, 0, value);
-    return data;
-  });
+  // @ts-expect-error TSL array destructuring
+  private setVisibility: ReturnType<typeof Fn> = Fn(
+    ([data = vec4(0), value = float(0)]) => {
+      data.w = tslUtils.packFlag(data.w, 0, value);
+      return data;
+    },
+  );
 
   private createComputeInit() {
     return Fn(() => {
@@ -1820,7 +1849,7 @@ class GrassCardsSsbo {
       let _notExcluded: ReturnType<typeof float>;
       {
         // Grid-based exclusion (CollisionMatrix blocked tiles) - with dithered soft edges for LOD1
-        let gridNotExcluded = float(1.0);
+        const gridNotExcluded = float(1.0).toVar();
         if (useGridBasedExclusion && gridExclusionTextureNode) {
           const gridHalfWorld = uGridExclusionWorldSize.mul(0.5);
           const gridUvX = worldX
@@ -1847,12 +1876,14 @@ class GrassCardsSsbo {
           const softEdgeBonus = gridExclusionValue
             .mul(float(1).sub(edgeSoftness))
             .mul(exclDitherRand.lessThan(0.25).select(1, 0));
-          gridNotExcluded = baseNotExcluded.add(softEdgeBonus).clamp(0, 1);
+          gridNotExcluded.assign(
+            baseNotExcluded.add(softEdgeBonus).clamp(0, 1),
+          );
         }
 
         // Legacy texture exclusion (buildings, duel arenas)
         // Use same smooth fade as LOD0 for consistency
-        let legacyNotExcluded = float(1.0);
+        const legacyNotExcluded = float(1.0).toVar();
         {
           const legacyHalfWorld = uExclusionWorldSize.mul(0.5);
           const legacyUvX = worldX
@@ -1871,9 +1902,11 @@ class GrassCardsSsbo {
 
           // Hard cutoff with dithering (exclusion > 0.7 = always hidden)
           const legacyDitherRand = hash(float(instanceIndex).mul(11.45));
-          legacyNotExcluded = step(
-            legacyExclusionValue,
-            float(0.6).add(legacyDitherRand.mul(0.2)),
+          legacyNotExcluded.assign(
+            step(
+              legacyExclusionValue,
+              float(0.6).add(legacyDitherRand.mul(0.2)),
+            ),
           );
         }
 
@@ -1982,9 +2015,10 @@ export class ProceduralGrassSystem extends System {
 
   private async loadTextures(): Promise<void> {
     // Get terrain system for height sampling
-    this.terrainSystem = this.world.getSystem(
-      "terrain",
-    ) as TerrainSystemInterface | null;
+    this.terrainSystem =
+      (this.world.getSystem("terrain") as unknown as
+        | TerrainSystemInterface
+        | undefined) ?? null;
 
     if (
       this.terrainSystem &&
@@ -2101,8 +2135,9 @@ export class ProceduralGrassSystem extends System {
    */
   private setupTerrainListeners(): void {
     // Listen for terrain tile generation to update heightmap incrementally
-    this.onTileGeneratedBound = (data: { tileX: number; tileZ: number }) => {
-      this.onTerrainTileGenerated(data.tileX, data.tileZ);
+    this.onTileGeneratedBound = (data: unknown) => {
+      const tileData = data as { tileX: number; tileZ: number };
+      this.onTerrainTileGenerated(tileData.tileX, tileData.tileZ);
       // Schedule exclusion texture refresh (debounced)
       this.scheduleExclusionRefresh();
     };
@@ -2152,7 +2187,7 @@ export class ProceduralGrassSystem extends System {
   private checkExistingRoads(): void {
     const roadSystem = this.world.getSystem(
       "roads",
-    ) as RoadNetworkSystemInterface | null;
+    ) as unknown as RoadNetworkSystemInterface | null;
     console.log(
       "[ProceduralGrass] checkExistingRoads - roadSystem:",
       roadSystem ? "found" : "NOT FOUND",
@@ -2365,7 +2400,8 @@ export class ProceduralGrassSystem extends System {
       const maxExclusion = float(0).toVar();
 
       // Loop through all blockers using TSL Loop
-      Loop(blockerCountUniform, ({ i }: { i: ReturnType<typeof int> }) => {
+      // @ts-expect-error TSL Loop callback types
+      Loop(blockerCountUniform, ({ i }) => {
         // Get blocker data (x, z, radius, _padding)
         const blockerData = blockerBuffer.element(i);
         const bx = blockerData.x;
@@ -2393,7 +2429,7 @@ export class ProceduralGrassSystem extends System {
 
       // Write to output buffer
       outputBuffer.element(texelIdx).assign(maxExclusion);
-    })();
+    });
   }
 
   /**
@@ -2465,7 +2501,7 @@ export class ProceduralGrassSystem extends System {
       uCenterX,
       uCenterZ,
     );
-    const computeNode = computeShader.compute(totalTexels, [64]);
+    const computeNode = computeShader().compute(totalTexels, [64]);
 
     try {
       // Run the compute shader
@@ -3754,7 +3790,11 @@ export class ProceduralGrassSystem extends System {
   stop(): void {
     // Remove terrain event listeners
     if (this.onTileGeneratedBound) {
-      this.world.off("terrain:tile:generated", this.onTileGeneratedBound);
+      // Type cast needed for EventEmitter compatibility
+      this.world.off(
+        "terrain:tile:generated",
+        this.onTileGeneratedBound as (...args: unknown[]) => void,
+      );
       this.onTileGeneratedBound = null;
     }
 

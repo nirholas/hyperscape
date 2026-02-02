@@ -9,7 +9,8 @@ import React, { useCallback } from "react";
 import { useThemeStore, useMobileLayout } from "@/ui";
 import type { PlayerEquipmentItems } from "@hyperscape/shared";
 import { INV_SLOTS_PER_ROW, INV_SLOT_SIZE } from "../constants";
-import { getItemIcon, formatItemName } from "../utils";
+import { formatItemName } from "../utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import type { InventorySlotViewItem, RightPanelMode } from "../types";
 import { InventoryPanel } from "../../InventoryPanel";
 
@@ -133,11 +134,10 @@ export function RightPanel({
                 <span
                   className="transition-transform duration-200 group-hover:scale-110"
                   style={{
-                    fontSize: "1.25rem",
                     filter: "drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8))",
                   }}
                 >
-                  {getItemIcon(item.id)}
+                  <ItemIcon itemId={item.id} size={32} />
                 </span>
                 <div
                   className="text-center px-0.5 mt-0.5"

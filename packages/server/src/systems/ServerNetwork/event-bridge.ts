@@ -17,7 +17,7 @@
  * ```
  */
 
-import type { World } from "@hyperscape/shared";
+import type { World, FletchingInterfaceOpenPayload } from "@hyperscape/shared";
 import { EventType, ALL_WORLD_AREAS } from "@hyperscape/shared";
 import type { BroadcastManager } from "./broadcast";
 import { BankRepository } from "../../database/repositories/BankRepository";
@@ -97,6 +97,9 @@ export class EventBridge {
     this.setupStoreEvents();
     this.setupFireEvents();
     this.setupSmeltingEvents();
+    this.setupCraftingEvents();
+    this.setupFletchingEvents();
+    this.setupTanningEvents();
     this.setupQuestEvents();
     this.setupTradeEvents();
   }
@@ -326,11 +329,13 @@ export class EventBridge {
           Number.isFinite(data.newLevel)
         ) {
           // Map skill name to database column names
+          // Round XP to integer at DB boundary (XP columns are integer type,
+          // but recipes use float values like 13.8, 67.5 for OSRS accuracy)
           const skillLevelKey = `${data.skill}Level`;
           const skillXpKey = `${data.skill}Xp`;
           dbSystem.savePlayer(data.playerId, {
             [skillLevelKey]: data.newLevel,
-            [skillXpKey]: data.newXp,
+            [skillXpKey]: Math.round(data.newXp),
           });
         }
       });
@@ -685,6 +690,28 @@ export class EventBridge {
           this.broadcast.sendToAll("projectileLaunched", data);
         },
       );
+
+      // Forward combat face target events so clients rotate toward their target
+      // Essential for magic/ranged attacks where player is stationary
+      this.world.on(EventType.COMBAT_FACE_TARGET, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          targetId: string;
+        };
+
+        // Send to specific player only — they need to rotate their local character
+        this.broadcast.sendToPlayer(data.playerId, "combatFaceTarget", data);
+      });
+
+      // Forward combat clear face target so clients stop rotating toward dead/disengaged targets
+      this.world.on(EventType.COMBAT_CLEAR_FACE_TARGET, (payload: unknown) => {
+        const data = payload as { playerId: string };
+        this.broadcast.sendToPlayer(
+          data.playerId,
+          "combatClearFaceTarget",
+          data,
+        );
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up combat events:", _err);
     }
@@ -1055,6 +1082,23 @@ export class EventBridge {
    */
   private setupFireEvents(): void {
     try {
+      // Broadcast fire lighting started to all clients (show model during 3s animation)
+      this.world.on(EventType.FIRE_LIGHTING_STARTED, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          position: { x: number; y: number; z: number };
+        };
+
+        this.broadcast.sendToAll("fireLightingStarted", data);
+      });
+
+      // Broadcast fire lighting cancelled to all clients (remove preloaded model)
+      this.world.on(EventType.FIRE_LIGHTING_CANCELLED, (payload: unknown) => {
+        const data = payload as { playerId: string };
+
+        this.broadcast.sendToAll("fireLightingCancelled", data);
+      });
+
       // Broadcast fire creation to all clients for visual rendering
       this.world.on(EventType.FIRE_CREATED, (payload: unknown) => {
         const data = payload as {
@@ -1136,6 +1180,106 @@ export class EventBridge {
       });
     } catch (_err) {
       console.error("[EventBridge] Error setting up smelting events:", _err);
+    }
+  }
+
+  /**
+   * Setup crafting system event listeners
+   *
+   * Forwards crafting interface open events to specific players
+   * so they can see the crafting UI with available recipes.
+   *
+   * @private
+   */
+  private setupCraftingEvents(): void {
+    try {
+      // Forward crafting interface open events to specific player
+      this.world.on(EventType.CRAFTING_INTERFACE_OPEN, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          availableRecipes: Array<{
+            output: string;
+            name: string;
+            category: string;
+            inputs: Array<{ item: string; amount: number }>;
+            tools: string[];
+            level: number;
+            xp: number;
+            meetsLevel: boolean;
+            hasInputs: boolean;
+          }>;
+          station: string;
+        };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "craftingInterfaceOpen", {
+            availableRecipes: data.availableRecipes,
+            station: data.station,
+          });
+        }
+      });
+    } catch (_err) {
+      console.error("[EventBridge] Error setting up crafting events:", _err);
+    }
+  }
+
+  /**
+   * Setup fletching system event listeners
+   *
+   * Forwards fletching interface open events to specific players
+   * so they can see the fletching UI with available recipes.
+   *
+   * @private
+   */
+  private setupFletchingEvents(): void {
+    try {
+      // Forward fletching interface open events to specific player
+      this.world.on(EventType.FLETCHING_INTERFACE_OPEN, (payload: unknown) => {
+        const data = payload as FletchingInterfaceOpenPayload;
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "fletchingInterfaceOpen", {
+            availableRecipes: data.availableRecipes,
+          });
+        }
+      });
+    } catch (_err) {
+      console.error("[EventBridge] Error setting up fletching events:", _err);
+    }
+  }
+
+  /**
+   * Setup tanning system event listeners
+   *
+   * Forwards tanning interface open events to specific players
+   * so they can see the tanning UI with available hides.
+   *
+   * @private
+   */
+  private setupTanningEvents(): void {
+    try {
+      // Forward tanning interface open events to specific player
+      this.world.on(EventType.TANNING_INTERFACE_OPEN, (payload: unknown) => {
+        const data = payload as {
+          playerId: string;
+          availableRecipes: Array<{
+            input: string;
+            output: string;
+            cost: number;
+            name: string;
+            hasHide: boolean;
+            hideCount: number;
+          }>;
+        };
+
+        if (data.playerId) {
+          this.broadcast.sendToPlayer(data.playerId, "tanningInterfaceOpen", {
+            availableRecipes: data.availableRecipes,
+          });
+        }
+      });
+    } catch (_err) {
+      console.error("[EventBridge] Error setting up tanning events:", _err);
     }
   }
 

@@ -1,4 +1,3 @@
-// @ts-nocheck - TSL functions use dynamic typing that TypeScript doesn't support
 /**
  * Dock Material TSL - WebGPU Material for Procedural Wood Docks
  *

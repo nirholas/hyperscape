@@ -21,6 +21,9 @@ import type {
   DialogueData,
   SmeltingData,
   SmithingData,
+  CraftingData,
+  FletchingData,
+  TanningData,
   LootWindowData,
   QuestStartData,
   QuestCompleteData,
@@ -33,6 +36,9 @@ import { StorePanel } from "../panels/StorePanel";
 import { DialoguePanel } from "../panels/DialoguePanel";
 import { SmeltingPanel } from "../panels/SmeltingPanel";
 import { SmithingPanel } from "../panels/SmithingPanel";
+import { CraftingPanel } from "../panels/CraftingPanel";
+import { FletchingPanel } from "../panels/FletchingPanel";
+import { TanningPanel } from "../panels/TanningPanel";
 import { StatsPanel } from "../panels/StatsPanel";
 import { LootWindowPanel } from "../panels/LootWindowPanel";
 import { QuestStartPanel } from "../panels/QuestStartPanel";
@@ -612,6 +618,9 @@ export interface InterfaceModalsRendererProps {
   dialogueData: DialogueData | null;
   smeltingData: SmeltingData | null;
   smithingData: SmithingData | null;
+  craftingData: CraftingData | null;
+  fletchingData: FletchingData | null;
+  tanningData: TanningData | null;
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
   xpLampData: XpLampData | null;
@@ -632,6 +641,9 @@ export interface InterfaceModalsRendererProps {
   setDialogueData: React.Dispatch<React.SetStateAction<DialogueData | null>>;
   setSmeltingData: React.Dispatch<React.SetStateAction<SmeltingData | null>>;
   setSmithingData: React.Dispatch<React.SetStateAction<SmithingData | null>>;
+  setCraftingData: React.Dispatch<React.SetStateAction<CraftingData | null>>;
+  setFletchingData: React.Dispatch<React.SetStateAction<FletchingData | null>>;
+  setTanningData: React.Dispatch<React.SetStateAction<TanningData | null>>;
   setQuestStartData: React.Dispatch<
     React.SetStateAction<QuestStartData | null>
   >;
@@ -666,6 +678,9 @@ export function InterfaceModalsRenderer({
   dialogueData,
   smeltingData,
   smithingData,
+  craftingData,
+  fletchingData,
+  tanningData,
   questStartData,
   questCompleteData,
   xpLampData,
@@ -680,6 +695,9 @@ export function InterfaceModalsRenderer({
   setDialogueData,
   setSmeltingData,
   setSmithingData,
+  setCraftingData,
+  setFletchingData,
+  setTanningData,
   setQuestStartData,
   setQuestCompleteData,
   setXpLampData,
@@ -781,7 +799,7 @@ export function InterfaceModalsRenderer({
           }}
           onClose={() => {
             setDialogueData(null);
-            world?.network?.send?.("dialogue_end", {
+            world?.network?.send?.("dialogueEnd", {
               npcId: dialogueData.npcId,
             });
           }}
@@ -822,6 +840,54 @@ export function InterfaceModalsRenderer({
         </ModalWindow>
       )}
 
+      {/* Crafting Panel */}
+      {craftingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setCraftingData(null)}
+          title="Crafting"
+          width={480}
+        >
+          <CraftingPanel
+            availableRecipes={craftingData.availableRecipes}
+            world={world}
+            onClose={() => setCraftingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {/* Fletching Panel */}
+      {fletchingData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setFletchingData(null)}
+          title="Fletching"
+          width={480}
+        >
+          <FletchingPanel
+            availableRecipes={fletchingData.availableRecipes}
+            world={world}
+            onClose={() => setFletchingData(null)}
+          />
+        </ModalWindow>
+      )}
+
+      {/* Tanning Panel */}
+      {tanningData?.visible && (
+        <ModalWindow
+          visible={true}
+          onClose={() => setTanningData(null)}
+          title="Tanning"
+          width={600}
+        >
+          <TanningPanel
+            availableRecipes={tanningData.availableRecipes}
+            world={world}
+            onClose={() => setTanningData(null)}
+          />
+        </ModalWindow>
+      )}
+
       {/* World Map - Fullscreen Overlay (RuneScape-style) */}
       {worldMapOpen && (
         <FullscreenWorldMap
@@ -835,7 +901,7 @@ export function InterfaceModalsRenderer({
         <ModalWindow
           visible={true}
           onClose={() => setStatsModalOpen(false)}
-          title="Character Stats"
+          title="Equipment Stats"
           width={520}
           maxWidth="95vw"
         >

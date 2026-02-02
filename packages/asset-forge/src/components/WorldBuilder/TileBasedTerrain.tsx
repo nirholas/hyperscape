@@ -554,45 +554,32 @@ function createTemplateGeometry(
 }
 
 /**
- * Create terrain material using the game's terrain shader
+ * Create terrain material using the game's terrain shader.
  * This ensures Asset Forge renders terrain identically to the game,
  * including road influence blending via the roadInfluence vertex attribute.
+ *
+ * No fallback - the game shader must load for correct road rendering.
  */
 function createTerrainMaterial(): THREE.Material & {
-  terrainUniforms?: TerrainUniforms;
+  terrainUniforms: TerrainUniforms;
 } {
-  try {
-    // Use the game's terrain shader for unified rendering
-    const material = createGameTerrainMaterial();
-    console.log(
-      "[TileBasedTerrain] Using game terrain shader with road influence support",
-    );
-    return material;
-  } catch (error) {
-    // Fallback to simple vertex colors if game shader fails to load
-    console.warn(
-      "[TileBasedTerrain] Falling back to simple terrain material:",
-      error,
-    );
-    const material = new MeshStandardNodeMaterial();
-    material.vertexColors = true;
-    material.roughness = 0.9;
-    material.metalness = 0.0;
-    material.flatShading = false;
-    material.side = THREE.FrontSide;
-    return material;
-  }
+  // Use the game's terrain shader for unified rendering
+  // This material reads the roadInfluence attribute and blends road colors
+  const material = createGameTerrainMaterial();
+  console.log(
+    "[TileBasedTerrain] Created terrain material with road influence support",
+  );
+  return material;
 }
 
-// Road influence calculation constants
-// Make roads more visible with wider influence zone
-const ROAD_INFLUENCE_BLEND_WIDTH = 3; // meters of blending beyond road edge (matches game engine)
+// Road influence calculation constants - must match game engine (TerrainSystem.ts ROAD_BLEND_WIDTH)
+const ROAD_INFLUENCE_BLEND_WIDTH = 2; // meters of blending beyond road edge (matches game engine)
 const ROAD_INFLUENCE_MINIMUM_WIDTH = 6; // minimum road width for visibility (wider than config default)
 
 // Debug: track which roads we've logged (by their ID to detect changes)
 let lastRoadDebugId: string | null = null;
 let loggedFirstInfluenceVertex = false;
-let debugVertexCount = 0;
+let _debugVertexCount = 0;
 
 /**
  * Calculate road influence at a point based on distance to nearest road segment.
@@ -611,7 +598,7 @@ function calculateRoadInfluenceAtPoint(
   if (currentRoadId !== lastRoadDebugId && roads.length > 0) {
     lastRoadDebugId = currentRoadId;
     loggedFirstInfluenceVertex = false;
-    debugVertexCount = 0;
+    _debugVertexCount = 0;
     console.log("[RoadInfluence] ===== ROADS DATA =====");
     console.log("[RoadInfluence] Total roads:", roads.length);
     console.log("[RoadInfluence] World center offset:", worldCenterOffset);
@@ -1792,6 +1779,15 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         worldSize: worldSizeMeters,
         minTownSpacing: scaledMinSpacing,
         waterThreshold: waterThreshold,
+        landmarks: {
+          fencesEnabled: config.towns.landmarks.fencesEnabled,
+          fenceDensity: config.towns.landmarks.fenceDensity,
+          fencePostHeight: 1.2,
+          lamppostsInVillages: config.towns.landmarks.lamppostsInVillages,
+          lamppostSpacing: 15,
+          marketStallsEnabled: config.towns.landmarks.marketStallsEnabled,
+          decorationsEnabled: config.towns.landmarks.decorationsEnabled,
+        },
       },
     });
 
@@ -2009,6 +2005,74 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
         townMarkers.add(buildingLOD);
         selectableObjectsRef.current.push(buildingLOD);
+      }
+
+      // Render town landmarks (fences, lampposts, wells, signposts, etc.)
+      if (town.landmarks && town.landmarks.length > 0) {
+        for (const landmark of town.landmarks) {
+          const lx = landmark.position.x + worldCenterOffset;
+          const lz = landmark.position.z + worldCenterOffset;
+          const ly = landmark.position.y;
+
+          // Color based on landmark type
+          let color = 0x888888;
+          let height = landmark.size.height;
+
+          switch (landmark.type) {
+            case "well":
+              color = 0x5a5a6a;
+              break; // Gray stone
+            case "fountain":
+              color = 0x4a7aaa;
+              break; // Blue-gray
+            case "market_stall":
+              color = 0xaa7a4a;
+              break; // Brown wood
+            case "signpost":
+              color = 0x8a6a4a;
+              break; // Wood brown
+            case "bench":
+              color = 0x7a5a3a;
+              break; // Dark wood
+            case "barrel":
+              color = 0x6a5a4a;
+              break; // Barrel brown
+            case "crate":
+              color = 0x8a7a5a;
+              break; // Crate tan
+            case "lamppost":
+              color = 0x3a3a3a;
+              break; // Dark iron
+            case "planter":
+              color = 0x5a8a5a;
+              break; // Green
+            case "tree":
+              color = 0x3a6a3a;
+              height = 4;
+              break; // Tree green
+            case "fence_post":
+              color = 0x6a5030;
+              break; // Rustic wood brown
+            case "fence_gate":
+              color = 0x7a6040;
+              break; // Lighter wood for gate
+          }
+
+          const landmarkGeo = new THREE.BoxGeometry(
+            landmark.size.width,
+            height,
+            landmark.size.depth,
+          );
+          const landmarkMat = new TownStdMat();
+          landmarkMat.color = new THREE.Color(color);
+          landmarkMat.roughness = 0.7;
+          const landmarkMesh = new THREE.Mesh(landmarkGeo, landmarkMat);
+          landmarkMesh.position.set(lx, ly + height / 2, lz);
+          landmarkMesh.rotation.y = landmark.rotation;
+          landmarkMesh.castShadow = true;
+          landmarkMesh.receiveShadow = true;
+          townMarkers.add(landmarkMesh);
+        }
       }
     }
 

@@ -17,6 +17,9 @@ const NetworkEvents = {
   LOOT_WINDOW: "lootWindow",
   SMELTING_CLOSE: "smeltingClose",
   SMITHING_CLOSE: "smithingClose",
+  CRAFTING_CLOSE: "craftingClose",
+  TANNING_CLOSE: "tanningClose",
+  FLETCHING_CLOSE: "fletchingClose",
 } as const;
 
 /** Bank item structure */
@@ -107,6 +110,7 @@ export interface SmithingRecipe {
   levelRequired: number;
   xp: number;
   category: string;
+  outputQuantity?: number;
 }
 
 /** Smithing data structure */
@@ -114,6 +118,63 @@ export interface SmithingData {
   visible: boolean;
   anvilId: string;
   availableRecipes: SmithingRecipe[];
+}
+
+/** Crafting recipe structure */
+export interface CraftingRecipeData {
+  output: string;
+  name: string;
+  category: string;
+  inputs: Array<{ item: string; amount: number }>;
+  tools: string[];
+  level: number;
+  xp: number;
+  meetsLevel: boolean;
+  hasInputs: boolean;
+}
+
+/** Crafting data structure */
+export interface CraftingData {
+  visible: boolean;
+  availableRecipes: CraftingRecipeData[];
+  station: string;
+}
+
+/** Fletching recipe structure */
+export interface FletchingRecipeData {
+  recipeId: string;
+  output: string;
+  name: string;
+  category: string;
+  outputQuantity: number;
+  inputs: Array<{ item: string; amount: number }>;
+  tools: string[];
+  level: number;
+  xp: number;
+  meetsLevel: boolean;
+  hasInputs: boolean;
+}
+
+/** Fletching data structure */
+export interface FletchingData {
+  visible: boolean;
+  availableRecipes: FletchingRecipeData[];
+}
+
+/** Tanning recipe structure */
+export interface TanningRecipeData {
+  input: string;
+  output: string;
+  cost: number;
+  name: string;
+  hasHide: boolean;
+  hideCount: number;
+}
+
+/** Tanning data structure */
+export interface TanningData {
+  visible: boolean;
+  availableRecipes: TanningRecipeData[];
 }
 
 /** Loot window data structure */
@@ -242,6 +303,9 @@ export interface ModalPanelsState {
   dialogueData: DialogueData | null;
   smeltingData: SmeltingData | null;
   smithingData: SmithingData | null;
+  craftingData: CraftingData | null;
+  fletchingData: FletchingData | null;
+  tanningData: TanningData | null;
   lootWindowData: LootWindowData | null;
   questStartData: QuestStartData | null;
   questCompleteData: QuestCompleteData | null;
@@ -255,6 +319,9 @@ export interface ModalPanelsState {
   setDialogueData: React.Dispatch<React.SetStateAction<DialogueData | null>>;
   setSmeltingData: React.Dispatch<React.SetStateAction<SmeltingData | null>>;
   setSmithingData: React.Dispatch<React.SetStateAction<SmithingData | null>>;
+  setCraftingData: React.Dispatch<React.SetStateAction<CraftingData | null>>;
+  setFletchingData: React.Dispatch<React.SetStateAction<FletchingData | null>>;
+  setTanningData: React.Dispatch<React.SetStateAction<TanningData | null>>;
   setLootWindowData: React.Dispatch<
     React.SetStateAction<LootWindowData | null>
   >;
@@ -276,6 +343,9 @@ export interface ModalPanelsState {
   closeDialogue: () => void;
   closeSmelting: () => void;
   closeSmithing: () => void;
+  closeCrafting: () => void;
+  closeFletching: () => void;
+  closeTanning: () => void;
   closeLootWindow: () => void;
   closeQuestStart: () => void;
   closeQuestComplete: () => void;
@@ -309,6 +379,11 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
   const [dialogueData, setDialogueData] = useState<DialogueData | null>(null);
   const [smeltingData, setSmeltingData] = useState<SmeltingData | null>(null);
   const [smithingData, setSmithingData] = useState<SmithingData | null>(null);
+  const [craftingData, setCraftingData] = useState<CraftingData | null>(null);
+  const [fletchingData, setFletchingData] = useState<FletchingData | null>(
+    null,
+  );
+  const [tanningData, setTanningData] = useState<TanningData | null>(null);
   const [lootWindowData, setLootWindowData] = useState<LootWindowData | null>(
     null,
   );
@@ -329,6 +404,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
   const closeDialogue = useCallback(() => setDialogueData(null), []);
   const closeSmelting = useCallback(() => setSmeltingData(null), []);
   const closeSmithing = useCallback(() => setSmithingData(null), []);
+  const closeCrafting = useCallback(() => setCraftingData(null), []);
+  const closeFletching = useCallback(() => setFletchingData(null), []);
+  const closeTanning = useCallback(() => setTanningData(null), []);
   const closeLootWindow = useCallback(() => setLootWindowData(null), []);
   const closeQuestStart = useCallback(() => setQuestStartData(null), []);
   const closeQuestComplete = useCallback(() => setQuestCompleteData(null), []);
@@ -378,6 +456,30 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     };
 
     const handleSmithingClose = () => setSmithingData(null);
+
+    // Crafting handlers
+    const handleCraftingOpen = (data: unknown) => {
+      const d = data as CraftingData;
+      if (d) setCraftingData({ ...d, visible: true });
+    };
+
+    const handleCraftingClose = () => setCraftingData(null);
+
+    // Fletching handlers
+    const handleFletchingOpen = (data: unknown) => {
+      const d = data as FletchingData;
+      if (d) setFletchingData({ ...d, visible: true });
+    };
+
+    const handleFletchingClose = () => setFletchingData(null);
+
+    // Tanning handlers
+    const handleTanningOpen = (data: unknown) => {
+      const d = data as TanningData;
+      if (d) setTanningData({ ...d, visible: true });
+    };
+
+    const handleTanningClose = () => setTanningData(null);
 
     // Loot window handler
     const handleLootWindow = (data: unknown) => {
@@ -705,17 +807,25 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
         });
       }
 
-      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING)
+      // Duel state changed (e.g., RULES -> STAKES -> CONFIRMING -> COUNTDOWN)
       if (d.component === "duelStateChange") {
         const stateData = d.data as {
           duelId: string;
-          state: "RULES" | "STAKES" | "CONFIRMING";
+          state: string;
         };
         setDuelData((prev) => {
           if (!prev || prev.duelId !== stateData.duelId) return prev;
+          // Close panel for non-panel states (COUNTDOWN, FIGHTING, etc.)
+          // The panel only displays RULES, STAKES, and CONFIRMING screens.
+          // When the duel transitions to COUNTDOWN, the panel should close
+          // and the countdown overlay takes over.
+          const panelStates = new Set(["RULES", "STAKES", "CONFIRMING"]);
+          if (!panelStates.has(stateData.state)) {
+            return null;
+          }
           return {
             ...prev,
-            screenState: stateData.state,
+            screenState: stateData.state as "RULES" | "STAKES" | "CONFIRMING",
             myAccepted: false,
             opponentAccepted: false,
           };
@@ -784,6 +894,13 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     world.on(EventType.DIALOGUE_END, handleDialogueEnd, undefined);
     world.on(EventType.SMELTING_INTERFACE_OPEN, handleSmeltingOpen, undefined);
     world.on(EventType.SMITHING_INTERFACE_OPEN, handleSmithingOpen, undefined);
+    world.on(EventType.CRAFTING_INTERFACE_OPEN, handleCraftingOpen, undefined);
+    world.on(
+      EventType.FLETCHING_INTERFACE_OPEN,
+      handleFletchingOpen,
+      undefined,
+    );
+    world.on(EventType.TANNING_INTERFACE_OPEN, handleTanningOpen, undefined);
     world.on(EventType.CORPSE_CLICK, handleCorpseClick, undefined);
     world.on(EventType.QUEST_START_CONFIRM, handleQuestStartConfirm, undefined);
     world.on(EventType.QUEST_COMPLETED, handleQuestCompleted, undefined);
@@ -795,6 +912,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
       world.network.on(NetworkEvents.LOOT_WINDOW, handleLootWindow);
       world.network.on(NetworkEvents.SMELTING_CLOSE, handleSmeltingClose);
       world.network.on(NetworkEvents.SMITHING_CLOSE, handleSmithingClose);
+      world.network.on(NetworkEvents.CRAFTING_CLOSE, handleCraftingClose);
+      world.network.on(NetworkEvents.FLETCHING_CLOSE, handleFletchingClose);
+      world.network.on(NetworkEvents.TANNING_CLOSE, handleTanningClose);
     }
 
     return () => {
@@ -824,6 +944,24 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
       world.off(
         EventType.SMITHING_INTERFACE_OPEN,
         handleSmithingOpen,
+        undefined,
+        undefined,
+      );
+      world.off(
+        EventType.CRAFTING_INTERFACE_OPEN,
+        handleCraftingOpen,
+        undefined,
+        undefined,
+      );
+      world.off(
+        EventType.FLETCHING_INTERFACE_OPEN,
+        handleFletchingOpen,
+        undefined,
+        undefined,
+      );
+      world.off(
+        EventType.TANNING_INTERFACE_OPEN,
+        handleTanningOpen,
         undefined,
         undefined,
       );
@@ -858,6 +996,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
         world.network.off(NetworkEvents.LOOT_WINDOW, handleLootWindow);
         world.network.off(NetworkEvents.SMELTING_CLOSE, handleSmeltingClose);
         world.network.off(NetworkEvents.SMITHING_CLOSE, handleSmithingClose);
+        world.network.off(NetworkEvents.CRAFTING_CLOSE, handleCraftingClose);
+        world.network.off(NetworkEvents.FLETCHING_CLOSE, handleFletchingClose);
+        world.network.off(NetworkEvents.TANNING_CLOSE, handleTanningClose);
       }
     };
   }, [world]);
@@ -868,6 +1009,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     dialogueData,
     smeltingData,
     smithingData,
+    craftingData,
+    fletchingData,
+    tanningData,
     lootWindowData,
     questStartData,
     questCompleteData,
@@ -879,6 +1023,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     setDialogueData,
     setSmeltingData,
     setSmithingData,
+    setCraftingData,
+    setFletchingData,
+    setTanningData,
     setLootWindowData,
     setQuestStartData,
     setQuestCompleteData,
@@ -890,6 +1037,9 @@ export function useModalPanels(world: ClientWorld | null): ModalPanelsState {
     closeDialogue,
     closeSmelting,
     closeSmithing,
+    closeCrafting,
+    closeFletching,
+    closeTanning,
     closeLootWindow,
     closeQuestStart,
     closeQuestComplete,

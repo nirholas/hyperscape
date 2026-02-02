@@ -7,9 +7,6 @@
  * @packageDocumentation
  */
 
-// Equipment - Paper doll, equipment slots, stats
-export * from "./equipment";
-
 // Quest - Quest log, tracker, objectives, rewards
 export * from "./quest";
 

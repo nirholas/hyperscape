@@ -125,6 +125,15 @@ export const MapMarker = memo(function MapMarker({
 }: MapMarkerProps) {
   const theme = useTheme();
 
+  // Handle click - must be before any conditional returns
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      onClick?.();
+    },
+    [onClick],
+  );
+
   // Calculate screen position from world coordinates
   const screenPos = viewport
     ? worldToMap(position, viewport, DEFAULT_PIXELS_PER_UNIT)
@@ -146,15 +155,6 @@ export const MapMarker = memo(function MapMarker({
 
   const markerColor = color ?? DEFAULT_MARKER_COLORS[type];
   const markerIcon = icon ?? DEFAULT_ICONS[type];
-
-  // Handle click
-  const handleClick = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      onClick?.();
-    },
-    [onClick],
-  );
 
   // Marker styles
   const markerStyle: CSSProperties = {

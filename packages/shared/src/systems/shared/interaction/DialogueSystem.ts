@@ -433,6 +433,13 @@ export class DialogueSystem extends SystemBase {
         });
         break;
 
+      case "openTanner":
+        this.emitTypedEvent(EventType.TANNING_INTERACT, {
+          playerId,
+          npcId,
+        });
+        break;
+
       case "startQuest": {
         const questId = params[0];
         if (!questId || !isValidQuestId(questId)) {

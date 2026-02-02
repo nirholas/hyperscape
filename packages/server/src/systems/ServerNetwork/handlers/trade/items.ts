@@ -87,6 +87,16 @@ export async function handleTradeAddItem(
     return;
   }
 
+  // Check if item is staked in a duel (can't trade staked items)
+  const duelSystem = world.getSystem("duel") as
+    | { getStakedSlots?: (id: string) => Set<number> }
+    | undefined;
+  const stakedSlots = duelSystem?.getStakedSlots?.(playerId);
+  if (stakedSlots?.has(slot)) {
+    sendTradeError(socket, "That item is staked in a duel", "ITEM_STAKED");
+    return;
+  }
+
   // Determine quantity (for stackable items, use provided quantity or all)
   let quantity = data.quantity ?? inventoryItem.quantity;
   if (quantity <= 0 || quantity > inventoryItem.quantity) {

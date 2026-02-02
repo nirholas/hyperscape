@@ -63,6 +63,7 @@ import {
   type DuelEquipmentSlot,
   AttackType,
   WeaponType,
+  GroundItemSystem,
 } from "@hyperscape/shared";
 
 // PlayerDeathSystem type for tick processing (not exported from main index)
@@ -261,6 +262,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
   /** Handler method registry */
   private handlers: Record<string, NetworkHandler> = {};
+
+  /** Idempotency guard: prevents double-settlement of duel stakes */
+  private processedDuelSettlements: Set<string> = new Set();
 
   /** Agent goal storage (characterId -> goal data) for dashboard display */
   static agentGoals: Map<string, unknown> = new Map();
@@ -591,6 +595,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       this.duelSystem,
     );
 
+    // Listen for duel countdown start and forward to clients
+    // This tells clients to close the duel panel and show the countdown overlay
+    this.world.on("duel:countdown:start", (event) => {
+      const { duelId, arenaId, challengerId, targetId } = event as {
+        duelId: string;
+        arenaId: number;
+        challengerId: string;
+        targetId: string;
+      };
+
+      const payload = { duelId, arenaId, challengerId, targetId };
+
+      const challengerSocket = this.getSocketByPlayerId(challengerId);
+      if (challengerSocket) {
+        challengerSocket.send("duelCountdownStart", payload);
+      }
+
+      const targetSocket = this.getSocketByPlayerId(targetId);
+      if (targetSocket) {
+        targetSocket.send("duelCountdownStart", payload);
+      }
+    });
+
     // Listen for duel countdown ticks and forward to clients
     this.world.on("duel:countdown:tick", (event) => {
       const { duelId, count, challengerId, targetId } = event as {
@@ -775,39 +802,10 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       );
     });
 
-    // Listen for duel stakes return (player's own items returned on cancel)
-    // Note: For duel wins, we use duel:stakes:settle to avoid race conditions
-    this.world.on("duel:stakes:return", (event) => {
-      const { playerId, stakes, reason } = event as {
-        playerId: string;
-        stakes: Array<{
-          inventorySlot: number;
-          itemId: string;
-          quantity: number;
-          value: number;
-        }>;
-        reason: string;
-      };
-
-      console.log(
-        `[Duel] Stakes return event received - playerId: ${playerId}, stakes: ${stakes?.length || 0}, reason: ${reason}`,
-      );
-
-      if (!stakes || stakes.length === 0) {
-        console.log("[Duel] No stakes to return, skipping");
-        return;
-      }
-
-      // Fire and forget - don't await in event handler
-      this.addStakedItemsToInventory(playerId, stakes, "return").catch(
-        (err) => {
-          console.error("[Duel] Error in stakes return handler:", err);
-        },
-      );
-    });
-
-    // Listen for duel stakes settle (combined: winner gets own stakes back + loser's stakes)
-    // This handles both in a single operation to avoid race conditions
+    // Listen for duel stakes settle (atomic transfer: loser's items -> winner)
+    // CRASH-SAFE: Items remain in inventory until this atomic transfer.
+    // Winner's own stakes stay in their inventory (nothing to do).
+    // Loser's stakes are atomically transferred to winner.
     this.world.on("duel:stakes:settle", (event) => {
       const { playerId, ownStakes, wonStakes, fromPlayerId, reason } =
         event as {
@@ -828,26 +826,43 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           reason: string;
         };
 
-      // Combine both sets of stakes into a single operation
-      const allStakes = [...(ownStakes || []), ...(wonStakes || [])];
-
       console.log(
-        `[Duel] Stakes settle event received - winnerId: ${playerId}, fromPlayerId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
+        `[Duel] Stakes settle event received - winnerId: ${playerId}, loserId: ${fromPlayerId}, ownStakes: ${ownStakes?.length || 0}, wonStakes: ${wonStakes?.length || 0}, reason: ${reason}`,
       );
 
-      if (allStakes.length === 0) {
-        console.log("[Duel] No stakes to settle, skipping");
+      // Idempotency guard: prevent double-settlement if event fires twice
+      const settlementKey = `${playerId}:${fromPlayerId}`;
+      if (this.processedDuelSettlements.has(settlementKey)) {
+        console.warn(
+          `[Duel] SECURITY: Duplicate settlement blocked for ${settlementKey}`,
+        );
+        return;
+      }
+      this.processedDuelSettlements.add(settlementKey);
+      // Auto-cleanup after 60 seconds to prevent unbounded growth
+      setTimeout(() => {
+        this.processedDuelSettlements.delete(settlementKey);
+      }, 60_000);
+
+      // Winner's own stakes stay in their inventory - nothing to do
+      // Only need to transfer loser's stakes (wonStakes) from loser to winner
+      if (!wonStakes || wonStakes.length === 0) {
+        console.log("[Duel] No stakes to transfer from loser, skipping");
         return;
       }
 
-      console.log("[Duel] All stakes to add:", JSON.stringify(allStakes));
-
-      // Fire and forget - don't await in event handler
-      this.addStakedItemsToInventory(playerId, allStakes, "award").catch(
-        (err) => {
-          console.error("[Duel] Error in stakes settle handler:", err);
-        },
+      console.log(
+        `[Duel] Transferring ${wonStakes.length} items from ${fromPlayerId} to ${playerId}`,
       );
+
+      // Fire and forget with retry logic
+      this.executeDuelStakeTransferWithRetry(
+        playerId,
+        fromPlayerId,
+        wonStakes,
+      ).catch((err) => {
+        console.error("[Duel] All settlement retries exhausted:", err);
+      });
     });
 
     // Listen for player teleport events (used by duel system)
@@ -1460,6 +1475,9 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         return;
       }
 
+      // Stop player movement before lighting fire (OSRS: player stands still to light)
+      this.tileMovementManager.stopPlayer(player.id);
+
       // Emit event for ProcessingSystem to handle
       this.world.emit(EventType.PROCESSING_FIREMAKING_REQUEST, {
         playerId: player.id,
@@ -1664,6 +1682,279 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
     };
 
+    // Crafting - player initiated crafting (needle, chisel, or furnace jewelry)
+    this.handlers["onCraftingSourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting - prevent inventory/recipe computation spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        triggerType?: string;
+        stationId?: string;
+        inputItemId?: string;
+      };
+      if (!payload.triggerType) return;
+
+      // Validate triggerType - narrow to literal union
+      const validTriggerTypes = ["needle", "chisel", "furnace"] as const;
+      type CraftingTriggerType = (typeof validTriggerTypes)[number];
+      if (
+        !validTriggerTypes.includes(payload.triggerType as CraftingTriggerType)
+      ) {
+        return;
+      }
+      const triggerType = payload.triggerType as CraftingTriggerType;
+
+      // Validate inputItemId if provided
+      if (
+        payload.inputItemId !== undefined &&
+        (typeof payload.inputItemId !== "string" ||
+          payload.inputItemId.length > 64)
+      ) {
+        return;
+      }
+
+      // Emit event for CraftingSystem to handle
+      this.world.emit(EventType.CRAFTING_INTERACT, {
+        playerId: player.id,
+        triggerType,
+        stationId: payload.stationId,
+        inputItemId: payload.inputItemId,
+      });
+    };
+
+    // Processing crafting - player selected item to craft from UI
+    this.handlers["onProcessingCrafting"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting - prevent request spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        recipeId?: unknown;
+        quantity?: unknown;
+      };
+
+      // Type validation
+      if (typeof payload.recipeId !== "string") {
+        return;
+      }
+
+      // Length validation (prevent memory abuse)
+      if (payload.recipeId.length > 64) {
+        return;
+      }
+
+      // Quantity validation with bounds (-1 = "All", server computes actual max)
+      let quantity = 1;
+      if (
+        typeof payload.quantity === "number" &&
+        Number.isFinite(payload.quantity)
+      ) {
+        quantity =
+          payload.quantity === -1
+            ? 10000
+            : Math.floor(Math.max(1, Math.min(payload.quantity, 10000)));
+      }
+
+      // Emit event for CraftingSystem to handle
+      this.world.emit(EventType.PROCESSING_CRAFTING_REQUEST, {
+        playerId: player.id,
+        recipeId: payload.recipeId,
+        quantity,
+      });
+    };
+
+    // Fletching source interaction - player used knife on logs or item-on-item
+    this.handlers["onFletchingSourceInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting - prevent inventory/recipe computation spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        triggerType?: string;
+        inputItemId?: string;
+        secondaryItemId?: string;
+      };
+      if (!payload.triggerType) return;
+
+      // Validate triggerType - narrow to literal union
+      const validFletchingTriggers = ["knife", "item_on_item"] as const;
+      type FletchingTriggerType = (typeof validFletchingTriggers)[number];
+      if (
+        !validFletchingTriggers.includes(
+          payload.triggerType as FletchingTriggerType,
+        )
+      ) {
+        return;
+      }
+      const triggerType = payload.triggerType as FletchingTriggerType;
+
+      // Validate inputItemId (required)
+      if (
+        typeof payload.inputItemId !== "string" ||
+        payload.inputItemId.length > 64
+      ) {
+        return;
+      }
+
+      // Validate optional secondaryItemId
+      if (
+        payload.secondaryItemId !== undefined &&
+        (typeof payload.secondaryItemId !== "string" ||
+          payload.secondaryItemId.length > 64)
+      ) {
+        return;
+      }
+
+      // Emit event for FletchingSystem to handle
+      this.world.emit(EventType.FLETCHING_INTERACT, {
+        playerId: player.id,
+        triggerType,
+        inputItemId: payload.inputItemId,
+        secondaryItemId: payload.secondaryItemId,
+      });
+    };
+
+    // Processing fletching - player selected recipe to fletch from UI
+    this.handlers["onProcessingFletching"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting - prevent request spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        recipeId?: unknown;
+        quantity?: unknown;
+      };
+
+      // Type validation
+      if (typeof payload.recipeId !== "string") {
+        return;
+      }
+
+      // Length validation (prevent memory abuse)
+      if (payload.recipeId.length > 64) {
+        return;
+      }
+
+      // Quantity validation with bounds (-1 = "All", server computes actual max)
+      let quantity = 1;
+      if (
+        typeof payload.quantity === "number" &&
+        Number.isFinite(payload.quantity)
+      ) {
+        quantity =
+          payload.quantity === -1
+            ? 10000
+            : Math.floor(Math.max(1, Math.min(payload.quantity, 10000)));
+      }
+
+      // Emit event for FletchingSystem to handle
+      this.world.emit(EventType.PROCESSING_FLETCHING_REQUEST, {
+        playerId: player.id,
+        recipeId: payload.recipeId,
+        quantity,
+      });
+    };
+
+    // Tanning - player selected hide to tan from UI
+    this.handlers["onProcessingTanning"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting - prevent request spam
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        inputItemId?: unknown;
+        quantity?: unknown;
+      };
+
+      // Type validation
+      if (typeof payload.inputItemId !== "string") {
+        return;
+      }
+
+      // Length validation (prevent memory abuse)
+      if (payload.inputItemId.length > 64) {
+        return;
+      }
+
+      // Quantity validation with bounds (-1 = "All", server computes actual max)
+      let quantity = 1;
+      if (
+        typeof payload.quantity === "number" &&
+        Number.isFinite(payload.quantity)
+      ) {
+        quantity =
+          payload.quantity === -1
+            ? 10000
+            : Math.floor(Math.max(1, Math.min(payload.quantity, 10000)));
+      }
+
+      // Emit event for TanningSystem to handle
+      this.world.emit(EventType.TANNING_REQUEST, {
+        playerId: player.id,
+        inputItemId: payload.inputItemId,
+        quantity,
+      });
+    };
+
+    // Runecrafting - player clicked runecrafting altar
+    // SERVER-AUTHORITATIVE: Emit RUNECRAFTING_INTERACT event for RunecraftingSystem to handle
+    this.handlers["onRunecraftingAltarInteract"] = (socket, data) => {
+      const player = socket.player;
+      if (!player) return;
+
+      // Rate limiting
+      if (!this.canProcessRequest(player.id)) {
+        return;
+      }
+
+      const payload = data as {
+        altarId?: unknown;
+      };
+
+      // Validate altarId
+      if (typeof payload.altarId !== "string" || payload.altarId.length > 64) {
+        return;
+      }
+
+      // Look up the altar entity to get the authoritative runeType
+      const altarEntity = this.world.entities.get(payload.altarId);
+      if (!altarEntity) return;
+
+      const runeType = (altarEntity as unknown as { runeType?: string })
+        .runeType;
+      if (!runeType) return;
+
+      // Emit event for RunecraftingSystem to handle
+      this.world.emit(EventType.RUNECRAFTING_INTERACT, {
+        playerId: player.id,
+        altarId: payload.altarId,
+        runeType,
+      });
+    };
+    this.handlers["runecraftingAltarInteract"] =
+      this.handlers["onRunecraftingAltarInteract"];
+
     // Route movement and combat through action queue for OSRS-style tick processing
     // Actions are queued and processed on tick boundaries, not immediately
     this.handlers["onMoveRequest"] = (socket, data) => {
@@ -1733,11 +2024,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const targetId = payload.mobId || payload.targetId;
       if (!targetId) return;
 
-      // Cancel any existing combat and pending attacks when switching targets
+      // Cancel any existing combat, pending attacks, and queued actions when switching targets
+      // CRITICAL: Clear ActionQueue to prevent stale ground-click movement from overriding
+      // the attack path on the next tick (race condition when ground click + mob click
+      // arrive in the same 600ms tick window)
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get mob entity directly from world entities
       const mobEntity = this.world.entities.get(targetId) as {
@@ -1790,11 +2086,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const targetPlayerId = payload.targetPlayerId;
       if (!targetPlayerId) return;
 
-      // Cancel any existing combat and pending attacks when switching targets
+      // Cancel any existing combat, pending attacks, and queued actions when switching targets
+      // CRITICAL: Clear ActionQueue to prevent stale ground-click movement from overriding
+      // the attack path on the next tick (race condition when ground click + mob click
+      // arrive in the same 600ms tick window)
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get target player entity
       const targetPlayer = this.world.entities?.players?.get(
@@ -3184,19 +3485,40 @@ export class ServerNetwork extends System implements NetworkWithSocket {
           if (needsFreeSlot) {
             freeSlot = findFreeSlot();
             if (freeSlot === -1) {
-              // Inventory full - drop item on ground at player's position
+              // Inventory full - spawn item directly on ground at player's position
+              // NOTE: We use GroundItemSystem.spawnGroundItem() directly instead of ITEM_DROP
+              // because ITEM_DROP tries to remove from inventory first (which would fail
+              // since this item was never in inventory - it came from duel stakes)
               const playerEntity = this.world.entities.get(playerId);
               if (playerEntity) {
                 console.warn(
                   `[Duel] Inventory full for ${playerId} - dropping ${stake.itemId} x${stake.quantity} on ground`,
                 );
-                // Emit ITEM_DROP event which the item system will handle
-                // Drop item at player's position (item already removed from inventory conceptually)
-                this.world.emit(EventType.ITEM_DROP, {
-                  playerId,
-                  itemId: stake.itemId,
-                  quantity: stake.quantity,
-                });
+                const groundItems =
+                  this.world.getSystem<GroundItemSystem>("ground-items");
+                if (groundItems) {
+                  await groundItems.spawnGroundItem(
+                    stake.itemId,
+                    stake.quantity,
+                    {
+                      x: playerEntity.position.x,
+                      y: playerEntity.position.y,
+                      z: playerEntity.position.z,
+                    },
+                    {
+                      despawnTime: 180000, // 3 minutes (OSRS standard)
+                      droppedBy: playerId,
+                      lootProtection: 60000, // 1 minute protection
+                    },
+                  );
+                  console.log(
+                    `[Duel] Spawned ${stake.itemId} x${stake.quantity} on ground for ${playerId} (inventory full)`,
+                  );
+                } else {
+                  console.error(
+                    `[Duel] GroundItemSystem not available - item ${stake.itemId} x${stake.quantity} LOST!`,
+                  );
+                }
               } else {
                 console.error(
                   `[Duel] Cannot drop item - player entity not found for ${playerId}`,
@@ -3243,6 +3565,446 @@ export class ServerNetwork extends System implements NetworkWithSocket {
         `[Duel] Error adding staked items to inventory for ${playerId}:`,
         error,
       );
+    }
+  }
+
+  /**
+   * Retry wrapper for executeDuelStakeTransfer.
+   * Retries up to 3 times with exponential backoff [0, 1000, 3000]ms.
+   * Ensures economic integrity even if the first attempt fails due to
+   * transient errors (connection timeouts, lock contention).
+   */
+  private async executeDuelStakeTransferWithRetry(
+    winnerId: string,
+    loserId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+  ): Promise<void> {
+    const MAX_RETRIES = 3;
+    const RETRY_DELAYS = [0, 1000, 3000];
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        if (attempt > 0) {
+          console.log(
+            `[Duel] Settlement retry attempt ${attempt + 1}/${MAX_RETRIES} for ${winnerId} <- ${loserId}`,
+          );
+        }
+        await this.executeDuelStakeTransfer(winnerId, loserId, stakes);
+        return; // Success — exit retry loop
+      } catch (err) {
+        const isLastAttempt = attempt === MAX_RETRIES - 1;
+
+        if (isLastAttempt) {
+          console.error(
+            `[Duel] CRITICAL: Settlement failed after ${MAX_RETRIES} attempts. ` +
+              `Items remain with loser (crash-safe). winnerId=${winnerId}, loserId=${loserId}`,
+            err,
+          );
+          // Notify players of permanent failure
+          const winnerSocket = this.getSocketByPlayerId(winnerId);
+          const loserSocket = this.getSocketByPlayerId(loserId);
+          if (winnerSocket) {
+            winnerSocket.send("chatAdded", {
+              id: `duel-settle-fail-${Date.now()}`,
+              from: "",
+              body: "Duel stake transfer failed. Please contact support if items are missing.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          if (loserSocket) {
+            loserSocket.send("chatAdded", {
+              id: `duel-settle-fail-${Date.now()}`,
+              from: "",
+              body: "Duel stake transfer failed. Your items were not taken.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          throw err;
+        }
+
+        console.warn(
+          `[Duel] Settlement attempt ${attempt + 1} failed, retrying in ${RETRY_DELAYS[attempt + 1]}ms:`,
+          err instanceof Error ? err.message : err,
+        );
+
+        // Wait before retry
+        await new Promise((resolve) =>
+          setTimeout(resolve, RETRY_DELAYS[attempt + 1]),
+        );
+      }
+    }
+  }
+
+  /**
+   * Execute atomic duel stake transfer from loser to winner.
+   *
+   * CRASH-SAFE: Items remain in loser's inventory until this atomic transaction.
+   * If server crashes during duel, items are still in loser's inventory (no loss).
+   *
+   * Transaction:
+   * 1. Validate items still exist in loser's inventory
+   * 2. Remove items from loser's inventory
+   * 3. Add items to winner's inventory
+   * 4. Reload both inventories from DB
+   */
+  private async executeDuelStakeTransfer(
+    winnerId: string,
+    loserId: string,
+    stakes: Array<{
+      inventorySlot: number;
+      itemId: string;
+      quantity: number;
+      value: number;
+    }>,
+  ): Promise<void> {
+    // Get database from world
+    const serverWorld = this.world as {
+      pgPool?: import("pg").Pool;
+      drizzleDb?: import("drizzle-orm/node-postgres").NodePgDatabase<
+        typeof import("../../database/schema")
+      >;
+    };
+
+    if (!serverWorld.drizzleDb || !serverWorld.pgPool) {
+      console.error("[Duel] Database not available for stake transfer");
+      return;
+    }
+
+    const pool = serverWorld.pgPool;
+
+    // Get inventory system for locking and reloading
+    const inventorySystem = this.world.getSystem("inventory") as
+      | {
+          lockForTransaction: (id: string) => boolean;
+          unlockTransaction: (id: string) => void;
+          reloadFromDatabase: (id: string) => Promise<void>;
+        }
+      | undefined;
+
+    // Lock both inventories
+    const winnerLocked =
+      inventorySystem?.lockForTransaction?.(winnerId) ?? true;
+    const loserLocked = inventorySystem?.lockForTransaction?.(loserId) ?? true;
+
+    if (!winnerLocked || !loserLocked) {
+      console.warn(
+        `[Duel] Could not lock inventories for transfer (winner: ${winnerLocked}, loser: ${loserLocked})`,
+      );
+      // Unlock any that were locked
+      if (winnerLocked) inventorySystem?.unlockTransaction?.(winnerId);
+      if (loserLocked) inventorySystem?.unlockTransaction?.(loserId);
+      return;
+    }
+
+    try {
+      // Deadlock retry: PostgreSQL 40P01 / serialization 40001
+      const DEADLOCK_MAX_RETRIES = 3;
+      const DEADLOCK_DELAYS = [50, 100, 200];
+
+      for (
+        let deadlockAttempt = 0;
+        deadlockAttempt < DEADLOCK_MAX_RETRIES;
+        deadlockAttempt++
+      ) {
+        try {
+          // Execute atomic transfer in a single transaction
+          await pool.query("BEGIN");
+
+          // Get winner's current inventory to find free slots
+          const winnerInvResult = await pool.query(
+            `SELECT "slotIndex" FROM inventory WHERE "playerId" = $1`,
+            [winnerId],
+          );
+          const usedSlots = new Set(
+            winnerInvResult.rows.map((r: { slotIndex: number }) => r.slotIndex),
+          );
+
+          const findFreeSlot = (): number => {
+            for (let i = 0; i < 28; i++) {
+              if (!usedSlots.has(i)) {
+                usedSlots.add(i);
+                return i;
+              }
+            }
+            return -1;
+          };
+
+          // Process each staked item
+          for (const stake of stakes) {
+            // 1. Validate item exists in loser's inventory at the exact slot
+            const validateResult = await pool.query(
+              `SELECT "itemId", quantity FROM inventory
+             WHERE "playerId" = $1 AND "slotIndex" = $2
+             FOR UPDATE`,
+              [loserId, stake.inventorySlot],
+            );
+
+            if (validateResult.rows.length === 0) {
+              console.error(
+                `[Duel] SECURITY: Staked item not found in loser inventory! ` +
+                  `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
+              );
+              // Item was removed/traded/dropped during duel - skip this item
+              // This prevents dupe exploits
+              continue;
+            }
+
+            const dbItem = validateResult.rows[0] as {
+              itemId: string;
+              quantity: number;
+            };
+
+            // Verify item ID matches
+            if (dbItem.itemId !== stake.itemId) {
+              console.error(
+                `[Duel] SECURITY: Item ID mismatch! ` +
+                  `Expected ${stake.itemId}, found ${dbItem.itemId} at slot ${stake.inventorySlot}`,
+              );
+              continue;
+            }
+
+            // SECURITY: Use actual DB quantity, not staked quantity.
+            // If player consumed part of a stack during the duel (e.g. ate food),
+            // we must only transfer what actually remains — not the originally staked amount.
+            const transferQuantity = Math.min(stake.quantity, dbItem.quantity);
+            if (transferQuantity <= 0) {
+              console.warn(
+                `[Duel] SECURITY: Staked item quantity is 0 — skipping. ` +
+                  `loserId=${loserId}, slot=${stake.inventorySlot}, itemId=${stake.itemId}`,
+              );
+              continue;
+            }
+
+            // 2. Remove from loser's inventory
+            if (dbItem.quantity <= transferQuantity) {
+              // Remove entire item
+              await pool.query(
+                `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
+                [loserId, stake.inventorySlot],
+              );
+            } else {
+              // Reduce quantity
+              await pool.query(
+                `UPDATE inventory SET quantity = quantity - $1
+               WHERE "playerId" = $2 AND "slotIndex" = $3`,
+                [transferQuantity, loserId, stake.inventorySlot],
+              );
+            }
+
+            // 3. Add to winner's inventory
+            // Check if item is stackable and already exists
+            const itemData = getItem(stake.itemId);
+            const isStackable = itemData?.stackable ?? false;
+
+            if (isStackable) {
+              const existingResult = await pool.query(
+                `SELECT "slotIndex" FROM inventory
+               WHERE "playerId" = $1 AND "itemId" = $2
+               FOR UPDATE`,
+                [winnerId, stake.itemId],
+              );
+
+              if (existingResult.rows.length > 0) {
+                // Add to existing stack — check for integer overflow first
+                const existingSlot = (
+                  existingResult.rows[0] as { slotIndex: number }
+                ).slotIndex;
+                const existingQty = (
+                  existingResult.rows[0] as {
+                    slotIndex: number;
+                    quantity: number;
+                  }
+                ).quantity;
+                if (existingQty > 2147483647 - transferQuantity) {
+                  console.error(
+                    `[Duel] SECURITY: Stack merge would overflow! ` +
+                      `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                      `existing=${existingQty}, adding=${transferQuantity}`,
+                  );
+                  // Overflow: skip this item — it stays with the loser
+                  continue;
+                }
+                await pool.query(
+                  `UPDATE inventory SET quantity = quantity + $1
+                 WHERE "playerId" = $2 AND "slotIndex" = $3`,
+                  [transferQuantity, winnerId, existingSlot],
+                );
+                console.log(
+                  `[Duel] Transferred ${transferQuantity} ${stake.itemId} from ${loserId} to ${winnerId} (stacked)`,
+                );
+                continue;
+              }
+            }
+
+            // Find free slot and insert
+            const freeSlot = findFreeSlot();
+            if (freeSlot === -1) {
+              // Inventory full - send to bank instead
+              console.log(
+                `[Duel] Winner inventory full, sending ${stake.itemId} x${transferQuantity} to bank`,
+              );
+
+              // Check if item already exists in bank (for stacking)
+              const bankResult = await pool.query(
+                `SELECT id, quantity FROM bank_storage
+               WHERE "playerId" = $1 AND "itemId" = $2
+               FOR UPDATE`,
+                [winnerId, stake.itemId],
+              );
+
+              if (bankResult.rows.length > 0) {
+                // Add to existing bank stack — check for integer overflow
+                const bankRow = bankResult.rows[0] as {
+                  id: string;
+                  quantity: number;
+                };
+                if (bankRow.quantity > 2147483647 - transferQuantity) {
+                  console.error(
+                    `[Duel] SECURITY: Bank stack merge would overflow! ` +
+                      `winnerId=${winnerId}, itemId=${stake.itemId}, ` +
+                      `existing=${bankRow.quantity}, adding=${transferQuantity}`,
+                  );
+                  continue;
+                }
+                await pool.query(
+                  `UPDATE bank_storage SET quantity = quantity + $1 WHERE id = $2`,
+                  [transferQuantity, bankRow.id],
+                );
+              } else {
+                // Find next available bank slot
+                const maxSlotResult = await pool.query(
+                  `SELECT COALESCE(MAX(slot), -1) + 1 as next_slot FROM bank_storage
+                 WHERE "playerId" = $1 AND "tabIndex" = 0`,
+                  [winnerId],
+                );
+                const nextSlot = (
+                  maxSlotResult.rows[0] as { next_slot: number }
+                ).next_slot;
+
+                await pool.query(
+                  `INSERT INTO bank_storage ("playerId", "itemId", quantity, slot, "tabIndex")
+                 VALUES ($1, $2, $3, $4, 0)`,
+                  [winnerId, stake.itemId, transferQuantity, nextSlot],
+                );
+              }
+              console.log(
+                `[Duel] Sent ${stake.itemId} x${transferQuantity} to ${winnerId}'s bank`,
+              );
+              continue;
+            }
+
+            await pool.query(
+              `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
+             VALUES ($1, $2, $3, $4, NULL)`,
+              [winnerId, stake.itemId, transferQuantity, freeSlot],
+            );
+            console.log(
+              `[Duel] Transferred ${stake.itemId} x${transferQuantity} from ${loserId} to ${winnerId} slot ${freeSlot}`,
+            );
+          }
+
+          // Commit the atomic transaction
+          await pool.query("COMMIT");
+          console.log(
+            `[Duel] Stake transfer complete: ${stakes.length} items from ${loserId} to ${winnerId}`,
+          );
+
+          // Reload both inventories from database
+          if (inventorySystem?.reloadFromDatabase) {
+            await inventorySystem.reloadFromDatabase(winnerId);
+            await inventorySystem.reloadFromDatabase(loserId);
+          }
+
+          // Notify both players of successful settlement
+          const winnerSocket = this.getSocketByPlayerId(winnerId);
+          const loserSocket = this.getSocketByPlayerId(loserId);
+          if (winnerSocket) {
+            winnerSocket.send("chatAdded", {
+              id: `duel-win-${Date.now()}`,
+              from: "",
+              body: `You received your opponent's stakes (${stakes.length} item${stakes.length !== 1 ? "s" : ""}).`,
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          if (loserSocket) {
+            loserSocket.send("chatAdded", {
+              id: `duel-loss-${Date.now()}`,
+              from: "",
+              body: "Your staked items have been transferred to the winner.",
+              createdAt: new Date().toISOString(),
+              type: "system",
+            });
+          }
+          // Transaction succeeded — exit the deadlock retry loop
+          return;
+        } catch (error) {
+          // Rollback on any error
+          try {
+            await pool.query("ROLLBACK");
+          } catch (_rollbackErr) {
+            // Rollback failed — connection may be broken
+          }
+
+          // Check for deadlock (40P01) or serialization failure (40001)
+          const errorMsg =
+            error instanceof Error ? error.message : String(error);
+          const isDeadlock =
+            errorMsg.includes("deadlock") ||
+            errorMsg.includes("40P01") ||
+            errorMsg.includes("could not serialize") ||
+            errorMsg.includes("40001");
+
+          if (isDeadlock && deadlockAttempt < DEADLOCK_MAX_RETRIES - 1) {
+            const delay = DEADLOCK_DELAYS[deadlockAttempt];
+            console.warn(
+              `[Duel] Deadlock detected in stake transfer, retrying in ${delay}ms ` +
+                `(attempt ${deadlockAttempt + 1}/${DEADLOCK_MAX_RETRIES})`,
+            );
+            await new Promise((resolve) => setTimeout(resolve, delay));
+            continue; // Retry the transaction
+          }
+
+          // Not a deadlock or last attempt — throw to outer handler
+          throw error;
+        }
+      }
+    } catch (error) {
+      console.error("[Duel] Stake transfer transaction failed:", error);
+
+      // Notify both players of transfer failure
+      const winnerSocket = this.getSocketByPlayerId(winnerId);
+      const loserSocket = this.getSocketByPlayerId(loserId);
+
+      if (winnerSocket) {
+        winnerSocket.send("chatAdded", {
+          id: `duel-error-${Date.now()}`,
+          from: "",
+          body: "Failed to transfer duel stakes. Items remain with original owners.",
+          createdAt: new Date().toISOString(),
+          type: "system",
+        });
+      }
+      if (loserSocket) {
+        loserSocket.send("chatAdded", {
+          id: `duel-error-${Date.now()}`,
+          from: "",
+          body: "Failed to transfer duel stakes. Your items were not taken.",
+          createdAt: new Date().toISOString(),
+          type: "system",
+        });
+      }
+    } finally {
+      // Always unlock both inventories
+      inventorySystem?.unlockTransaction?.(winnerId);
+      inventorySystem?.unlockTransaction?.(loserId);
     }
   }
 
@@ -3322,7 +4084,13 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     const equipmentSystem = this.world.getSystem("equipment") as
       | {
           getPlayerEquipment?: (id: string) => {
-            weapon?: { item?: { attackRange?: number; id?: string } };
+            weapon?: {
+              item?: {
+                attackRange?: number;
+                attackType?: string;
+                id?: string;
+              };
+            };
           } | null;
         }
       | undefined;
@@ -3333,22 +4101,34 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       if (equipment?.weapon?.item) {
         const weaponItem = equipment.weapon.item;
 
-        // Check if weapon has attackRange directly
-        if (weaponItem.attackRange) {
-          return weaponItem.attackRange;
-        }
+        // OSRS-accurate: Magic weapons (staffs/wands) without autocast
+        // default to melee range (1 tile bonk). The selectedSpell check above
+        // already returns 10 for magic range when a spell is selected.
+        const isMagicWeapon =
+          String(weaponItem.attackType || "").toLowerCase() === "magic" ||
+          (weaponItem.id &&
+            String(getItem(weaponItem.id)?.attackType || "").toLowerCase() ===
+              "magic");
 
-        // Fallback: look up from items manifest
-        if (weaponItem.id) {
-          const itemData = getItem(weaponItem.id);
-          if (itemData?.attackRange) {
-            return itemData.attackRange;
+        if (!isMagicWeapon) {
+          // Non-magic weapons use their attackRange (e.g., bows)
+          if (weaponItem.attackRange) {
+            return weaponItem.attackRange;
+          }
+
+          // Fallback: look up from items manifest
+          if (weaponItem.id) {
+            const itemData = getItem(weaponItem.id);
+            if (itemData?.attackRange) {
+              return itemData.attackRange;
+            }
           }
         }
+        // Magic weapons without autocast fall through to melee range (1)
       }
     }
 
-    // Default to 1 tile (unarmed/punching)
+    // Default to 1 tile (unarmed/punching, or magic weapon without autocast)
     return 1;
   }
 
@@ -3390,18 +4170,29 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
         // Check explicit attackType first
         if (weaponItem.attackType) {
-          return weaponItem.attackType;
+          // OSRS-accurate: Magic weapons (staffs/wands) without autocast use
+          // melee crush attack (bonk). The selectedSpell check above already
+          // returns MAGIC when a spell is selected.
+          const isMagicAttackType =
+            String(weaponItem.attackType).toLowerCase() === "magic";
+          if (!isMagicAttackType) {
+            return weaponItem.attackType as AttackType;
+          }
+          // Magic attack type without autocast → melee bonk
+          return AttackType.MELEE;
         }
 
         // Fall back to weaponType for legacy compatibility
         if (weaponItem.weaponType === WeaponType.BOW) {
           return AttackType.RANGED;
         }
+        // OSRS-accurate: Staffs/wands without autocast use melee (crush bonk)
+        // The selectedSpell check above already handles the autocast case
         if (
           weaponItem.weaponType === WeaponType.STAFF ||
           weaponItem.weaponType === WeaponType.WAND
         ) {
-          return AttackType.MAGIC;
+          return AttackType.MELEE;
         }
       }
     }

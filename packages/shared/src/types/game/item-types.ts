@@ -165,6 +165,15 @@ export interface Item {
   equippedModelPath?: string | null; // 3D model path for EQUIPPED items (hand-held weapons)
   iconPath: string; // UI icon path
 
+  // Ground item display overrides
+  /** Scale for 3D model when displayed as ground item (default: 0.3) */
+  modelScale?: number;
+  /** Ground item Y positioning:
+   *  - When <= 0: model bottom is bbox-snapped to terrain with this as offset (0 = flush)
+   *  - When > 0: item floats at this height with bobbing animation
+   *  - When undefined: defaults to 0.5 (standard floating ground item) */
+  groundOffset?: number;
+
   // Consumable properties - only for food/consumables
   healAmount?: number; // Health restored when consumed
 
@@ -285,6 +294,8 @@ export interface Item {
     category: string;
     /** Time in game ticks (600ms per tick). Default: 4 ticks */
     ticks?: number;
+    /** Number of items produced per action. Default: 1. Arrowtips produce 15. */
+    outputQuantity?: number;
   };
 
   // === TIER-BASED EQUIPMENT SYSTEM ===

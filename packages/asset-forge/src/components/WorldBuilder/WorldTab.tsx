@@ -541,6 +541,15 @@ const WorldTabContent: React.FC<WorldTabContentProps> = ({
         minTownSpacing: config.towns.minTownSpacing,
         worldSize: worldSizeMeters,
         waterThreshold: config.terrain.waterThreshold,
+        landmarks: {
+          fencesEnabled: config.towns.landmarks.fencesEnabled,
+          fenceDensity: config.towns.landmarks.fenceDensity,
+          fencePostHeight: 1.2,
+          lamppostsInVillages: config.towns.landmarks.lamppostsInVillages,
+          lamppostSpacing: 15,
+          marketStallsEnabled: config.towns.landmarks.marketStallsEnabled,
+          decorationsEnabled: config.towns.landmarks.decorationsEnabled,
+        },
       },
     });
 

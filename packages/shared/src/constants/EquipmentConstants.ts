@@ -8,11 +8,8 @@
 import { EquipmentSlotName } from "../types/game/item-types";
 
 /**
- * Currently implemented equipment slot names.
- * Used for iteration across equipment systems.
- *
- * Note: The EquipmentSlotName enum has additional slots (boots, gloves, cape, etc.)
- * that are not yet implemented. This array contains only the active slots.
+ * All equipment slot names.
+ * Used for iteration across equipment systems (persistence, stats, UI).
  */
 export const EQUIPMENT_SLOT_NAMES = [
   EquipmentSlotName.WEAPON,
@@ -20,6 +17,11 @@ export const EQUIPMENT_SLOT_NAMES = [
   EquipmentSlotName.HELMET,
   EquipmentSlotName.BODY,
   EquipmentSlotName.LEGS,
+  EquipmentSlotName.BOOTS,
+  EquipmentSlotName.GLOVES,
+  EquipmentSlotName.CAPE,
+  EquipmentSlotName.AMULET,
+  EquipmentSlotName.RING,
   EquipmentSlotName.ARROWS,
 ] as const;
 

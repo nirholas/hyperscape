@@ -129,6 +129,18 @@
       </label>
     </div>
     <div class="control">
+      <label class="checkbox">
+        <input id="showWindows" type="checkbox" checked />
+        Show window panes
+      </label>
+    </div>
+    <div class="control">
+      <label class="checkbox">
+        <input id="showDoorTrims" type="checkbox" checked />
+        Show door trims
+      </label>
+    </div>
+    <div class="control">
       <button id="generateBtn" type="button">Generate building</button>
     </div>
     <div id="stats"></div>
@@ -348,7 +360,21 @@
       innkeeper: new THREE.Color(0x4cc9f0),
       forge: new THREE.Color(0x7f1d1d),
       anvil: new THREE.Color(0x4b5563),
+      windowFrame: new THREE.Color(0x4a3c32),
+      doorFrame: new THREE.Color(0x3c2e24),
     };
+
+    // Glass material for windows
+    const glassMaterial = new THREE.MeshPhysicalMaterial({
+      color: 0x88ccff,
+      transparent: true,
+      opacity: 0.35,
+      roughness: 0.05,
+      metalness: 0.0,
+      transmission: 0.5,
+      thickness: 0.02,
+      side: THREE.DoubleSide,
+    });
 
     let currentBuilding = null;
 
@@ -1891,6 +1917,115 @@
       return geometry;
     }
 
+    // Window frame geometry
+    function createWindowFrameGeometry(width, height, frameThickness, frameDepth, orientation, center, centerY) {
+      const geometries = [];
+      
+      // Top frame
+      const topGeo = new THREE.BoxGeometry(width, frameThickness, frameDepth);
+      topGeo.translate(0, height / 2 - frameThickness / 2, 0);
+      applyVertexColors(topGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(topGeo);
+      
+      // Bottom frame
+      const bottomGeo = new THREE.BoxGeometry(width, frameThickness, frameDepth);
+      bottomGeo.translate(0, -height / 2 + frameThickness / 2, 0);
+      applyVertexColors(bottomGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(bottomGeo);
+      
+      // Left frame
+      const leftGeo = new THREE.BoxGeometry(frameThickness, height - frameThickness * 2, frameDepth);
+      leftGeo.translate(-width / 2 + frameThickness / 2, 0, 0);
+      applyVertexColors(leftGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(leftGeo);
+      
+      // Right frame
+      const rightGeo = new THREE.BoxGeometry(frameThickness, height - frameThickness * 2, frameDepth);
+      rightGeo.translate(width / 2 - frameThickness / 2, 0, 0);
+      applyVertexColors(rightGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(rightGeo);
+      
+      const merged = mergeGeometries(geometries, false);
+      for (const geo of geometries) geo.dispose();
+      
+      if (orientation === "z") {
+        merged.rotateY(Math.PI / 2);
+      }
+      merged.translate(center.x, centerY, center.z);
+      
+      return merged;
+    }
+
+    // Window glass geometry (for separate transparent rendering)
+    function createWindowGlassGeometry(width, height, orientation, center, centerY) {
+      const glassGeo = new THREE.PlaneGeometry(width, height);
+      
+      if (orientation === "z") {
+        glassGeo.rotateY(Math.PI / 2);
+      }
+      glassGeo.translate(center.x, centerY, center.z);
+      
+      return glassGeo;
+    }
+
+    // Window crossbar geometry (2x2 grid)
+    function createWindowCrossbarGeometry(width, height, barThickness, barDepth, orientation, center, centerY) {
+      const geometries = [];
+      
+      // Vertical bar
+      const vBarGeo = new THREE.BoxGeometry(barThickness, height, barDepth);
+      applyVertexColors(vBarGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(vBarGeo);
+      
+      // Horizontal bar
+      const hBarGeo = new THREE.BoxGeometry(width, barThickness, barDepth);
+      applyVertexColors(hBarGeo, palette.windowFrame, 0.15, 0.1, 0.9);
+      geometries.push(hBarGeo);
+      
+      const merged = mergeGeometries(geometries, false);
+      for (const geo of geometries) geo.dispose();
+      
+      if (orientation === "z") {
+        merged.rotateY(Math.PI / 2);
+      }
+      merged.translate(center.x, centerY, center.z);
+      
+      return merged;
+    }
+
+    // Door frame geometry
+    function createDoorFrameGeometry(width, height, frameThickness, frameDepth, orientation, center, baseY) {
+      const geometries = [];
+      
+      // Top frame (header)
+      const topGeo = new THREE.BoxGeometry(width + frameThickness * 2, frameThickness * 1.5, frameDepth);
+      topGeo.translate(0, height + frameThickness * 0.75, 0);
+      applyVertexColors(topGeo, palette.doorFrame, 0.15, 0.1, 0.9);
+      geometries.push(topGeo);
+      
+      // Left frame
+      const leftGeo = new THREE.BoxGeometry(frameThickness, height, frameDepth);
+      leftGeo.translate(-width / 2 - frameThickness / 2, height / 2, 0);
+      applyVertexColors(leftGeo, palette.doorFrame, 0.15, 0.1, 0.9);
+      geometries.push(leftGeo);
+      
+      // Right frame
+      const rightGeo = new THREE.BoxGeometry(frameThickness, height, frameDepth);
+      rightGeo.translate(width / 2 + frameThickness / 2, height / 2, 0);
+      applyVertexColors(rightGeo, palette.doorFrame, 0.15, 0.1, 0.9);
+      geometries.push(rightGeo);
+      
+      const merged = mergeGeometries(geometries, false);
+      for (const geo of geometries) geo.dispose();
+      
+      if (orientation === "z") {
+        merged.rotateY(Math.PI / 2);
+      }
+      merged.translate(center.x, baseY, center.z);
+      
+      return merged;
+    }
+
     function addWallSegment(
       geometries,
       length,
@@ -1943,6 +2078,9 @@
       miterLeft = false,
       miterRight = false,
       invertMiter = false,
+      windowGeometries = null,
+      glassGeometries = null,
+      doorGeometries = null,
     ) {
       if (!openingType) {
         addWallSegment(
@@ -1965,6 +2103,7 @@
 
       const isArch = openingType === "arch";
       const isWindow = openingType === "window";
+      const isDoor = openingType === "door";
       const openingWidth = Math.min(
         isWindow ? WINDOW_WIDTH : isArch ? ARCH_WIDTH : DOOR_WIDTH,
         length - thickness * 2,
@@ -2038,6 +2177,48 @@
           false,
           invertMiter,
         );
+        
+        // Create window frame and glass panes
+        if (windowGeometries && glassGeometries) {
+          const frameThickness = 0.03;
+          const frameDepth = thickness * 0.6;
+          const windowCenterY = baseY + sillHeight + windowHeight / 2;
+          
+          // Window frame (outer)
+          const frameGeo = createWindowFrameGeometry(
+            openingWidth,
+            windowHeight,
+            frameThickness,
+            frameDepth,
+            orientation,
+            center,
+            windowCenterY,
+          );
+          if (frameGeo) windowGeometries.push(frameGeo);
+          
+          // Glass pane
+          const glassGeo = createWindowGlassGeometry(
+            openingWidth - frameThickness * 2,
+            windowHeight - frameThickness * 2,
+            orientation,
+            center,
+            windowCenterY,
+          );
+          if (glassGeo) glassGeometries.push(glassGeo);
+          
+          // Crossbar (2x2 grid)
+          const crossbarGeo = createWindowCrossbarGeometry(
+            openingWidth,
+            windowHeight,
+            frameThickness * 0.7,
+            frameDepth * 0.5,
+            orientation,
+            center,
+            windowCenterY,
+          );
+          if (crossbarGeo) windowGeometries.push(crossbarGeo);
+        }
+        
         stats.windows += 1;
         return;
       }
@@ -2078,6 +2259,23 @@
         false,
         invertMiter,
       );
+      
+      // Add door frame
+      if (doorGeometries) {
+        const frameThickness = 0.035;
+        const frameDepth = thickness * 0.7;
+        const doorFrameGeo = createDoorFrameGeometry(
+          openingWidth,
+          openingHeight,
+          frameThickness,
+          frameDepth,
+          orientation,
+          center,
+          baseY,
+        );
+        if (doorFrameGeo) doorGeometries.push(doorFrameGeo);
+      }
+      
       stats.doorways += 1;
     }
 
@@ -2217,7 +2415,7 @@
       }
     }
 
-    function addWallsForFloor(geometries, layout, floorPlan, floorIndex, stats) {
+    function addWallsForFloor(geometries, layout, floorPlan, floorIndex, stats, windowGeometries = null, glassGeometries = null, doorGeometries = null) {
       const { width, depth } = layout;
       const footprint = floorPlan.footprint;
       const roomMap = floorPlan.roomMap;
@@ -2251,6 +2449,12 @@
                 baseY,
                 opening || null,
                 stats,
+                false,
+                false,
+                false,
+                null,
+                null,
+                doorGeometries,
               );
             }
           } else {
@@ -2279,6 +2483,9 @@
               miterLeft,
               miterRight,
               invertMiter,
+              windowGeometries,
+              glassGeometries,
+              doorGeometries,
             );
           }
 
@@ -2303,6 +2510,12 @@
                 baseY,
                 opening || null,
                 stats,
+                false,
+                false,
+                false,
+                null,
+                null,
+                doorGeometries,
               );
             }
           } else {
@@ -2331,6 +2544,9 @@
               miterLeft,
               miterRight,
               invertMiter,
+              windowGeometries,
+              glassGeometries,
+              doorGeometries,
             );
           }
 
@@ -2360,6 +2576,9 @@
               miterLeft,
               miterRight,
               invertMiter,
+              windowGeometries,
+              glassGeometries,
+              doorGeometries,
             );
           }
 
@@ -2389,6 +2608,9 @@
               miterLeft,
               miterRight,
               invertMiter,
+              windowGeometries,
+              glassGeometries,
+              doorGeometries,
             );
           }
         }
@@ -2801,6 +3023,9 @@
 
     function buildBuilding(layout, recipe, typeKey, rng, includeRoof) {
       const geometries = [];
+      const windowGeometries = [];
+      const glassGeometries = [];
+      const doorGeometries = [];
 
       const stats = {
         wallSegments: 0,
@@ -2827,7 +3052,7 @@
       for (let floor = 0; floor < layout.floors; floor += 1) {
         addFloorTiles(geometries, layout, floor, stats);
         addFloorEdgeSkirts(geometries, layout, floor);
-        addWallsForFloor(geometries, layout, layout.floorPlans[floor], floor, stats);
+        addWallsForFloor(geometries, layout, layout.floorPlans[floor], floor, stats, windowGeometries, glassGeometries, doorGeometries);
       }
 
       addStairs(geometries, layout, stats);
@@ -2857,7 +3082,11 @@
         );
       }
 
-      let mesh = null;
+      // Create building group
+      const buildingGroup = new THREE.Group();
+      buildingGroup.userData = { layout, recipe, stats };
+
+      // Main building mesh
       if (geometries.length > 0) {
         const mergedGeometry = mergeGeometries(geometries, false);
         const cleanedGeometry = removeInternalFaces(mergedGeometry);
@@ -2865,17 +3094,40 @@
         for (const geometry of geometries) {
           geometry.dispose();
         }
-        mesh = new THREE.Mesh(cleanedGeometry, uberMaterial);
-        mesh.userData = {
-          layout,
-          recipe,
-          stats,
-        };
-      } else {
-        mesh = new THREE.Group(); // Fallback empty
+        const buildingMesh = new THREE.Mesh(cleanedGeometry, uberMaterial);
+        buildingMesh.name = "building-main";
+        buildingGroup.add(buildingMesh);
       }
 
-      return { building: mesh, stats };
+      // Window frames mesh
+      if (windowGeometries.length > 0) {
+        const windowMerged = mergeGeometries(windowGeometries, false);
+        for (const geo of windowGeometries) geo.dispose();
+        const windowMesh = new THREE.Mesh(windowMerged, uberMaterial);
+        windowMesh.name = "window-frames";
+        buildingGroup.add(windowMesh);
+      }
+
+      // Door frames mesh
+      if (doorGeometries.length > 0) {
+        const doorMerged = mergeGeometries(doorGeometries, false);
+        for (const geo of doorGeometries) geo.dispose();
+        const doorMesh = new THREE.Mesh(doorMerged, uberMaterial);
+        doorMesh.name = "door-frames";
+        buildingGroup.add(doorMesh);
+      }
+
+      // Glass panes mesh (separate transparent material)
+      if (glassGeometries.length > 0) {
+        const glassMerged = mergeGeometries(glassGeometries, false);
+        for (const geo of glassGeometries) geo.dispose();
+        const glassMesh = new THREE.Mesh(glassMerged, glassMaterial);
+        glassMesh.name = "window-glass";
+        glassMesh.renderOrder = 1; // Render after opaque
+        buildingGroup.add(glassMesh);
+      }
+
+      return { building: buildingGroup, stats };
     }
 
     function disposeBuilding(group) {
@@ -2908,6 +3160,8 @@
     const randomSeed = document.getElementById("randomSeed");
     const showRoof = document.getElementById("showRoof");
     const showGrid = document.getElementById("showGrid");
+    const showWindows = document.getElementById("showWindows");
+    const showDoorTrims = document.getElementById("showDoorTrims");
     const generateBtn = document.getElementById("generateBtn");
     const statsEl = document.getElementById("stats");
 
@@ -2975,6 +3229,26 @@
     showRoof.addEventListener("change", generate); // Re-generate to toggle roof
     showGrid.addEventListener("change", () => {
       grid.visible = showGrid.checked;
+    });
+    showWindows.addEventListener("change", () => {
+      // Toggle visibility of window glass and frames
+      if (currentBuilding) {
+        currentBuilding.traverse((child) => {
+          if (child.name === "window-glass" || child.name === "window-frames") {
+            child.visible = showWindows.checked;
+          }
+        });
+      }
+    });
+    showDoorTrims.addEventListener("change", () => {
+      // Toggle visibility of door frames
+      if (currentBuilding) {
+        currentBuilding.traverse((child) => {
+          if (child.name === "door-frames") {
+            child.visible = showDoorTrims.checked;
+          }
+        });
+      }
     });
     randomSeed.addEventListener("click", () => {
       seedInput.value = Math.random().toString(36).slice(2, 8);

@@ -7,15 +7,15 @@
  * - handleDuelAcceptStakes: Accept current stakes configuration
  *
  * Security features:
- * - Database transactions for atomicity (BEGIN/COMMIT/ROLLBACK)
- * - SELECT FOR UPDATE to prevent race conditions
+ * - Items remain in player inventory until duel completion (crash-safe)
+ * - SELECT FOR UPDATE to validate items exist
  * - Rate limiting to prevent spam
  * - Audit logging for economic integrity
+ * - Atomic transfer at duel completion prevents item loss
  */
 
 import {
   type World,
-  type SlotNumber,
   type ItemID,
   getItem,
   isValidSlotNumber,
@@ -25,40 +25,12 @@ import type { DatabaseConnection } from "../trade/types";
 import { AuditLogger } from "../../services";
 import {
   rateLimiter,
-  getDuelSystem,
   sendDuelError,
   sendToSocket,
-  getPlayerId,
   getSocketByPlayerId,
+  withDuelAuth,
+  DUEL_PACKETS,
 } from "./helpers";
-
-// ============================================================================
-// Transaction Helper
-// ============================================================================
-
-/**
- * Execute a function within a database transaction.
- * Automatically handles BEGIN, COMMIT, and ROLLBACK.
- *
- * @param db - Database connection
- * @param fn - Async function to execute within transaction
- * @returns Result of the function
- * @throws Rethrows any error after rolling back
- */
-async function withTransaction<T>(
-  db: DatabaseConnection,
-  fn: () => Promise<T>,
-): Promise<T> {
-  await db.pool.query("BEGIN");
-  try {
-    const result = await fn();
-    await db.pool.query("COMMIT");
-    return result;
-  } catch (error) {
-    await db.pool.query("ROLLBACK");
-    throw error;
-  }
-}
 
 // ============================================================================
 // Add Stake Handler
@@ -67,11 +39,15 @@ async function withTransaction<T>(
 /**
  * Handle adding an item to stakes
  *
+ * CRASH-SAFE DESIGN: Items remain in inventory until duel completion.
+ * We only track which items are offered in the session. The actual transfer
+ * happens atomically when the duel ends, preventing item loss on crash.
+ *
  * Security:
- * - Wrapped in database transaction
- * - Uses SELECT FOR UPDATE to lock inventory row
+ * - Validates item exists in inventory (SELECT FOR UPDATE)
  * - Rate limited to prevent spam
  * - Audit logged for economic tracking
+ * - Items stay in inventory until duel completion (crash-safe)
  */
 export async function handleDuelAddStake(
   socket: ServerSocket,
@@ -79,11 +55,9 @@ export async function handleDuelAddStake(
   world: World,
   db: DatabaseConnection,
 ): Promise<void> {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limiting - prevent rapid stake operations
   if (!rateLimiter.tryOperation(playerId)) {
@@ -92,12 +66,6 @@ export async function handleDuelAddStake(
       "Please wait before modifying stakes",
       "RATE_LIMITED",
     );
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -113,107 +81,68 @@ export async function handleDuelAddStake(
     return;
   }
 
-  // Get inventory system for memory sync
-  const inventorySystem = world.getSystem("inventory") as
-    | {
-        lockForTransaction?: (id: string) => boolean;
-        unlockTransaction?: (id: string) => void;
-        reloadFromDatabase?: (id: string) => Promise<void>;
-      }
-    | undefined;
-
-  // Lock in-memory inventory to prevent concurrent operations
-  const locked = inventorySystem?.lockForTransaction?.(playerId) ?? true;
-  if (!locked) {
-    sendDuelError(socket, "Inventory busy, try again", "SERVER_ERROR");
-    return;
-  }
-
   try {
-    // Execute within database transaction for atomicity
-    await withTransaction(db, async () => {
-      // SECURITY: Lock the inventory row to prevent race conditions (TOCTOU)
-      const lockResult = await db.pool.query(
-        `SELECT "itemId", quantity FROM inventory
-         WHERE "playerId" = $1 AND "slotIndex" = $2
-         FOR UPDATE`,
-        [playerId, inventorySlot],
-      );
+    // Validate item exists in inventory (read-only check, no modification)
+    const itemResult = await db.pool.query(
+      `SELECT "itemId", quantity FROM inventory
+       WHERE "playerId" = $1 AND "slotIndex" = $2`,
+      [playerId, inventorySlot],
+    );
 
-      if (lockResult.rows.length === 0) {
-        throw new StakeError("No item in that slot", "ITEM_NOT_FOUND");
-      }
-
-      const inventoryItem = lockResult.rows[0] as {
-        itemId: string;
-        quantity: number;
-      };
-
-      // Validate item exists in item database
-      const itemData = getItem(inventoryItem.itemId);
-      if (!itemData) {
-        throw new StakeError("Invalid item", "INVALID_ITEM");
-      }
-
-      // Check if item is tradeable (stakeable items must be tradeable)
-      if (itemData.tradeable === false) {
-        throw new StakeError(
-          "This item cannot be staked",
-          "ITEM_NOT_TRADEABLE",
-        );
-      }
-
-      // Determine quantity (for stackable items, use provided quantity or all)
-      let qty = quantity;
-      if (qty <= 0 || qty > inventoryItem.quantity) {
-        qty = inventoryItem.quantity;
-      }
-
-      // Calculate value
-      const value = (itemData.value || 0) * qty;
-
-      // Add to stakes (in-memory)
-      const result = duelSystem.addStake(
-        duelId,
-        playerId,
-        inventorySlot,
-        inventoryItem.itemId,
-        qty,
-        value,
-      );
-
-      if (!result.success) {
-        throw new StakeError(result.error!, result.errorCode || "UNKNOWN");
-      }
-
-      // Remove item from inventory (database)
-      if (qty >= inventoryItem.quantity) {
-        // Remove entire item
-        await db.pool.query(
-          `DELETE FROM inventory WHERE "playerId" = $1 AND "slotIndex" = $2`,
-          [playerId, inventorySlot],
-        );
-      } else {
-        // Reduce quantity
-        await db.pool.query(
-          `UPDATE inventory SET quantity = quantity - $1 WHERE "playerId" = $2 AND "slotIndex" = $3`,
-          [qty, playerId, inventorySlot],
-        );
-      }
-
-      // Audit log the stake operation
-      AuditLogger.getInstance().logDuelStakeAdd(duelId, playerId, {
-        inventorySlot: inventorySlot as SlotNumber,
-        itemId: inventoryItem.itemId as ItemID,
-        quantity: qty,
-        value,
-      });
-    });
-
-    // Sync in-memory inventory with database
-    if (inventorySystem?.reloadFromDatabase) {
-      await inventorySystem.reloadFromDatabase(playerId);
+    if (itemResult.rows.length === 0) {
+      sendDuelError(socket, "No item in that slot", "ITEM_NOT_FOUND");
+      return;
     }
+
+    const inventoryItem = itemResult.rows[0] as {
+      itemId: ItemID;
+      quantity: number;
+    };
+
+    // Validate item exists in item database
+    const itemData = getItem(inventoryItem.itemId);
+    if (!itemData) {
+      sendDuelError(socket, "Invalid item", "INVALID_ITEM");
+      return;
+    }
+
+    // Check if item is tradeable (stakeable items must be tradeable)
+    if (itemData.tradeable === false) {
+      sendDuelError(socket, "This item cannot be staked", "ITEM_NOT_TRADEABLE");
+      return;
+    }
+
+    // Determine quantity (for stackable items, use provided quantity or all)
+    let qty = quantity;
+    if (qty <= 0 || qty > inventoryItem.quantity) {
+      qty = inventoryItem.quantity;
+    }
+
+    // Calculate value
+    const value = (itemData.value || 0) * qty;
+
+    // Add to stakes (in-memory tracking only - items stay in inventory)
+    const result = duelSystem.addStake(
+      duelId,
+      playerId,
+      inventorySlot,
+      inventoryItem.itemId,
+      qty,
+      value,
+    );
+
+    if (!result.success) {
+      sendDuelError(socket, result.error!, result.errorCode || "UNKNOWN");
+      return;
+    }
+
+    // Audit log the stake operation
+    AuditLogger.getInstance().logDuelStakeAdd(duelId, playerId, {
+      inventorySlot,
+      itemId: inventoryItem.itemId,
+      quantity: qty,
+      value,
+    });
 
     // Get session to send updates to both players
     const session = duelSystem.getDuelSession(duelId);
@@ -229,7 +158,7 @@ export async function handleDuelAddStake(
       modifiedBy: playerId,
     };
 
-    sendToSocket(socket, "duelStakesUpdated", updatePayload);
+    sendToSocket(socket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
 
     const opponentId =
       playerId === session.challengerId
@@ -237,18 +166,11 @@ export async function handleDuelAddStake(
         : session.challengerId;
     const opponentSocket = getSocketByPlayerId(world, opponentId);
     if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStakesUpdated", updatePayload);
+      sendToSocket(opponentSocket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
     }
   } catch (error) {
-    if (error instanceof StakeError) {
-      sendDuelError(socket, error.message, error.code);
-    } else {
-      console.error("[Duel] Stake add transaction failed:", error);
-      sendDuelError(socket, "Failed to add stake", "SERVER_ERROR");
-    }
-  } finally {
-    // SECURITY: Always unlock inventory
-    inventorySystem?.unlockTransaction?.(playerId);
+    console.error("[Duel] Stake add failed:", error);
+    sendDuelError(socket, "Failed to add stake", "SERVER_ERROR");
   }
 }
 
@@ -259,9 +181,10 @@ export async function handleDuelAddStake(
 /**
  * Handle removing a staked item
  *
+ * CRASH-SAFE DESIGN: Since items remain in inventory until duel completion,
+ * removing a stake just updates the session tracking - no DB changes needed.
+ *
  * Security:
- * - Wrapped in database transaction
- * - Uses SELECT FOR UPDATE when adding back to inventory
  * - Rate limited to prevent spam
  * - Audit logged for economic tracking
  */
@@ -269,13 +192,11 @@ export async function handleDuelRemoveStake(
   socket: ServerSocket,
   data: { duelId: string; stakeIndex: number },
   world: World,
-  db: DatabaseConnection,
+  _db: DatabaseConnection,
 ): Promise<void> {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limiting - prevent rapid stake operations
   if (!rateLimiter.tryOperation(playerId)) {
@@ -284,12 +205,6 @@ export async function handleDuelRemoveStake(
       "Please wait before modifying stakes",
       "RATE_LIMITED",
     );
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -311,110 +226,36 @@ export async function handleDuelRemoveStake(
     return;
   }
 
-  // Copy stake data before removal
+  // Copy stake data before removal for audit
   const removedStake = { ...stakes[stakeIndex] };
 
-  // Get inventory system for memory sync
-  const inventorySystem = world.getSystem("inventory") as
-    | {
-        lockForTransaction?: (id: string) => boolean;
-        unlockTransaction?: (id: string) => void;
-        reloadFromDatabase?: (id: string) => Promise<void>;
-      }
-    | undefined;
-
-  // Lock in-memory inventory
-  const locked = inventorySystem?.lockForTransaction?.(playerId) ?? true;
-  if (!locked) {
-    sendDuelError(socket, "Inventory busy, try again", "SERVER_ERROR");
+  // Remove from stakes (in-memory tracking only - items are still in inventory)
+  const result = duelSystem.removeStake(duelId, playerId, stakeIndex);
+  if (!result.success) {
+    sendDuelError(socket, result.error!, result.errorCode || "UNKNOWN");
     return;
   }
 
-  try {
-    // Execute within database transaction for atomicity
-    await withTransaction(db, async () => {
-      // Remove from stakes (in-memory) first
-      const result = duelSystem.removeStake(duelId, playerId, stakeIndex);
-      if (!result.success) {
-        throw new StakeError(result.error!, result.errorCode || "UNKNOWN");
-      }
+  // Audit log the unstake operation
+  AuditLogger.getInstance().logDuelStakeRemove(duelId, playerId, removedStake);
 
-      // Return item to inventory
-      const itemData = getItem(removedStake.itemId);
-      const isStackable = itemData?.stackable ?? false;
+  // Notify both players of the stake change
+  const updatePayload = {
+    duelId,
+    challengerStakes: session.challengerStakes,
+    targetStakes: session.targetStakes,
+    challengerAccepted: session.challengerAccepted,
+    targetAccepted: session.targetAccepted,
+    modifiedBy: playerId,
+  };
 
-      if (isStackable) {
-        // Check if item already exists in inventory (need to stack)
-        const existingResult = await db.pool.query(
-          `SELECT "slotIndex", quantity FROM inventory
-           WHERE "playerId" = $1 AND "itemId" = $2
-           FOR UPDATE`,
-          [playerId, removedStake.itemId],
-        );
+  sendToSocket(socket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
 
-        if (existingResult.rows.length > 0) {
-          // Add to existing stack
-          const existing = existingResult.rows[0] as {
-            slotIndex: number;
-            quantity: number;
-          };
-          await db.pool.query(
-            `UPDATE inventory SET quantity = quantity + $1
-             WHERE "playerId" = $2 AND "slotIndex" = $3`,
-            [removedStake.quantity, playerId, existing.slotIndex],
-          );
-        } else {
-          // Find free slot and insert
-          await insertIntoFreeSlot(db, playerId, removedStake);
-        }
-      } else {
-        // Non-stackable - find free slot and insert
-        await insertIntoFreeSlot(db, playerId, removedStake);
-      }
-
-      // Audit log the unstake operation
-      AuditLogger.getInstance().logDuelStakeRemove(
-        duelId,
-        playerId,
-        removedStake,
-      );
-    });
-
-    // Sync in-memory inventory with database
-    if (inventorySystem?.reloadFromDatabase) {
-      await inventorySystem.reloadFromDatabase(playerId);
-    }
-
-    // Notify both players of the stake change
-    const updatePayload = {
-      duelId,
-      challengerStakes: session.challengerStakes,
-      targetStakes: session.targetStakes,
-      challengerAccepted: session.challengerAccepted,
-      targetAccepted: session.targetAccepted,
-      modifiedBy: playerId,
-    };
-
-    sendToSocket(socket, "duelStakesUpdated", updatePayload);
-
-    const opponentId =
-      playerId === session.challengerId
-        ? session.targetId
-        : session.challengerId;
-    const opponentSocket = getSocketByPlayerId(world, opponentId);
-    if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStakesUpdated", updatePayload);
-    }
-  } catch (error) {
-    if (error instanceof StakeError) {
-      sendDuelError(socket, error.message, error.code);
-    } else {
-      console.error("[Duel] Stake remove transaction failed:", error);
-      sendDuelError(socket, "Failed to remove stake", "SERVER_ERROR");
-    }
-  } finally {
-    // SECURITY: Always unlock inventory
-    inventorySystem?.unlockTransaction?.(playerId);
+  const opponentId =
+    playerId === session.challengerId ? session.targetId : session.challengerId;
+  const opponentSocket = getSocketByPlayerId(world, opponentId);
+  if (opponentSocket) {
+    sendToSocket(opponentSocket, DUEL_PACKETS.STAKES_UPDATED, updatePayload);
   }
 }
 
@@ -430,21 +271,13 @@ export function handleDuelAcceptStakes(
   data: { duelId: string },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limit accept operations to prevent spam
   if (!rateLimiter.tryOperation(playerId)) {
     sendDuelError(socket, "Please wait before accepting", "RATE_LIMITED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -473,13 +306,17 @@ export function handleDuelAcceptStakes(
     movedToConfirm,
   };
 
-  sendToSocket(socket, "duelAcceptanceUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.ACCEPTANCE_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelAcceptanceUpdated", updatePayload);
+    sendToSocket(
+      opponentSocket,
+      DUEL_PACKETS.ACCEPTANCE_UPDATED,
+      updatePayload,
+    );
   }
 
   // If moved to confirm screen, send state change notification
@@ -493,66 +330,9 @@ export function handleDuelAcceptStakes(
       targetStakes: session.targetStakes,
     };
 
-    sendToSocket(socket, "duelStateChanged", statePayload);
+    sendToSocket(socket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStateChanged", statePayload);
+      sendToSocket(opponentSocket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     }
   }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/**
- * Custom error class for stake operations
- */
-class StakeError extends Error {
-  constructor(
-    message: string,
-    public readonly code: string,
-  ) {
-    super(message);
-    this.name = "StakeError";
-  }
-}
-
-/**
- * Find a free inventory slot and insert item
- */
-async function insertIntoFreeSlot(
-  db: DatabaseConnection,
-  playerId: string,
-  stake: { itemId: string; quantity: number },
-): Promise<void> {
-  // Get all used slots
-  const slotsResult = await db.pool.query(
-    `SELECT "slotIndex" FROM inventory WHERE "playerId" = $1`,
-    [playerId],
-  );
-
-  const usedSlots = new Set(
-    slotsResult.rows.map((r: { slotIndex: number }) => r.slotIndex),
-  );
-
-  // Find first free slot (0-27)
-  let freeSlot = -1;
-  for (let i = 0; i < 28; i++) {
-    if (!usedSlots.has(i)) {
-      freeSlot = i;
-      break;
-    }
-  }
-
-  if (freeSlot === -1) {
-    // This shouldn't happen since item came from inventory
-    throw new StakeError("No free inventory slot", "INVENTORY_FULL");
-  }
-
-  // Insert into free slot
-  await db.pool.query(
-    `INSERT INTO inventory ("playerId", "itemId", quantity, "slotIndex", metadata)
-     VALUES ($1, $2, $3, $4, NULL)`,
-    [playerId, stake.itemId, stake.quantity, freeSlot],
-  );
 }

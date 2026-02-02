@@ -30,6 +30,22 @@ export type CameraMode = "orbit" | "flythrough" | "player";
 // ============== CREATION MODE TYPES ==============
 
 /**
+ * Configuration for town landmark generation
+ */
+export interface TownLandmarkConfig {
+  /** Enable fences around building lots (villages and towns) */
+  fencesEnabled: boolean;
+  /** Density of fence posts (0-1, higher = more posts) */
+  fenceDensity: number;
+  /** Enable lampposts in villages (always enabled for towns) */
+  lamppostsInVillages: boolean;
+  /** Enable market stalls in town plazas */
+  marketStallsEnabled: boolean;
+  /** Enable decorative elements (barrels, crates, planters) */
+  decorationsEnabled: boolean;
+}
+
+/**
  * Configuration for town generation during world creation
  */
 export interface TownGenerationConfig {
@@ -49,6 +65,8 @@ export interface TownGenerationConfig {
   maxSlope: number;
   /** Preferred biomes for town placement (higher weight = more likely) */
   biomePreferences: Record<string, number>;
+  /** Landmark generation configuration */
+  landmarks: TownLandmarkConfig;
 }
 
 /**
@@ -1043,6 +1061,17 @@ export type WorldBuilderAction =
 // ============== DEFAULT VALUES ==============
 
 /**
+ * Default town landmark configuration
+ */
+export const DEFAULT_LANDMARK_CONFIG: TownLandmarkConfig = {
+  fencesEnabled: true,
+  fenceDensity: 0.7,
+  lamppostsInVillages: true,
+  marketStallsEnabled: true,
+  decorationsEnabled: true,
+};
+
+/**
  * Default town generation configuration
  */
 export const DEFAULT_TOWN_CONFIG: TownGenerationConfig = {
@@ -1065,6 +1094,7 @@ export const DEFAULT_TOWN_CONFIG: TownGenerationConfig = {
     mountains: 0.1,
     lakes: 0.0,
   },
+  landmarks: DEFAULT_LANDMARK_CONFIG,
 };
 
 /**

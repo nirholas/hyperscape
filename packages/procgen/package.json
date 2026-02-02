@@ -27,13 +27,13 @@
       "types": "./dist/building/index.d.ts",
       "import": "./dist/building/index.js"
     },
-    "./building/viewer": {
-      "types": "./dist/building/viewer/index.d.ts",
-      "import": "./dist/building/viewer/index.js"
-    },
     "./building/town": {
       "types": "./dist/building/town/index.d.ts",
       "import": "./dist/building/town/index.js"
+    },
+    "./building/viewer": {
+      "types": "./dist/building/viewer/index.d.ts",
+      "import": "./dist/building/viewer/index.js"
     },
     "./terrain": {
       "types": "./dist/terrain/index.d.ts",
@@ -67,7 +67,7 @@
     "viewer": "vite viewer"
   },
   "peerDependencies": {
-    "three": ">=0.170.0",
+    "three": ">=0.182.0",
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
     "@hyperscape/shared": "workspace:*"
@@ -80,8 +80,8 @@
     "@types/node": "^24.8.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/three": "^0.170.0",
-    "three": "^0.180.0",
+    "@types/three": "0.182.0",
+    "three": "0.182.0",
     "typescript": "^5.9.2",
     "vitest": "^4.0.6",
     "vite": "^6.3.5"

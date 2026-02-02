@@ -29,6 +29,8 @@ export interface Theme {
       panelPrimary: string;
       /** Semi-transparent panel background (secondary) - use for panel sections */
       panelSecondary: string;
+      /** Hover state background */
+      hover: string;
     };
     text: {
       primary: string;
@@ -50,6 +52,7 @@ export interface Theme {
       secondary: string;
       hover: string;
       active: string;
+      /** Gold accent color for currency, stakes */
       gold: string;
     };
     state: {
@@ -208,6 +211,7 @@ export const baseTheme: Theme = {
       glass: "rgba(28, 28, 32, 0.78)",
       panelPrimary: "rgba(35, 35, 42, 0.75)", // Lighter panel background
       panelSecondary: "rgba(58, 58, 68, 0.75)", // Much more visible panel section
+      hover: "#2a2a32", // Hover state background
     },
     text: {
       primary: "#fafafa", // Zinc-50
@@ -375,6 +379,7 @@ export const hyperscapeTheme: Theme = {
       glass: "rgba(18, 18, 22, 0.82)", // Lighter glass
       panelPrimary: "rgba(25, 25, 32, 0.78)", // Lighter panel background
       panelSecondary: "rgba(45, 45, 56, 0.82)", // Much more visible panel section
+      hover: "#2a2a32", // Hover state background
     },
     text: {
       primary: "#f8f4ec", // Brighter warm white

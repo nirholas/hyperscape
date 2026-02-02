@@ -94,21 +94,6 @@ const DEFAULT_BIOME_SUITABILITY: Record<string, number> = {
   lakes: 0.0,
 };
 
-const BUILDING_CONFIG: Record<
-  TownBuildingType,
-  { width: number; depth: number; priority: number }
-> = {
-  bank: { width: 8, depth: 6, priority: 1 },
-  store: { width: 7, depth: 5, priority: 2 },
-  anvil: { width: 5, depth: 4, priority: 3 },
-  well: { width: 3, depth: 3, priority: 4 },
-  house: { width: 6, depth: 5, priority: 5 },
-  inn: { width: 10, depth: 12, priority: 2 },
-  smithy: { width: 7, depth: 7, priority: 3 },
-  "simple-house": { width: 6, depth: 6, priority: 6 },
-  "long-house": { width: 5, depth: 12, priority: 6 },
-};
-
 /** Town configuration loaded from world-config.json (exported for testing) */
 export interface TownConfig {
   townCount: number;
@@ -773,6 +758,7 @@ export class TownSystem extends System {
         position: l.position,
         rotation: l.rotation,
         size: l.size,
+        metadata: l.metadata,
       }),
     );
 
@@ -864,6 +850,65 @@ export class TownSystem extends System {
         town.position.z - r <= maxZ
       );
     });
+  }
+
+  /**
+   * Update signpost destinations after roads have been generated.
+   * Call this from RoadNetworkSystem after generating roads.
+   *
+   * @param roads - Array of roads with fromTownId and toTownId
+   */
+  updateSignpostDestinations(
+    roads: Array<{ id: string; fromTownId: string; toTownId: string }>,
+  ): void {
+    // Build map of road connections: townId -> array of destination town IDs
+    const townConnections = new Map<string, string[]>();
+    for (const road of roads) {
+      // From town -> to town
+      const fromConns = townConnections.get(road.fromTownId) ?? [];
+      fromConns.push(road.toTownId);
+      townConnections.set(road.fromTownId, fromConns);
+
+      // To town -> from town (bidirectional roads)
+      const toConns = townConnections.get(road.toTownId) ?? [];
+      toConns.push(road.fromTownId);
+      townConnections.set(road.toTownId, toConns);
+    }
+
+    // Build town ID -> name map
+    const townNames = new Map<string, string>();
+    for (const town of this.towns) {
+      townNames.set(town.id, town.name);
+    }
+
+    // Update signpost metadata for each town
+    for (const town of this.towns) {
+      if (!town.landmarks) continue;
+
+      const destinations = townConnections.get(town.id) ?? [];
+
+      // Find signposts and assign destinations based on entry point order
+      const signposts = town.landmarks.filter((l) => l.type === "signpost");
+
+      for (let i = 0; i < signposts.length && i < destinations.length; i++) {
+        const signpost = signposts[i];
+        const destTownId = destinations[i];
+        const destTownName = townNames.get(destTownId);
+
+        if (destTownName) {
+          signpost.metadata = {
+            ...signpost.metadata,
+            destination: destTownName,
+            destinationId: destTownId,
+          };
+        }
+      }
+    }
+
+    Logger.system(
+      "TownSystem",
+      `Updated signpost destinations for ${this.towns.length} towns`,
+    );
   }
 
   shouldAvoidSpawning(x: number, z: number, avoidRadius: number = 30): boolean {

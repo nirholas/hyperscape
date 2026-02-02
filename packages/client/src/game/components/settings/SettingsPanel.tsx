@@ -74,7 +74,9 @@ export function SettingsPanel({
   style,
 }: SettingsPanelProps): React.ReactElement {
   const theme = useTheme();
-  const settings = settingsHook ?? useSettings(settingsOptions);
+  // Always call useSettings unconditionally (React hooks rules)
+  const internalSettings = useSettings(settingsOptions);
+  const settings = settingsHook ?? internalSettings;
 
   const [activeCategory, setActiveCategory] =
     useState<SettingCategory>(initialCategory);

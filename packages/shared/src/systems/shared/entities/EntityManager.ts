@@ -9,6 +9,7 @@
  */
 
 import { World } from "../../../core/World";
+import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
 import { Entity, EntityConfig } from "../../../entities/Entity";
 import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
@@ -25,6 +26,10 @@ import {
   AltarEntity,
   type AltarEntityConfig,
 } from "../../../entities/world/AltarEntity";
+import {
+  RunecraftingAltarEntity,
+  type RunecraftingAltarEntityConfig,
+} from "../../../entities/world/RunecraftingAltarEntity";
 import {
   StarterChestEntity,
   type StarterChestEntityConfig,
@@ -588,6 +593,13 @@ export class EntityManager extends SystemBase {
       case "altar":
         entity = new AltarEntity(this.world, config as AltarEntityConfig);
         break;
+      case EntityType.RUNECRAFTING_ALTAR:
+      case "runecrafting_altar":
+        entity = new RunecraftingAltarEntity(
+          this.world,
+          config as unknown as RunecraftingAltarEntityConfig,
+        );
+        break;
       case EntityType.STARTER_CHEST:
       case "starter_chest":
         entity = new StarterChestEntity(
@@ -1108,6 +1120,7 @@ export class EntityManager extends SystemBase {
       movementType: npcDataFromDB?.movement.type ?? "wander", // Default to wander if not specified
       aggroRange: this.getMobAggroRange(mobType),
       combatRange: this.getMobCombatRange(mobType),
+      leashRange: this.getMobLeashRange(mobType),
       wanderRadius: this.getMobWanderRadius(mobType),
       xpReward: this.getMobXPReward(mobType, level),
       lootTable: this.getMobLootTable(mobType),
@@ -1695,6 +1708,17 @@ export class EntityManager extends SystemBase {
       return 1.5; // Default: 1.5 meters melee range
     }
     return npcData.combat.combatRange;
+  }
+
+  private getMobLeashRange(mobType: string): number {
+    const npcData = getNPCById(mobType);
+    if (!npcData) {
+      return COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE; // Extended default: 42 tiles
+    }
+    // leashRange from manifest, or fallback to default
+    return (
+      npcData.combat.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE
+    );
   }
 
   private getMobXPReward(mobType: string, level: number): number {

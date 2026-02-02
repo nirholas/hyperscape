@@ -41,8 +41,12 @@ const STYLE_BONUSES: Readonly<Record<CombatStyle, Readonly<StyleBonus>>> = {
 } as const;
 
 /** Accurate: +3 atk, Aggressive: +3 str, Defensive: +3 def, Controlled: +1 all */
-export function getStyleBonus(style: CombatStyle): Readonly<StyleBonus> {
-  return STYLE_BONUSES[style];
+export function getStyleBonus(
+  style: CombatStyle | string,
+): Readonly<StyleBonus> {
+  // Return style bonus or default to accurate-like bonus for unknown styles
+  // (handles ranged styles like "rapid"/"longrange" and magic "autocast")
+  return STYLE_BONUSES[style as CombatStyle] ?? STYLE_BONUSES.accurate;
 }
 
 export interface CombatStats {

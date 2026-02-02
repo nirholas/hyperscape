@@ -14,13 +14,11 @@
 import THREE, {
   uniform,
   Fn,
-  If,
   float,
   vec3,
   vec4,
   vec2,
   sin,
-  cos,
   uv,
   floor,
   instanceIndex,
@@ -43,7 +41,6 @@ import THREE, {
   mul,
   atan,
   smoothstep,
-  fract,
 } from "../../../extras/three/three";
 import { SpriteNodeMaterial } from "three/webgpu";
 import { System } from "../infrastructure/System";

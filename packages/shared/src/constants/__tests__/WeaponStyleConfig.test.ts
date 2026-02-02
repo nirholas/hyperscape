@@ -73,15 +73,18 @@ describe("WeaponStyleConfig", () => {
     });
 
     it("returns OSRS-accurate styles for magic weapons", () => {
-      // Staves and wands have accurate, longrange, and autocast in OSRS
+      // Staves and wands have melee bash styles PLUS autocast in OSRS
+      // @see https://oldschool.runescape.wiki/w/Staff (Bash=accurate, Pound=aggressive, Focus=defensive)
       expect(getAvailableStyles(WeaponType.STAFF)).toEqual([
         "accurate",
-        "longrange",
+        "aggressive",
+        "defensive",
         "autocast",
       ]);
       expect(getAvailableStyles(WeaponType.WAND)).toEqual([
         "accurate",
-        "longrange",
+        "aggressive",
+        "defensive",
         "autocast",
       ]);
     });

@@ -18,6 +18,7 @@ export * from "./TownSystem";
 export * from "./POISystem";
 export * from "./RoadNetworkSystem";
 export * from "./BuildingRenderingSystem";
+export * from "./ProceduralTownLandmarks";
 export * from "./BuildingCollisionService";
 export * from "./GrassExclusionManager";
 export * from "./ProcgenRockCache";

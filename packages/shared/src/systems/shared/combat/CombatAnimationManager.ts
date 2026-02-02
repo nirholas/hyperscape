@@ -139,6 +139,11 @@ export class CombatAnimationManager {
     if (isEquipmentSystem(equipmentSystem)) {
       const equipment = equipmentSystem.getPlayerEquipment(entityId);
 
+      // Check if player has a spell selected (autocast or manual cast)
+      const selectedSpell = (
+        playerEntity as { data?: { selectedSpell?: string } }
+      )?.data?.selectedSpell;
+
       if (equipment?.weapon?.item) {
         const weaponItem = equipment.weapon.item;
         // Normalize to lowercase for comparison (JSON may have uppercase values)
@@ -147,12 +152,18 @@ export class CombatAnimationManager {
         const attackType =
           weaponItem.attackType?.toLowerCase?.() ?? weaponItem.attackType;
 
-        if (
+        const isMagicWeapon =
           attackType === "magic" ||
           weaponType === "staff" ||
-          weaponType === "wand"
-        ) {
+          weaponType === "wand";
+
+        if (isMagicWeapon && selectedSpell) {
+          // OSRS-accurate: Magic weapons with autocast use spell cast animation
           combatEmote = "spell_cast";
+        } else if (isMagicWeapon) {
+          // OSRS-accurate: Magic weapons WITHOUT autocast use melee bonk (crush)
+          // Staffs default to punching/combat animation when no spell selected
+          combatEmote = "combat";
         } else if (weaponType === "sword") {
           combatEmote = "sword_swing";
         } else if (
@@ -164,9 +175,6 @@ export class CombatAnimationManager {
         }
       } else {
         // No weapon equipped - check if player has a spell selected (unarmed casting)
-        const selectedSpell = (
-          playerEntity as { data?: { selectedSpell?: string } }
-        )?.data?.selectedSpell;
         if (selectedSpell) {
           combatEmote = "spell_cast";
         }

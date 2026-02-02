@@ -8,6 +8,7 @@ import { AppProvider } from "./contexts/AppContext";
 import { NavigationProvider } from "./contexts/NavigationContext";
 import { ArmorFittingPage } from "./pages/ArmorFittingPage";
 import { AssetsPage } from "./pages/AssetsPage";
+import { BatchSpritesPage } from "./pages/BatchSpritesPage";
 import { BuildingGenPage } from "./pages/BuildingGenPage";
 import { EquipmentPage } from "./pages/EquipmentPage";
 import { FlowerGenPage } from "./pages/FlowerGenPage";
@@ -70,6 +71,7 @@ function AppLayout() {
               path={ROUTES.RETARGET_ANIMATE}
               element={<RetargetAnimatePage />}
             />
+            <Route path={ROUTES.BATCH_SPRITES} element={<BatchSpritesPage />} />
             <Route path={ROUTES.WORLD_BUILDER} element={<WorldBuilderPage />} />
             <Route path={ROUTES.WORLD_EDITOR} element={<WorldEditorPage />} />
             <Route path={ROUTES.MANIFESTS} element={<ManifestsPage />} />

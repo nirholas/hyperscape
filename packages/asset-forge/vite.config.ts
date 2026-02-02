@@ -121,12 +121,23 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: uiPort,
+      // Allow Vite to serve files from workspace packages (procgen, shared, etc.)
+      fs: {
+        allow: [
+          // Allow the monorepo root and all packages
+          path.resolve(__dirname, "../.."),
+        ],
+      },
       proxy: {
         "/api": {
           target: `http://localhost:${apiPort}`,
           changeOrigin: true,
         },
         "/assets": {
+          target: `http://localhost:${apiPort}`,
+          changeOrigin: true,
+        },
+        "/game-models": {
           target: `http://localhost:${apiPort}`,
           changeOrigin: true,
         },

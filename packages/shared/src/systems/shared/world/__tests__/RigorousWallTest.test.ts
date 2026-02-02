@@ -182,7 +182,7 @@ describe("Rigorous Wall Navigation - Exhaustive Testing", () => {
 
     let solidWallsTested = 0;
     let solidWallsBlocking = 0;
-    let failures: string[] = [];
+    const failures: string[] = [];
 
     for (const wall of floor0.wallSegments) {
       if (wall.hasOpening) continue; // Skip doors/arches
@@ -254,7 +254,7 @@ describe("Rigorous Wall Navigation - Exhaustive Testing", () => {
     );
 
     let doorsPassable = 0;
-    let failures: string[] = [];
+    const failures: string[] = [];
 
     for (const door of doorWalls) {
       // Calculate outside tile
@@ -643,7 +643,7 @@ describe("Rigorous Wall Navigation - Exhaustive Testing", () => {
     expect(allBlocked).toBe(true);
   });
 
-  it("CRITICAL: Test that ground player cannot enter non-door building tiles", () => {
+  it("CRITICAL: Test ground player cannot enter non-door building tiles", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
     const floor0 = building.floors[0];
 
@@ -662,7 +662,6 @@ describe("Rigorous Wall Navigation - Exhaustive Testing", () => {
     );
 
     let nonDoorTilesTested = 0;
-    let nonDoorTilesBlocked = 0;
     const failures: string[] = [];
 
     for (const key of floor0.walkableTiles) {

@@ -11,6 +11,7 @@
 import React, { useState } from "react";
 import type { ClientWorld } from "../../types";
 import { useThemeStore } from "@/ui";
+import { formatItemName } from "@/utils";
 
 interface SmeltingBar {
   barItemId: string;
@@ -25,13 +26,6 @@ interface SmeltingPanelProps {
   availableBars: SmeltingBar[];
   world: ClientWorld;
   onClose: () => void;
-}
-
-/**
- * Format item name from itemId
- */
-function formatItemName(itemId: string): string {
-  return itemId.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
 }
 
 /**

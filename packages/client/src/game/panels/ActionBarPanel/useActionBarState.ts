@@ -177,7 +177,8 @@ export function useActionBarState({
     [gridSize],
   );
 
-  // Update window size when slot count changes
+  // Update window size and position when slot count changes
+  // Recalculate position to keep action bar centered horizontally AND anchored to bottom
   useEffect(() => {
     if (!windowId) return;
 
@@ -185,10 +186,21 @@ export function useActionBarState({
     const width = snapToGrid(dims.width + BORDER_BUFFER);
     const height = snapToGrid(dims.height + BORDER_BUFFER);
 
+    // Get viewport dimensions for positioning
+    const viewportWidth =
+      typeof window !== "undefined" ? window.innerWidth : 1920;
+    const viewportHeight =
+      typeof window !== "undefined" ? window.innerHeight : 1080;
+
+    // Center horizontally and anchor to bottom of viewport
+    const centeredX = Math.floor(viewportWidth / 2 - width / 2);
+    const bottomAnchoredY = viewportHeight - height;
+
     updateWindow(windowId, {
       minSize: { width, height },
       maxSize: { width, height },
       size: { width, height },
+      position: { x: centeredX, y: bottomAnchoredY },
     });
   }, [windowId, slotCount, isEditMode, isLocked, updateWindow, snapToGrid]);
 

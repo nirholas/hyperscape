@@ -10,7 +10,7 @@
 import React from "react";
 import { DragOverlay as DndKitDragOverlay } from "@dnd-kit/core";
 import { getItem } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import type { DndKitActiveItem } from "./DragDropCoordinator";
 
 /** Inventory item for overlay rendering */
@@ -68,7 +68,7 @@ function DragOverlayContent({
       inventory[index] || (data?.item as { itemId: string } | undefined);
     if (item) {
       const itemData = getItem(item.itemId);
-      icon = getItemIcon(item.itemId);
+      icon = <ItemIcon itemId={item.itemId} size={32} />;
       label = itemData?.name || item.itemId;
     }
   } else if (id.startsWith("prayer-")) {

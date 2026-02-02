@@ -46,6 +46,7 @@ import {
   validateTransactionRequest,
   executeSecureTransaction,
   executeInventoryTransaction,
+  emitInventorySyncEvents,
   sendToSocket,
   sendErrorToast,
   sendSuccessToast,
@@ -96,6 +97,15 @@ export function handleStoreOpen(
   const playerId = getPlayerId(socket);
   if (!playerId) {
     console.warn("[StoreHandler] No player on socket for storeOpen");
+    return;
+  }
+
+  // Block shop access during duels
+  const duelSystemStore = world.getSystem("duel") as
+    | { isPlayerInDuel?: (id: string) => boolean }
+    | undefined;
+  if (duelSystemStore?.isPlayerInDuel?.(playerId)) {
+    sendErrorToast(socket, "You can't use a shop during a duel.");
     return;
   }
 
@@ -349,7 +359,12 @@ export async function handleStoreBuy(
     coins: result.newCoinBalance,
   });
 
-  // NOTE: emitInventorySyncEvents removed - reloadFromDatabase() handles in-memory sync
+  // Sync CoinPouchSystem in-memory cache with the new DB balance.
+  // reloadFromDatabase() only reloads inventory items, NOT coins.
+  // Without this, the stale in-memory balance overwrites the DB on next auto-save.
+  emitInventorySyncEvents(ctx, {
+    newCoinBalance: result.newCoinBalance,
+  });
 
   sendSuccessToast(
     socket,
@@ -400,6 +415,23 @@ export async function handleStoreSell(
   if (!isValidQuantity(data.quantity)) {
     sendErrorToast(socket, "Invalid quantity");
     return;
+  }
+
+  // Block selling staked items during duels
+  const duelSystemSell = world.getSystem("duel") as
+    | {
+        getStakedSlots?: (id: string) => Set<number>;
+        isPlayerInDuel?: (id: string) => boolean;
+      }
+    | undefined;
+  if (duelSystemSell?.isPlayerInDuel?.(ctx.playerId)) {
+    const stakedSlotsSell = duelSystemSell.getStakedSlots?.(ctx.playerId);
+    if (stakedSlotsSell && stakedSlotsSell.size > 0) {
+      // Player has staked items — block all sell operations during duel
+      // (We can't know which slots will be affected without querying the DB first)
+      sendErrorToast(socket, "You can't sell items during a duel.");
+      return;
+    }
   }
 
   // Step 3: Validate store exists and accepts buyback
@@ -554,7 +586,12 @@ export async function handleStoreSell(
     coins: result.newCoinBalance,
   });
 
-  // NOTE: emitInventorySyncEvents removed - reloadFromDatabase() handles in-memory sync
+  // Sync CoinPouchSystem in-memory cache with the new DB balance.
+  // reloadFromDatabase() only reloads inventory items, NOT coins.
+  // Without this, the stale in-memory balance overwrites the DB on next auto-save.
+  emitInventorySyncEvents(ctx, {
+    newCoinBalance: result.newCoinBalance,
+  });
 
   sendSuccessToast(
     socket,

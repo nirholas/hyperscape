@@ -59,7 +59,6 @@ import THREE, {
   float,
   smoothstep,
   positionWorld,
-  normalWorld,
   step,
   max,
   min,
@@ -1276,8 +1275,6 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     const isRoof = step(float(0.5), surfaceType).mul(
       step(surfaceType, float(0.85)),
     ); // 0.67 ± 0.18
-    const isCeiling = step(float(0.85), surfaceType); // 1.0 (ceiling uses floor pattern but interior)
-
     // === BRICK PATTERN (materialId ~= 0.0) ===
     const brickResult = brickPattern(scaledUV);
     const isBrick = brickResult.x;
@@ -1368,7 +1365,6 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     // === PLAIN STUCCO PATTERN (materialId ~= 0.6) ===
     const stuccoResult = stuccoPattern(scaledUV);
     const stuccoVariation = stuccoResult.x;
-    const stuccoLodFade = stuccoResult.y;
     // Stucco variation already handles LOD internally
     const plainStuccoSurface = mix(
       uStuccoBase,
@@ -2005,30 +2001,6 @@ function createBuildingRoofMaterial(): RoofOcclusionMaterial {
   // ========== PROCEDURAL COLOR NODE ==========
   // Reuse the same procedural texturing as the wall material
 
-  // Brick colors
-  const uBrickBase = uniform(BUILDING_BASE_COLOR);
-  const uBrickSecondary = uniform(BUILDING_SECONDARY_COLOR);
-  const uBrickMortar = uniform(BUILDING_MORTAR_COLOR);
-
-  // Stone colors
-  const uStoneBase = uniform(new THREE.Color("#9B9B9B"));
-  const uStoneSecondary = uniform(new THREE.Color("#787878"));
-  const uStoneMortar = uniform(new THREE.Color("#C8C8C8"));
-
-  // Timber colors (brighter)
-  const uTimberBeam = uniform(new THREE.Color("#6B5040"));
-  const uTimberStucco = uniform(new THREE.Color("#FFF5E8"));
-  const uTimberStuccoSecondary = uniform(new THREE.Color("#F5EBD8"));
-
-  // Stucco colors (brighter)
-  const uStuccoBase = uniform(new THREE.Color("#FFF8F0"));
-  const uStuccoSecondary = uniform(new THREE.Color("#F5EEE5"));
-
-  // Wood colors (brighter)
-  const uWoodBase = uniform(new THREE.Color("#A88030"));
-  const uWoodSecondary = uniform(new THREE.Color("#8B6028"));
-  const uWoodGrain = uniform(new THREE.Color("#705020"));
-
   // Roof colors (brighter warm brown)
   const uRoofBase = uniform(new THREE.Color("#A06048")); // Warm terracotta
   const uRoofSecondary = uniform(new THREE.Color("#B07050")); // Lighter brown
@@ -2037,28 +2009,16 @@ function createBuildingRoofMaterial(): RoofOcclusionMaterial {
     // Read vertex color for tinting
     const vertexColor = attribute("color", "vec3");
 
-    // Use UV2 for material ID (x=material type, y reserved)
-    const materialUV = uv(1);
-    const materialId = materialUV.x;
-
     // World position for texture coordinates
     const worldPos = positionWorld;
-    const worldNormal = normalWorld;
 
     // Triplanar scale
     const textureScale = float(0.5);
     const scaledPos = mul(worldPos, textureScale);
 
-    // Blending weights from normal (triplanar)
-    const blendWeights = abs(worldNormal);
-    const blendSum = add(add(blendWeights.x, blendWeights.y), blendWeights.z);
-    const normalizedBlend = div(blendWeights, max(blendSum, float(0.001)));
-
     // Simple procedural pattern for roofs - tile pattern
     const tileScaleX = float(2.0);
     const tileScaleZ = float(4.0);
-    const tileX = mul(fract(mul(scaledPos.x, tileScaleX)), float(2.0));
-    const tileZ = mul(fract(mul(scaledPos.z, tileScaleZ)), float(2.0));
 
     // Create tile variation
     const tileNoise = sin(

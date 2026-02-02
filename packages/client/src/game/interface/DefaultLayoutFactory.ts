@@ -4,12 +4,13 @@
  * Extracted from InterfaceManager to reduce file size and improve testability.
  *
  * Default Layout (flush, no overlaps, touching edges):
- * - Right column: Minimap (top, large) → [gap] → Combat → Skills/Prayer → Inventory → Menubar (bottom)
+ * - Right column: Minimap (top) → [gap] → Combat/Skills/Prayer → Inventory → Menubar (bottom)
  * - Left column: Quests (above chat) → Chat/Friends/Settings (bottom-left)
  * - Bottom center: Action bar
  *
- * The bottom stack (combat, skills, inventory, menubar) is attached together.
- * There is a gap between the minimap and the combat panel.
+ * The bottom stack (skills, inventory, menubar) is attached together.
+ * There is a gap between the minimap and the skills panel.
+ * Combat is now a tab in the skills/prayer window (first tab).
  * All panels in the right column share a consistent width.
  *
  * @packageDocumentation
@@ -76,12 +77,13 @@ export function getResponsivePanelSizing(panelId: string, viewport: Viewport) {
  * Creates the default window layout configuration
  *
  * Layout structure (flush, no overlaps):
- * - Right column top: Minimap (large, fills available space)
+ * - Right column top: Minimap (compact, preferred size)
  * - Gap between minimap and bottom stack
- * - Right column bottom stack (attached): Combat → Skills/Prayer → Inventory → Menubar (at bottom edge)
+ * - Right column bottom stack (attached): Combat/Skills/Prayer → Inventory → Menubar (at bottom edge)
  * - Left column: Quests (above chat) → Chat/Friends/Settings (bottom-left)
  * - Bottom center: Action bar
  *
+ * Combat is now the first tab in the skills/prayer window for a more compact layout.
  * All right column panels share consistent width.
  * The bottom stack panels touch each other, with the menubar flush to screen bottom.
  *
@@ -99,6 +101,7 @@ export function createDefaultWindows(): WindowConfig[] {
   const skillsConfig = getPanelConfig("skills");
   const inventoryConfig = getPanelConfig("inventory");
   const combatConfig = getPanelConfig("combat");
+  const chatConfig = getPanelConfig("chat");
 
   // Right column width - use panel minSize for consistent alignment
   // All right column panels share the same width (skillsConfig.minSize.width = 235)
@@ -106,45 +109,92 @@ export function createDefaultWindows(): WindowConfig[] {
   const rightColumnX = viewport.width - rightColumnWidth;
 
   // === RIGHT COLUMN HEIGHTS (no quests - moved to left) ===
-  // Fixed heights for specific panels (bottom stack: menubar -> inventory -> skills -> combat)
-  // Menubar height matches content - single row with tight wrapping (includes border buffer)
-  const menubarHeight = MENUBAR_DIMENSIONS.minHeight;
-  const inventoryHeight = Math.max(280, Math.round(viewport.height * 0.26)); // ~26% of viewport
-  const skillsHeight = Math.max(200, Math.round(viewport.height * 0.185)); // ~18.5% of viewport
-  const combatHeight = Math.max(
-    combatConfig.minSize.height,
-    Math.round(viewport.height * 0.15),
-  ); // ~15% of viewport
+  // Fixed heights for specific panels (bottom stack: menubar -> inventory -> skills/combat/prayer)
+  // Combat is now a tab in the skills window, not a separate panel
+  // Scale proportionally based on viewport, using minSize as floor
+  // Target: compact layout that scales down for smaller screens
+  // Menubar - uses preferred height for comfortable 5x2 grid layout
+  const menubarHeight = MENUBAR_DIMENSIONS.height;
 
-  // Gap between minimap and combat stack
-  const minimapCombatGap = 20;
+  // Calculate scale factor based on viewport height relative to design resolution
+  // Use a tighter scale range (0.7-1.0) to keep panels compact
+  const heightScale = Math.min(1.0, Math.max(0.7, viewport.height / 1080));
+
+  // Scale panel heights, but never go below minSize
+  const inventoryHeight = Math.max(
+    inventoryConfig.minSize.height,
+    Math.round(inventoryConfig.minSize.height * heightScale),
+  );
+  // Skills panel is taller now since combat is merged in as a tab
+  // Use the larger of skills or combat minSize for the combined panel
+  const combinedSkillsMinHeight = Math.max(
+    skillsConfig.minSize.height,
+    combatConfig.minSize.height,
+  );
+  const skillsHeight = Math.max(
+    combinedSkillsMinHeight,
+    Math.round(combinedSkillsMinHeight * heightScale),
+  );
+
+  // Verify total height fits in viewport, otherwise use available space proportionally
+  // Note: combat is no longer a separate panel
+  const totalRightColumnHeight =
+    menubarHeight + inventoryHeight + skillsHeight + 20; // 20px gap for minimap
+  const maxRightColumnHeight = viewport.height - 80; // Leave 80px for minimap minimum
+
+  // If panels don't fit, scale them down proportionally
+  const fitScale =
+    totalRightColumnHeight > maxRightColumnHeight
+      ? maxRightColumnHeight / totalRightColumnHeight
+      : 1;
+
+  const finalInventoryHeight = Math.max(
+    inventoryConfig.minSize.height * 0.7,
+    Math.round(inventoryHeight * fitScale),
+  );
+  const finalSkillsHeight = Math.max(
+    combinedSkillsMinHeight * 0.7,
+    Math.round(skillsHeight * fitScale),
+  );
+
+  // Gap between minimap and skills stack
+  const minimapSkillsGap = 20;
 
   // === CALCULATE RIGHT COLUMN Y POSITIONS (bottom-up) ===
-  // Menubar at bottom -> Inventory -> Skills -> Combat (all attached)
-  // Gap between combat and minimap
+  // Menubar at bottom -> Inventory -> Skills/Combat/Prayer (all attached)
+  // Gap between skills and minimap
   // Minimap fills remaining space at top
-  const menubarY = viewport.height - menubarHeight;
-  const inventoryY = menubarY - inventoryHeight;
-  const skillsY = inventoryY - skillsHeight;
-  const combatY = skillsY - combatHeight;
+  // Menubar: position so bottom edge touches viewport bottom
+  const menubarWindowHeight = menubarHeight;
+  const menubarY = viewport.height - menubarWindowHeight;
+  const inventoryY = menubarY - finalInventoryHeight;
+  const skillsY = inventoryY - finalSkillsHeight;
   const minimapY = 0;
-  // Minimap fills from top down to the gap above combat
-  const minimapHeight = Math.max(
-    minimapConfig.minSize.height,
-    combatY - minimapCombatGap,
+  // Minimap has a reasonable default size, not filling all remaining space
+  // Use preferred size from config, capped to available space
+  const availableMinimapHeight = skillsY - minimapSkillsGap;
+  const minimapHeight = Math.min(
+    minimapConfig.preferredSize.height, // Cap at preferred size (300px)
+    Math.max(minimapConfig.minSize.height, availableMinimapHeight),
   );
 
   // === LEFT COLUMN ===
   // Chat at bottom, quests directly above it (attached to chat top)
-  const chatWidth = Math.max(280, Math.round(viewport.width * 0.22));
-  const questsWidth = Math.round(chatWidth / 2); // Quests is half the width of chat
-  const chatHeight = Math.max(200, Math.round(viewport.height * 0.35));
-  const questsHeight = questsConfig.minSize.height; // Use minimum height from panel config
+  // Scale based on viewport for responsive sizing
+  const widthScale = Math.min(1.0, Math.max(0.7, viewport.width / 1920));
+  const chatWidth = Math.max(380, Math.round(500 * widthScale)); // Wide chat panel
+  const questsWidth = Math.round(chatWidth * 0.5); // Half of chat width
+  const chatHeight = Math.max(300, Math.round(380 * heightScale)); // Larger chat height for better visibility
+  const questsHeight = Math.max(
+    questsConfig.minSize.height * 0.7,
+    Math.round(questsConfig.minSize.height * heightScale),
+  );
   const chatY = viewport.height - chatHeight;
   const questsY = chatY - questsHeight; // Quests directly above chat
 
   // === BOTTOM CENTER ===
   const actionbarSizing = getResponsivePanelSizing("actionbar", viewport);
+  // Position flush at bottom of viewport
   const actionBarY = viewport.height - actionbarSizing.size.height;
   const actionBarX = Math.floor(
     viewport.width / 2 - actionbarSizing.size.width / 2,
@@ -154,13 +204,19 @@ export function createDefaultWindows(): WindowConfig[] {
     // === RIGHT COLUMN (top to bottom, flush stacking) ===
 
     // Minimap - top right, flush with top and right edges
-    // Width constraints aligned with other right column panels
+    // Wider than other right column panels for better visibility
     {
       id: "minimap-window",
-      position: { x: rightColumnX, y: minimapY },
-      size: { width: rightColumnWidth, height: minimapHeight },
+      position: {
+        x: viewport.width - minimapConfig.preferredSize.width,
+        y: minimapY,
+      },
+      size: {
+        width: minimapConfig.preferredSize.width,
+        height: minimapHeight,
+      },
       minSize: {
-        width: skillsConfig.minSize.width, // Use same min as other panels (235)
+        width: minimapConfig.minSize.width,
         height: minimapConfig.minSize.height,
       },
       // No maxSize for minimap - it can grow to any size
@@ -177,20 +233,20 @@ export function createDefaultWindows(): WindowConfig[] {
       anchor: "top-right",
     },
 
-    // Combat - above skills, part of bottom stack (gap above to minimap)
-    // Width constraints aligned with other right column panels
+    // Combat/Skills/Prayer - combined panel with combat as first tab
+    // Gap above to minimap
     {
-      id: "combat-window",
-      position: { x: rightColumnX, y: combatY },
-      size: { width: rightColumnWidth, height: combatHeight },
+      id: "skills-prayer-window",
+      position: { x: rightColumnX, y: skillsY },
+      size: { width: rightColumnWidth, height: finalSkillsHeight },
       minSize: {
-        width: skillsConfig.minSize.width, // Use same min as other panels (235)
-        height: combatConfig.minSize.height,
+        width: skillsConfig.minSize.width,
+        height: combinedSkillsMinHeight + TAB_BAR_HEIGHT,
       },
       maxSize: skillsConfig.maxSize
         ? {
-            width: skillsConfig.maxSize.width, // Use same max as other panels (390)
-            height: combatConfig.maxSize?.height || combatHeight,
+            width: skillsConfig.maxSize.width,
+            height: skillsConfig.maxSize.height + TAB_BAR_HEIGHT,
           }
         : undefined,
       tabs: [
@@ -201,27 +257,6 @@ export function createDefaultWindows(): WindowConfig[] {
           content: "combat",
           closeable: true,
         },
-      ],
-      transparency: 0,
-      anchor: "bottom-right",
-    },
-
-    // Skills/Prayer - directly below combat, touching
-    {
-      id: "skills-prayer-window",
-      position: { x: rightColumnX, y: skillsY },
-      size: { width: rightColumnWidth, height: skillsHeight },
-      minSize: {
-        width: skillsConfig.minSize.width,
-        height: skillsConfig.minSize.height + TAB_BAR_HEIGHT,
-      },
-      maxSize: skillsConfig.maxSize
-        ? {
-            width: skillsConfig.maxSize.width,
-            height: skillsConfig.maxSize.height + TAB_BAR_HEIGHT,
-          }
-        : undefined,
-      tabs: [
         {
           id: "skills",
           label: "Skills",
@@ -245,7 +280,7 @@ export function createDefaultWindows(): WindowConfig[] {
     {
       id: "inventory-window",
       position: { x: rightColumnX, y: inventoryY },
-      size: { width: rightColumnWidth, height: inventoryHeight },
+      size: { width: rightColumnWidth, height: finalInventoryHeight },
       minSize: {
         width: inventoryConfig.minSize.width,
         height: inventoryConfig.minSize.height + TAB_BAR_HEIGHT,
@@ -277,14 +312,15 @@ export function createDefaultWindows(): WindowConfig[] {
     },
 
     // Menubar - bottom right, flush with bottom and right edges
-    // Uses aligned width (235px) to match other right column panels
+    // Uses same width as other right column panels for alignment
+    // Fluid 5x2 grid layout where buttons scale with container
     {
       id: "menubar-window",
       position: {
-        x: viewport.width - MENUBAR_DIMENSIONS.minWidth,
+        x: rightColumnX,
         y: menubarY,
       },
-      size: { width: MENUBAR_DIMENSIONS.minWidth, height: menubarHeight },
+      size: { width: rightColumnWidth, height: menubarWindowHeight },
       minSize: {
         width: MENUBAR_DIMENSIONS.minWidth,
         height: MENUBAR_DIMENSIONS.minHeight,
@@ -335,7 +371,7 @@ export function createDefaultWindows(): WindowConfig[] {
       id: "chat-window",
       position: { x: 0, y: chatY },
       size: { width: chatWidth, height: chatHeight },
-      minSize: { width: 130, height: 150 },
+      minSize: chatConfig.minSize,
       tabs: [
         {
           id: "chat",
@@ -364,7 +400,7 @@ export function createDefaultWindows(): WindowConfig[] {
     },
 
     // === BOTTOM CENTER ===
-    // Action bar - bottom center
+    // Action bar - bottom center, flush with bottom of viewport
     {
       id: "actionbar-0-window",
       position: { x: actionBarX, y: actionBarY },

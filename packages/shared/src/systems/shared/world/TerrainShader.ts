@@ -31,6 +31,7 @@ import THREE, {
   abs,
   sin,
   cos,
+  type ShaderNode,
 } from "../../../extras/three/three";
 
 export const TERRAIN_CONSTANTS = {
@@ -385,6 +386,12 @@ export function calculateSlope(
 // TERRAIN MATERIAL - OSRS Style (No Textures)
 // ============================================================================
 
+/**
+ * Maximum number of vertex lights supported
+ * Keep low for performance - vertex lighting is cheap but not free
+ */
+export const MAX_VERTEX_LIGHTS = 8;
+
 export type TerrainUniforms = {
   sunPosition: { value: THREE.Vector3 };
   time: { value: number };
@@ -394,7 +401,48 @@ export type TerrainUniforms = {
   fogFarSq: { value: number }; // Pre-computed fogFar^2 for GPU optimization
   fogColor: { value: THREE.Vector3 };
   fogEnabled: { value: number }; // 1.0 = fog enabled, 0.0 = fog disabled (for minimap)
+  // Vertex lighting uniforms (lampposts, etc.)
+  vertexLightPositions: { value: THREE.Vector3 }[]; // Array of 8 light positions
+  vertexLightColors: { value: THREE.Vector3 }[]; // Array of 8 light colors
+  vertexLightParams: { value: THREE.Vector2 }[]; // Array of 8 (intensity, range) pairs
 };
+
+/**
+ * Vertex light data for updating terrain lighting
+ */
+export interface VertexLight {
+  position: THREE.Vector3;
+  color: THREE.Color;
+  intensity: number;
+  range: number;
+}
+
+/**
+ * Update terrain vertex lights from lamppost positions
+ * Call this when player moves to update nearby lights
+ */
+export function updateTerrainVertexLights(
+  uniforms: TerrainUniforms,
+  lights: VertexLight[],
+): void {
+  const count = Math.min(lights.length, MAX_VERTEX_LIGHTS);
+
+  for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
+    if (i < count) {
+      const light = lights[i];
+      uniforms.vertexLightPositions[i].value.copy(light.position);
+      uniforms.vertexLightColors[i].value.set(
+        light.color.r,
+        light.color.g,
+        light.color.b,
+      );
+      uniforms.vertexLightParams[i].value.set(light.intensity, light.range);
+    } else {
+      // Disable unused lights by setting intensity to 0
+      uniforms.vertexLightParams[i].value.set(0, 1);
+    }
+  }
+}
 
 /**
  * OSRS-style vertex color terrain material
@@ -429,6 +477,20 @@ export function createTerrainMaterial(): THREE.Material & {
   );
   // Fog enabled: 1.0 = normal fog, 0.0 = no fog (for minimap rendering)
   const fogEnabledUniform = uniform(float(1.0));
+
+  // ============================================================================
+  // VERTEX LIGHTING UNIFORMS (for lampposts, torches, etc.)
+  // ============================================================================
+  // Create arrays of uniforms for each light
+  const vertexLightPositionUniforms: ReturnType<typeof uniform>[] = [];
+  const vertexLightColorUniforms: ReturnType<typeof uniform>[] = [];
+  const vertexLightParamUniforms: ReturnType<typeof uniform>[] = []; // (intensity, range)
+
+  for (let i = 0; i < MAX_VERTEX_LIGHTS; i++) {
+    vertexLightPositionUniforms.push(uniform(vec3(0, 0, 0)));
+    vertexLightColorUniforms.push(uniform(vec3(1, 0.9, 0.6))); // Warm lamplight default
+    vertexLightParamUniforms.push(uniform(vec2(0, 15))); // intensity=0 (off), range=15m
+  }
 
   const worldPos = positionWorld;
   const worldNormal = normalWorld;
@@ -565,23 +627,135 @@ export function createTerrainMaterial(): THREE.Material & {
   );
 
   // === ROAD OVERLAY ===
-  // Roads are compacted dirt paths - use same dirt colors as terrain for consistency
-  // Apply noise variation so roads don't look flat/artificial
+  // Roads are compacted dirt paths - distinct from terrain for visibility
+  // Use a lighter, grayer "packed dirt" color that stands out from both grass and dirt
   const roadInfluence = attribute("roadInfluence", "float");
 
-  // Use same dirt colors as terrain dirt patches (dirtBrown, dirtDark defined above)
-  // Add noise variation for natural look - compacted dirt has less variation than loose dirt
-  const roadNoiseVar = mul(noiseValue2, float(0.5)); // Less variation than regular dirt
-  const roadDirtColor = mix(dirtBrown, dirtDark, roadNoiseVar);
+  // Road base colors - lighter and grayer than terrain dirt for visibility
+  // Packed/compacted dirt tends to be lighter and more uniform than loose soil
+  const roadLight = vec3(0.6, 0.5, 0.4); // Light packed dirt (visible on grass)
+  const roadDark = vec3(0.45, 0.38, 0.3); // Darker packed dirt (visible on dirt)
 
-  // Road edges are slightly lighter (loose dirt kicked up to edges)
-  // Center is darker (compacted, worn surface)
-  const roadCenterDarken = mul(roadInfluence, float(0.15)); // Darken center
-  const compactedRoadColor = sub(roadDirtColor, vec3(roadCenterDarken));
+  // Add subtle noise variation for natural look
+  const roadNoiseVar = mul(noiseValue2, float(0.3)); // Less variation than regular dirt
+  const roadBaseColor = mix(roadLight, roadDark, roadNoiseVar);
+
+  // Road center is slightly worn/darker, edges are lighter (kicked up dirt)
+  const roadCenterDarken = mul(roadInfluence, float(0.05)); // Subtle center darkening
+  const compactedRoadColor = sub(roadBaseColor, vec3(roadCenterDarken));
 
   // Blend road color with terrain based on influence
   // influence 0 = terrain color, 1 = full road color
+  // Prioritize road color when roadInfluence > 0 (roads always visible)
   const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
+
+  // ============================================================================
+  // VERTEX LIGHTING (lampposts, torches, etc.)
+  // Simple additive point lights with smooth attenuation
+  // ============================================================================
+
+  // Helper to calculate single light contribution
+  // Returns additive light color contribution
+  const calculateLightContribution = (
+    lightPos: ReturnType<typeof uniform>,
+    lightColor: ReturnType<typeof uniform>,
+    lightParams: ReturnType<typeof uniform>, // x=intensity, y=range
+  ) => {
+    // Vector from world position to light
+    const toLightVec = sub(lightPos, worldPos);
+    const distToLight = add(
+      add(mul(toLightVec.x, toLightVec.x), mul(toLightVec.y, toLightVec.y)),
+      mul(toLightVec.z, toLightVec.z),
+    );
+    const dist = mul(distToLight, float(1)); // Keep as squared for now
+
+    // Range squared for comparison
+    const rangeSq = mul(lightParams.y, lightParams.y);
+
+    // Smooth attenuation: 1 at center, 0 at range (using squared distances)
+    const attenuation = mul(
+      smoothstep(rangeSq, float(0), dist),
+      lightParams.x, // intensity
+    );
+
+    // Light contribution = color * attenuation
+    return mul(lightColor, attenuation);
+  };
+
+  // Accumulate light contributions from all 8 lights
+  // Start with zero (no extra light)
+  // Use ShaderNode type to allow reassignment from add() operations
+  let lightAccum: ShaderNode = vec3(0, 0, 0);
+
+  // Unroll loop for all 8 lights (TSL doesn't support dynamic loops well)
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[0],
+      vertexLightColorUniforms[0],
+      vertexLightParamUniforms[0],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[1],
+      vertexLightColorUniforms[1],
+      vertexLightParamUniforms[1],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[2],
+      vertexLightColorUniforms[2],
+      vertexLightParamUniforms[2],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[3],
+      vertexLightColorUniforms[3],
+      vertexLightParamUniforms[3],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[4],
+      vertexLightColorUniforms[4],
+      vertexLightParamUniforms[4],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[5],
+      vertexLightColorUniforms[5],
+      vertexLightParamUniforms[5],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[6],
+      vertexLightColorUniforms[6],
+      vertexLightParamUniforms[6],
+    ),
+  );
+  lightAccum = add(
+    lightAccum,
+    calculateLightContribution(
+      vertexLightPositionUniforms[7],
+      vertexLightColorUniforms[7],
+      vertexLightParamUniforms[7],
+    ),
+  );
+
+  // Apply vertex lighting additively (multiply base by (1 + lightAccum))
+  // This brightens terrain near lights without washing out colors
+  const litTerrain = mul(baseWithRoads, add(vec3(1, 1, 1), lightAccum));
 
   // === DISTANCE FOG ===
   // NOTE: distSq already computed above for LOD - reusing it here
@@ -591,8 +765,8 @@ export function createTerrainMaterial(): THREE.Material & {
   const baseFogFactor = smoothstep(fogNearSqUniform, fogFarSqUniform, distSq);
   const fogFactor = mul(baseFogFactor, fogEnabledUniform);
 
-  // Mix terrain color with fog color based on distance
-  const finalColor = mix(baseWithRoads, fogColorUniform, fogFactor);
+  // Mix lit terrain color with fog color based on distance
+  const finalColor = mix(litTerrain, fogColorUniform, fogFactor);
 
   // === CREATE MATERIAL ===
   const material = new MeshStandardNodeMaterial();
@@ -612,6 +786,16 @@ export function createTerrainMaterial(): THREE.Material & {
     fogFarSq: fogFarSqUniform,
     fogColor: fogColorUniform,
     fogEnabled: fogEnabledUniform,
+    // Vertex lighting arrays
+    vertexLightPositions: vertexLightPositionUniforms.map(
+      (u) => u as unknown as { value: THREE.Vector3 },
+    ),
+    vertexLightColors: vertexLightColorUniforms.map(
+      (u) => u as unknown as { value: THREE.Vector3 },
+    ),
+    vertexLightParams: vertexLightParamUniforms.map(
+      (u) => u as unknown as { value: THREE.Vector2 },
+    ),
   };
   const result = material as typeof material & {
     terrainUniforms: TerrainUniforms;

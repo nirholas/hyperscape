@@ -30,6 +30,7 @@ import {
   Warehouse,
   RefreshCw,
 } from "lucide-react";
+import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
 import "./AdminScreen.css";
 
 // Types
@@ -1001,10 +1002,11 @@ const InventoryTab: React.FC<{
     metadata: Record<string, unknown> | null;
   }>;
 }> = ({ items }) => {
-  // Create 28-slot array
-  const slots = Array(28).fill(null);
+  // Create slots array using shared constant
+  const maxSlots = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
+  const slots = Array(maxSlots).fill(null);
   items.forEach((item) => {
-    if (item.slotIndex >= 0 && item.slotIndex < 28) {
+    if (item.slotIndex >= 0 && item.slotIndex < maxSlots) {
       slots[item.slotIndex] = item;
     }
   });

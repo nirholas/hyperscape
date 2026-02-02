@@ -77,6 +77,26 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
       },
     });
 
+    // Craft action (jewelry at furnace)
+    actions.push({
+      id: "craft",
+      label: `Craft ${targetName}`,
+      styledLabel: [
+        { text: "Craft " },
+        { text: targetName, color: SCENERY_COLOR },
+      ],
+      enabled: true,
+      priority: 2,
+      handler: () => {
+        this.queueInteraction({
+          target,
+          actionId: "craft",
+          range: this.getActionRange("craft"),
+          onExecute: () => this.executeCraft(target),
+        });
+      },
+    });
+
     // Walk here
     actions.push(this.createWalkHereAction(target));
 
@@ -103,6 +123,25 @@ export class SmeltingSourceInteractionHandler extends BaseInteractionHandler {
   }
 
   // === Private Methods ===
+
+  /**
+   * Execute the crafting interaction at furnace (jewelry).
+   * Emits CRAFTING_INTERACT event + sends packet to server.
+   */
+  private executeCraft(target: RaycastTarget): void {
+    const player = this.getPlayer();
+    if (!player) return;
+
+    console.log(
+      `[SmeltingSourceInteraction] Player clicked furnace for crafting at ${target.position.x}, ${target.position.z}`,
+    );
+
+    // Send to server — server CraftingSystem will process and send back craftingInterfaceOpen
+    this.send("craftingSourceInteract", {
+      triggerType: "furnace",
+      stationId: target.entityId,
+    });
+  }
 
   /**
    * Execute the smelting interaction.

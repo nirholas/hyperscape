@@ -417,6 +417,8 @@ export enum EventType {
   CORPSE_EMPTY = "corpse:empty",
 
   // Fire System
+  FIRE_LIGHTING_STARTED = "fire:lighting:started",
+  FIRE_LIGHTING_CANCELLED = "fire:lighting:cancelled",
   FIRE_EXTINGUISHED = "fire:extinguished",
   FIRE_CREATED = "fire:created",
 
@@ -466,6 +468,30 @@ export enum EventType {
   SMITHING_START = "smithing:start",
   SMITHING_COMPLETE = "smithing:complete",
   PROCESSING_SMITHING_REQUEST = "processing:smithing:request",
+
+  // Crafting Events (leather, jewelry, gem cutting)
+  CRAFTING_INTERACT = "crafting:interact",
+  CRAFTING_INTERFACE_OPEN = "crafting:interface:open",
+  CRAFTING_START = "crafting:start",
+  CRAFTING_COMPLETE = "crafting:complete",
+  PROCESSING_CRAFTING_REQUEST = "processing:crafting:request",
+
+  // Fletching Events (knife + logs, stringing, arrow tipping)
+  FLETCHING_INTERACT = "fletching:interact",
+  FLETCHING_INTERFACE_OPEN = "fletching:interface:open",
+  FLETCHING_START = "fletching:start",
+  FLETCHING_COMPLETE = "fletching:complete",
+  PROCESSING_FLETCHING_REQUEST = "processing:fletching:request",
+
+  // Runecrafting Events (instant altar conversion)
+  RUNECRAFTING_INTERACT = "runecrafting:interact",
+  RUNECRAFTING_COMPLETE = "runecrafting:complete",
+
+  // Tanning Events (NPC tanner: hides → leather)
+  TANNING_INTERACT = "tanning:interact",
+  TANNING_INTERFACE_OPEN = "tanning:interface:open",
+  TANNING_REQUEST = "tanning:request",
+  TANNING_COMPLETE = "tanning:complete",
 
   // Death System
   DEATH_LOOT_COLLECT = "death:loot:collect",

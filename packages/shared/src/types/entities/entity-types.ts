@@ -29,6 +29,9 @@ export interface Skills {
   cooking: SkillData;
   smithing: SkillData;
   agility: SkillData;
+  crafting: SkillData;
+  fletching: SkillData;
+  runecrafting: SkillData;
 }
 
 // Component data map - strongly typed, no optionals
@@ -122,6 +125,9 @@ export interface StatsComponent {
   cooking: SkillData;
   smithing: SkillData;
   agility: SkillData;
+  crafting: SkillData;
+  fletching: SkillData;
+  runecrafting: SkillData;
   /** Active prayer IDs from manifest (manifest-driven, replaces boolean flags) */
   activePrayers: string[];
   equipment: {

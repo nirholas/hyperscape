@@ -108,8 +108,10 @@ export function useSettingsCategory(
 ): UseSettingsCategoryResult {
   const { category, settingsHook, initialShowAdvanced = false } = options;
 
-  // Use provided hook or create new one
-  const settings = settingsHook ?? useSettings();
+  // Always call useSettings unconditionally (React hooks rules)
+  const internalSettings = useSettings();
+  // Use provided hook or internal one
+  const settings = settingsHook ?? internalSettings;
   const [showAdvanced, setShowAdvanced] = useState(initialShowAdvanced);
 
   // Get category info

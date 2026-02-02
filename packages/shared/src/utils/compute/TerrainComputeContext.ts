@@ -275,7 +275,6 @@ export class TerrainComputeContext {
     roads: GPURoadSegment[],
     textureSize: number,
     worldSize: number,
-    blendWidth: number = 3,
   ): Promise<Float32Array> {
     if (!this.initialized || !this.roadInfluencePipeline) {
       throw new Error("TerrainComputeContext not initialized");
@@ -283,7 +282,6 @@ export class TerrainComputeContext {
 
     const pixelCount = textureSize * textureSize;
     const halfWorld = worldSize / 2;
-    const metersPerPixel = worldSize / textureSize;
 
     // Generate texture pixel coordinates as "vertices"
     // Each pixel maps to a world coordinate

@@ -30,7 +30,7 @@ import {
   usesWear,
   CONTEXT_MENU_COLORS,
 } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 /**
  * Minimal item type for ActionPanel - only requires the properties actually used
  * Compatible with both InventorySlotItem and InventorySlotViewItem
@@ -76,7 +76,6 @@ const DraggableSlot = memo(function DraggableSlot({
   onLeave,
   onClick,
   onContextMenu,
-  getItemIcon,
 }: {
   item: ActionPanelItem | null;
   slotNumber: number;
@@ -87,7 +86,6 @@ const DraggableSlot = memo(function DraggableSlot({
   onLeave: () => void;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
-  getItemIcon: (itemId: string) => string;
 }) {
   const theme = useThemeStore((s) => s.theme);
   const isEmpty = !item;
@@ -169,7 +167,7 @@ const DraggableSlot = memo(function DraggableSlot({
             filter: "drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5))",
           }}
         >
-          {getItemIcon(item.itemId)}
+          <ItemIcon itemId={item.itemId} size={isMobile ? 32 : 36} />
         </div>
       ) : (
         <div
@@ -667,7 +665,6 @@ export function ActionPanel({
                   onLeave={() => setHoveredSlot(null)}
                   onClick={() => item && onItemUse?.(item, slotNumber)}
                   onContextMenu={(e) => handleContextMenu(e, item, slotNumber)}
-                  getItemIcon={getItemIcon}
                 />
               );
             })}
@@ -692,7 +689,7 @@ export function ActionPanel({
                 pointerEvents: "none",
               }}
             >
-              {getItemIcon(draggedItem.itemId)}
+              <ItemIcon itemId={draggedItem.itemId} size={isMobile ? 32 : 36} />
             </div>
           )}
         </DragOverlay>

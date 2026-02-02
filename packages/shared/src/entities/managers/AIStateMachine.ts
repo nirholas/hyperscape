@@ -44,6 +44,7 @@ export interface AIStateContext {
   // Combat (TICK-BASED, OSRS-accurate)
   canAttack(currentTick: number): boolean;
   performAttack(targetId: string, currentTick: number): void;
+  onEnterCombatRange(currentTick: number): void; // Sets up first-attack timing (1-tick delay)
   isInCombat(): boolean;
   exitCombat(): void;
 
@@ -292,7 +293,9 @@ export class ChaseState implements AIState {
     if (playerDistFromSpawn > aggressionRange) {
       context.setTarget(null);
       context.exitCombat();
-      return MobAIState.IDLE;
+      // RS-accurate: Mob returns to spawn when player exceeds aggression range
+      // Prevents ranged farming exploit where mobs stand idle at leash edge
+      return MobAIState.RETURN;
     }
 
     // TILE-BASED COMBAT RANGE CHECK (OSRS-style)
@@ -376,8 +379,12 @@ export class ChaseState implements AIState {
 export class AttackState implements AIState {
   readonly name = MobAIState.ATTACK;
 
-  enter(_context: AIStateContext): void {
-    // No-op
+  enter(context: AIStateContext): void {
+    // OSRS-accurate: First attack is delayed 1 tick after entering combat range
+    // This sets up _pendingFirstAttack and _firstAttackTick for proper timing
+    // Critical for re-entry attacks: resets timing when mob transitions back to ATTACK state
+    const currentTick = context.getCurrentTick();
+    context.onEnterCombatRange(currentTick);
   }
 
   update(context: AIStateContext, _deltaTime: number): MobAIState | null {
@@ -412,7 +419,9 @@ export class AttackState implements AIState {
     if (playerDistFromSpawn > aggressionRange) {
       context.setTarget(null);
       context.exitCombat();
-      return MobAIState.IDLE;
+      // RS-accurate: Mob returns to spawn when player exceeds aggression range
+      // Prevents ranged farming exploit where mobs stand idle at leash edge
+      return MobAIState.RETURN;
     }
 
     // TILE-BASED RANGE CHECK (uses manifest combatRange)
@@ -461,16 +470,20 @@ export class AttackState implements AIState {
 }
 
 /**
- * RETURN State - Walking back to spawn (RETREAT ONLY, not for leashing)
+ * RETURN State - Walking back to spawn point
  *
- * IMPORTANT: This state is for EXPLICIT RETREAT scenarios only:
+ * Used when:
+ * - Mob exceeds leash range while chasing/attacking (RS-accurate)
  * - Mob stuck for too long (production safety)
  * - Low HP retreat behavior (future feature)
- * - Scripted boss retreat mechanics (future feature)
  *
- * Normal LEASHING does NOT use this state. When an NPC exceeds its leash range:
- * - OSRS behavior: NPC stops in place → IDLE → resumes wandering
- * - Our implementation: CHASE/ATTACK → IDLE (not RETURN)
+ * RS-accurate behavior: When player moves beyond aggression range, mob
+ * returns to its spawn point rather than standing idle at the leash edge.
+ * This prevents ranged farming exploits where players attack from outside
+ * the mob's retaliation range.
+ *
+ * Per OSRS/RS3 Wiki: "Stepping outside of a radius will cause a melee
+ * monster to stop attacking you immediately and return to wandering."
  *
  * Uses TILE-BASED distance check for arrival detection.
  * Movement is tile-based (600ms ticks), so we must check if we're on the

@@ -26,8 +26,10 @@ export type InteractableEntityType =
   | "furnace"
   | "anvil"
   | "altar"
+  | "runecrafting_altar"
   | "starter_chest"
-  | "forfeit_pillar";
+  | "forfeit_pillar"
+  | "signpost"; // Town landmark signpost
 
 /**
  * Target types for context menus (includes entities + special cases like terrain)

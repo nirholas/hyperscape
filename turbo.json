@@ -4,7 +4,7 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**", "build/**", ".next/**"],
+      "outputs": ["dist/**", "build/**", ".next/**", "tsconfig.tsbuildinfo"],
       "cache": true
     },
     "extract-bounds": {
@@ -26,12 +26,22 @@
     },
     "shared#build": {
       "dependsOn": ["^build", "physx-js-webidl#build"],
-      "outputs": ["dist/**", "build/**"],
+      "outputs": ["dist/**", "build/**", "tsconfig.tsbuildinfo"],
+      "cache": true
+    },
+    "procgen#build": {
+      "dependsOn": ["^build", "shared#build"],
+      "outputs": ["dist/**", "tsconfig.tsbuildinfo"],
       "cache": true
     },
     "client#build": {
       "dependsOn": ["^build", "physx-js-webidl#build", "shared#build"],
-      "outputs": ["dist/**", "build/**"],
+      "outputs": ["dist/**", "build/**", "tsconfig.tsbuildinfo"],
+      "cache": true
+    },
+    "asset-forge#build": {
+      "dependsOn": ["^build", "procgen#build"],
+      "outputs": ["dist/**", "tsconfig.tsbuildinfo"],
       "cache": true
     },
     "app#build": {

@@ -16,6 +16,7 @@ import {
   Route,
   Sprout,
   Gamepad2,
+  Image,
 } from "lucide-react";
 import React, { useState, useRef, useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
@@ -166,6 +167,14 @@ const Navigation: React.FC = () => {
           >
             <Shuffle size={18} />
             <span>Retarget</span>
+          </Link>
+
+          <Link
+            to={ROUTES.BATCH_SPRITES}
+            className={navLinkClass(ROUTES.BATCH_SPRITES)}
+          >
+            <Image size={18} />
+            <span>Batch Sprites</span>
           </Link>
 
           <Link

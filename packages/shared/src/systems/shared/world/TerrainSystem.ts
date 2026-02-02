@@ -4,11 +4,7 @@ import {
   geometryToPxMesh,
   PMeshHandle,
 } from "../../../extras/three/geometryToPxMesh";
-import THREE, {
-  MeshStandardNodeMaterial,
-  vertexColor,
-  Fn,
-} from "../../../extras/three/three";
+import THREE, { MeshStandardNodeMaterial } from "../../../extras/three/three";
 import { System } from "../infrastructure/System";
 import { EventType } from "../../../types/events";
 import { NoiseGenerator } from "../../../utils/NoiseGenerator";
@@ -140,9 +136,13 @@ export class TerrainSystem extends System {
   }; // DatabaseSystem reference
 
   // Terrain shader material (shared across all tiles)
-  private terrainMaterial?: THREE.Material & {
-    terrainUniforms: TerrainUniforms;
-  };
+  // On client: full material with terrainUniforms for visual rendering
+  // On server: basic placeholder material (no uniforms needed)
+  private terrainMaterial?:
+    | THREE.Material
+    | (THREE.Material & {
+        terrainUniforms: TerrainUniforms;
+      });
   private chunkSaveInterval?: NodeJS.Timeout;
   private terrainUpdateIntervalId?: NodeJS.Timeout;
   private serializationIntervalId?: NodeJS.Timeout;
@@ -277,33 +277,15 @@ export class TerrainSystem extends System {
   }
 
   /**
-   * Create fallback terrain tile material using TSL Node Material
-   * Simple vertex colors without custom fog - uses scene fog instead
-   * This is only used as a fallback when the main terrain material hasn't loaded yet
-   */
-  private createTerrainTileMaterial(): THREE.Material {
-    // Simple vertex color material - let scene fog handle distance fading
-    const colorNode = Fn(() => {
-      return vertexColor();
-    })();
-
-    const material = new MeshStandardNodeMaterial();
-    material.colorNode = colorNode;
-    material.roughness = 0.9;
-    material.metalness = 0.0;
-    material.side = THREE.FrontSide;
-    material.flatShading = false;
-    material.fog = true; // Use scene fog for fallback
-
-    return material;
-  }
-
-  /**
-   * Load terrain textures and create the shared terrain material
-   * Automatically uses KTX2 GPU-compressed textures when available
+   * Load terrain textures and create the shared terrain material.
+   * Automatically uses KTX2 GPU-compressed textures when available.
+   *
+   * This material includes road influence support via the roadInfluence vertex attribute.
+   * No fallback material - roads require the full shader to render correctly.
    */
   private initTerrainMaterial(): void {
     // Create the shared terrain material (uses procedural OSRS-style colors, no textures needed)
+    // This material reads the roadInfluence attribute and blends road colors
     this.terrainMaterial = createTerrainMaterial();
 
     // Setup for CSM shadows
@@ -311,29 +293,49 @@ export class TerrainSystem extends System {
       this.world.setupMaterial(this.terrainMaterial);
     }
 
-    console.log("[TerrainSystem] Terrain material created");
+    console.log(
+      "[TerrainSystem] Terrain material created with road influence support",
+    );
   }
 
   /**
-   * Get the terrain material (creates fallback if not loaded)
+   * Get the terrain material.
+   * On client: returns the full terrain shader material (must call initTerrainMaterial() first).
+   * On server: returns a basic placeholder material since server doesn't render visuals.
    */
   private getTerrainMaterial(): THREE.Material {
-    if (this.terrainMaterial) {
-      return this.terrainMaterial;
+    if (!this.terrainMaterial) {
+      // Server doesn't need visual materials - just a placeholder for mesh creation
+      // Road data is stored in geometry attributes, not in the material
+      if (!this.world.isClient) {
+        this.terrainMaterial = new THREE.MeshBasicMaterial({ color: 0x808080 });
+        return this.terrainMaterial;
+      }
+      throw new Error(
+        "[TerrainSystem] Terrain material not initialized. " +
+          "initTerrainMaterial() must be called before creating terrain tiles.",
+      );
     }
-    // Fallback to simple vertex color material
-    return this.createTerrainTileMaterial();
+    return this.terrainMaterial;
   }
 
   /**
    * Get the terrain material with uniforms for external access (e.g., minimap fog control)
+   * Returns null on server since server uses a basic material without uniforms.
    */
   public getTerrainMaterialWithUniforms():
     | (THREE.Material & {
         terrainUniforms: TerrainUniforms;
       })
     | null {
-    return this.terrainMaterial ?? null;
+    if (!this.terrainMaterial) return null;
+    // Check if material has terrainUniforms (client-only)
+    if ("terrainUniforms" in this.terrainMaterial) {
+      return this.terrainMaterial as THREE.Material & {
+        terrainUniforms: TerrainUniforms;
+      };
+    }
+    return null;
   }
 
   /**
@@ -1511,7 +1513,16 @@ export class TerrainSystem extends System {
     // OPTIMIZATION: Wait for roads before generating visual tiles
     // This avoids generating tiles twice (once without roads, once with)
     // getHeightAt() works without tiles, so RoadNetworkSystem can still query heights
-    this.world.on(EventType.ROADS_GENERATED, () => {
+    this.world.on(EventType.ROADS_GENERATED, (...args: unknown[]) => {
+      // Extract road data from event args
+      const data = (args[0] ?? {}) as {
+        roadCount?: number;
+        townCount?: number;
+      };
+      console.log(
+        `[TerrainSystem] ROADS_GENERATED event received: ${data.roadCount ?? 0} roads, ${data.townCount ?? 0} towns`,
+      );
+
       // Clear the fallback timeout since we received the event
       if (this.roadsTimeoutId) {
         clearTimeout(this.roadsTimeoutId);
@@ -1529,7 +1540,10 @@ export class TerrainSystem extends System {
         );
         this.loadInitialTiles();
       } else {
-        // Tiles already exist (shouldn't happen normally, but handle gracefully)
+        // Tiles already exist - refresh road influence on existing tiles
+        console.log(
+          "[TerrainSystem] Tiles already exist, refreshing road influence...",
+        );
         this.refreshRoadInfluence();
       }
     });
@@ -3913,7 +3927,9 @@ export class TerrainSystem extends System {
 
   /**
    * Default tree configuration for biomes without explicit tree config.
-   * Targets ~1 tree per 10m spacing (density 100 = ~41 trees per 64m tile).
+   * Targets ~1 tree per 20m spacing (density 25 = ~10 trees per 64m tile).
+   * Reduced from 100 to prevent exceeding MAX_GLOBAL_LEAVES capacity (100k leaves,
+   * ~2000 leaves per tree = ~50 trees max visible at full detail).
    */
   private static readonly DEFAULT_TREE_CONFIG: BiomeTreeConfig = {
     enabled: true,
@@ -3924,11 +3940,11 @@ export class TerrainSystem extends System {
       tree_willow: 10, // Weeping Willow
       tree_yew: 5, // European Larch
     },
-    density: 100, // ~1 tree per 10m (41 trees per 64m tile)
-    minSpacing: 8, // Minimum 8m between trees
+    density: 20, // ~8 trees per 64m tile
+    minSpacing: 18, // Minimum 18m between trees for natural spacing
     clustering: true,
-    clusterSize: 4,
-    scaleVariation: [0.7, 1.3],
+    clusterSize: 3,
+    scaleVariation: [0.8, 1.2],
   };
 
   /**
@@ -4301,8 +4317,9 @@ export class TerrainSystem extends System {
 
       // Update terrain time for animated caustics
       this.terrainTime += dt;
-      if (this.terrainMaterial?.terrainUniforms) {
-        this.terrainMaterial.terrainUniforms.time.value = this.terrainTime;
+      const materialWithUniforms = this.getTerrainMaterialWithUniforms();
+      if (materialWithUniforms) {
+        materialWithUniforms.terrainUniforms.time.value = this.terrainTime;
 
         // Sync fog values from Environment system
         this.syncFogFromEnvironment();
@@ -4320,7 +4337,8 @@ export class TerrainSystem extends System {
    * Ensures terrain fog matches the global scene fog
    */
   private syncFogFromEnvironment(): void {
-    if (!this.terrainMaterial?.terrainUniforms) return;
+    const materialWithUniforms = this.getTerrainMaterialWithUniforms();
+    if (!materialWithUniforms) return;
 
     const environment = this.world.getSystem("environment") as
       | Environment
@@ -4331,17 +4349,17 @@ export class TerrainSystem extends System {
 
     // Update fog uniforms (including pre-computed squared values for GPU optimization)
     if (fogNear !== undefined) {
-      this.terrainMaterial.terrainUniforms.fogNear.value = fogNear;
-      this.terrainMaterial.terrainUniforms.fogNearSq.value = fogNear * fogNear;
+      materialWithUniforms.terrainUniforms.fogNear.value = fogNear;
+      materialWithUniforms.terrainUniforms.fogNearSq.value = fogNear * fogNear;
     }
     if (fogFar !== undefined) {
-      this.terrainMaterial.terrainUniforms.fogFar.value = fogFar;
-      this.terrainMaterial.terrainUniforms.fogFarSq.value = fogFar * fogFar;
+      materialWithUniforms.terrainUniforms.fogFar.value = fogFar;
+      materialWithUniforms.terrainUniforms.fogFarSq.value = fogFar * fogFar;
     }
     if (fogColor) {
       // Reuse _tempColor to avoid allocation every frame
       this._tempColor.set(fogColor);
-      this.terrainMaterial.terrainUniforms.fogColor.value.set(
+      materialWithUniforms.terrainUniforms.fogColor.value.set(
         this._tempColor.r,
         this._tempColor.g,
         this._tempColor.b,

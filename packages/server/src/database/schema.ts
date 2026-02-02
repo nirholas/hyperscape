@@ -206,6 +206,9 @@ export const characters = pgTable(
     cookingLevel: integer("cookingLevel").default(1),
     smithingLevel: integer("smithingLevel").default(1),
     agilityLevel: integer("agilityLevel").default(1),
+    craftingLevel: integer("craftingLevel").default(1),
+    fletchingLevel: integer("fletchingLevel").default(1),
+    runecraftingLevel: integer("runecraftingLevel").default(1),
 
     // Experience points
     attackXp: integer("attackXp").default(0),
@@ -222,6 +225,9 @@ export const characters = pgTable(
     cookingXp: integer("cookingXp").default(0),
     smithingXp: integer("smithingXp").default(0),
     agilityXp: integer("agilityXp").default(0),
+    craftingXp: integer("craftingXp").default(0),
+    fletchingXp: integer("fletchingXp").default(0),
+    runecraftingXp: integer("runecraftingXp").default(0),
 
     // Prayer points (current and max)
     prayerPoints: integer("prayerPoints").default(1),
@@ -1009,7 +1015,9 @@ export const operationsLog = pgTable(
   "operations_log",
   {
     id: text("id").primaryKey(), // UUID
-    playerId: text("playerId").notNull(),
+    playerId: text("playerId")
+      .notNull()
+      .references(() => characters.id, { onDelete: "cascade" }),
     operationType: text("operationType").notNull(), // 'trade', 'bank', 'equipment', 'inventory'
     operationState: jsonb("operationState").notNull(), // Full operation data for replay
     completed: boolean("completed").default(false),

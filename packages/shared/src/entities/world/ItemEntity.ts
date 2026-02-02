@@ -124,7 +124,19 @@ export class ItemEntity extends InteractableEntity {
           this.mesh.name = `Item_${this.config.itemId}`;
           this.mesh.castShadow = false;
           this.mesh.receiveShadow = false;
-          this.mesh.scale.set(0.3, 0.3, 0.3); // Scale down items
+          const s = this.config.modelScale ?? 0.3;
+          this.mesh.scale.set(s, s, s);
+
+          // Grounded items: compute bounding box and snap bottom to terrain level
+          // GroundItemSystem places the node 0.2 above terrain, so we compensate
+          const gOffset = this.config.groundOffset;
+          if (gOffset !== undefined && gOffset <= 0) {
+            const bbox = new THREE.Box3().setFromObject(this.mesh);
+            // 0.2 matches the yOffset passed to groundToTerrain() in GroundItemSystem
+            const GROUND_ITEM_TERRAIN_OFFSET = 0.2;
+            this.mesh.position.y =
+              -bbox.min.y - GROUND_ITEM_TERRAIN_OFFSET + gOffset;
+          }
 
           // PERFORMANCE: Set item mesh to layer 1 (main camera only, not minimap)
           this.mesh.layers.set(1);
@@ -283,9 +295,15 @@ export class ItemEntity extends InteractableEntity {
         // Subtle rotation wobble like paper in breeze
         this.mesh.rotation.z = Math.sin(time * 2) * 0.1;
       } else {
-        // Regular items: float and spin
-        this.mesh.position.y = 0.5 + Math.sin(time * 2) * 0.1;
-        this.mesh.rotation.y += deltaTime * 0.5;
+        const offset = this.config.groundOffset;
+        if (offset !== undefined && offset <= 0) {
+          // Grounded items: Y position set by createMesh bbox snap, no animation
+        } else {
+          // Regular items: float and spin
+          const floatHeight = offset ?? 0.5;
+          this.mesh.position.y = floatHeight + Math.sin(time * 2) * 0.1;
+          this.mesh.rotation.y += deltaTime * 0.5;
+        }
       }
     }
 
@@ -323,9 +341,15 @@ export class ItemEntity extends InteractableEntity {
         // Subtle rotation wobble like paper in breeze
         this.mesh.rotation.z = Math.sin(time * 2) * 0.1;
       } else {
-        // Regular items: float and spin
-        this.mesh.position.y = 0.5 + Math.sin(time * 2) * 0.1;
-        this.mesh.rotation.y += deltaTime * 0.5;
+        const offset = this.config.groundOffset;
+        if (offset !== undefined && offset <= 0) {
+          // Grounded items: Y position set by createMesh bbox snap, no animation
+        } else {
+          // Regular items: float and spin
+          const floatHeight = offset ?? 0.5;
+          this.mesh.position.y = floatHeight + Math.sin(time * 2) * 0.1;
+          this.mesh.rotation.y += deltaTime * 0.5;
+        }
       }
     }
   }
@@ -452,6 +476,8 @@ export class ItemEntity extends InteractableEntity {
       value: this.config.value,
       rarity: this.config.rarity,
       stackable: this.config.stackable,
+      modelScale: this.config.modelScale,
+      groundOffset: this.config.groundOffset,
     };
   }
 
@@ -468,6 +494,8 @@ export class ItemEntity extends InteractableEntity {
       value: this.config.value,
       rarity: this.config.rarity,
       stackable: this.config.stackable,
+      modelScale: this.config.modelScale,
+      groundOffset: this.config.groundOffset,
     } as EntityData;
   }
 }

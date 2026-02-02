@@ -14,7 +14,8 @@ import { useThemeStore } from "@/ui";
 import type { BankItem, BankTab, ConfirmModalState } from "../types";
 import type { DragState } from "../hooks";
 import { TAB_INDEX_ALL, TAB_INDEX_NEW_TAB_HOVER } from "../constants";
-import { getItemIcon, formatItemName } from "../utils";
+import { formatItemName } from "../utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 
 export interface BankTabBarProps {
   tabs: BankTab[];
@@ -139,9 +140,11 @@ export function BankTabBar({
           const firstRealItem = tabItemsSorted.find((i) => i.quantity > 0);
           const firstAnyItem = tabItemsSorted[0];
           const iconItem = firstRealItem || firstAnyItem;
-          const tabIcon = iconItem
-            ? getItemIcon(iconItem.itemId)
-            : `${tabIndex}`;
+          const tabIcon = iconItem ? (
+            <ItemIcon itemId={iconItem.itemId} size={14} />
+          ) : (
+            <span>{tabIndex}</span>
+          );
           const isPlaceholderIcon = iconItem && iconItem.quantity === 0;
           // Tab 0 can't be deleted, only custom tabs (1-9)
           const canDelete = tabIndex > 0;

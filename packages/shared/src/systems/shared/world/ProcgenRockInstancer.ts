@@ -31,7 +31,6 @@ import {
   lerpOctahedronGeometry,
   OctahedronType,
   type TSLImpostorMaterial,
-  type ImpostorBakeResult,
 } from "@hyperscape/impostor";
 import { getRockVariant, ensureRockVariantsLoaded } from "./ProcgenRockCache";
 

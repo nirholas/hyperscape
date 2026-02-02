@@ -43,6 +43,10 @@ import {
   type FiremakingManifest,
   type SmeltingManifest,
   type SmithingManifest,
+  type CraftingManifest,
+  type TanningManifest,
+  type FletchingManifest,
+  type RunecraftingManifest,
 } from "./ProcessingDataProvider";
 import {
   stationDataProvider,
@@ -65,6 +69,7 @@ const REQUIRED_ITEM_FILES = [
   "misc",
   "ammunition",
   "runes",
+  "armor",
 ] as const;
 const getAllTreasureLocations = () => TREASURE_LOCATIONS;
 const getTreasureLocationsByDifficulty = (_difficulty: number) =>
@@ -86,6 +91,7 @@ import type {
   NPCDataInput,
   NPCCategory,
   NPCModelArchetype,
+  LevelRange,
   TreasureLocation,
   StoreData,
   BiomeData,
@@ -472,6 +478,18 @@ export class DataManager {
       // Load recipe manifests for ProcessingDataProvider
       await this.loadRecipeManifestsFromCDN(baseUrl);
 
+      // Load skill unlocks
+      try {
+        const skillUnlocksRes = await fetch(`${baseUrl}/skill-unlocks.json`);
+        const skillUnlocksManifest =
+          (await skillUnlocksRes.json()) as SkillUnlocksManifest;
+        loadSkillUnlocks(skillUnlocksManifest);
+      } catch {
+        console.warn(
+          "[DataManager] skill-unlocks.json not available from CDN, skill guide will be empty",
+        );
+      }
+
       // Build EXTERNAL_TOOLS from items where item.tool is defined
       // This replaces the old tools.json loading
       this.buildToolsFromItems();
@@ -837,6 +855,30 @@ export class DataManager {
       }
     }
 
+    // Derive simple defense/attack from detailed bonuses for backward compatibility.
+    // Armor items define per-style bonuses (defenseStab, defenseSlash, etc.) but the
+    // existing DamageCalculator reads simple "defense". Use highest melee defence as the
+    // simple value until per-style combat is wired up.
+    const bonuses = item.bonuses as Record<string, number> | undefined;
+    if (bonuses) {
+      if (bonuses.defense === undefined) {
+        const ds = bonuses.defenseStab ?? 0;
+        const dl = bonuses.defenseSlash ?? 0;
+        const dc = bonuses.defenseCrush ?? 0;
+        if (ds !== 0 || dl !== 0 || dc !== 0) {
+          bonuses.defense = Math.max(ds, dl, dc);
+        }
+      }
+      if (bonuses.attack === undefined) {
+        const as_ = bonuses.attackStab ?? 0;
+        const al = bonuses.attackSlash ?? 0;
+        const ac = bonuses.attackCrush ?? 0;
+        if (as_ !== 0 || al !== 0 || ac !== 0) {
+          bonuses.attack = Math.max(as_, al, ac);
+        }
+      }
+    }
+
     // Apply defaults only for missing fields (use ?? to preserve falsy values like 0)
     const normalized: Item = {
       ...item,
@@ -990,6 +1032,54 @@ export class DataManager {
       );
     }
 
+    // Load crafting recipes
+    try {
+      const craftingRes = await fetch(`${baseUrl}/recipes/crafting.json`);
+      const craftingManifest = (await craftingRes.json()) as CraftingManifest;
+      processingDataProvider.loadCraftingRecipes(craftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+      );
+    }
+
+    // Load tanning recipes
+    try {
+      const tanningRes = await fetch(`${baseUrl}/recipes/tanning.json`);
+      const tanningManifest = (await tanningRes.json()) as TanningManifest;
+      processingDataProvider.loadTanningRecipes(tanningManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/tanning.json not found, tanning will be unavailable",
+      );
+    }
+
+    // Load fletching recipes
+    try {
+      const fletchingRes = await fetch(`${baseUrl}/recipes/fletching.json`);
+      const fletchingManifest =
+        (await fletchingRes.json()) as FletchingManifest;
+      processingDataProvider.loadFletchingRecipes(fletchingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
+      );
+    }
+
+    // Load runecrafting recipes
+    try {
+      const runecraftingRes = await fetch(
+        `${baseUrl}/recipes/runecrafting.json`,
+      );
+      const runecraftingManifest =
+        (await runecraftingRes.json()) as RunecraftingManifest;
+      processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
+      );
+    }
+
     // Rebuild ProcessingDataProvider to use the loaded manifests
     // This is necessary in case it was already lazy-initialized before manifests loaded
     processingDataProvider.rebuild();
@@ -1090,6 +1180,56 @@ export class DataManager {
     } catch {
       console.warn(
         "[DataManager] recipes/smithing.json not found, falling back to embedded item data",
+      );
+    }
+
+    // Load crafting recipes
+    try {
+      const craftingPath = path.join(recipesDir, "crafting.json");
+      const craftingData = await fs.readFile(craftingPath, "utf-8");
+      const craftingManifest = JSON.parse(craftingData) as CraftingManifest;
+      processingDataProvider.loadCraftingRecipes(craftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/crafting.json not found, crafting will be unavailable",
+      );
+    }
+
+    // Load tanning recipes
+    try {
+      const tanningPath = path.join(recipesDir, "tanning.json");
+      const tanningData = await fs.readFile(tanningPath, "utf-8");
+      const tanningManifest = JSON.parse(tanningData) as TanningManifest;
+      processingDataProvider.loadTanningRecipes(tanningManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/tanning.json not found, tanning will be unavailable",
+      );
+    }
+
+    // Load fletching recipes
+    try {
+      const fletchingPath = path.join(recipesDir, "fletching.json");
+      const fletchingData = await fs.readFile(fletchingPath, "utf-8");
+      const fletchingManifest = JSON.parse(fletchingData) as FletchingManifest;
+      processingDataProvider.loadFletchingRecipes(fletchingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/fletching.json not found, fletching will be unavailable",
+      );
+    }
+
+    // Load runecrafting recipes
+    try {
+      const runecraftingPath = path.join(recipesDir, "runecrafting.json");
+      const runecraftingData = await fs.readFile(runecraftingPath, "utf-8");
+      const runecraftingManifest = JSON.parse(
+        runecraftingData,
+      ) as RunecraftingManifest;
+      processingDataProvider.loadRunecraftingRecipes(runecraftingManifest);
+    } catch {
+      console.warn(
+        "[DataManager] recipes/runecrafting.json not found, runecrafting will be unavailable",
       );
     }
 
@@ -1340,12 +1480,24 @@ export class DataManager {
     // 2. VRM handles skeleton binding correctly
     // 3. GLB rigged models break when scaled (skeleton/animation issues)
     // If VRM has buffer parsing issues, fix the VRM file (optimize/compress) rather than substituting GLB
+    // Handle levelRange - can be array [min, max] or object { min, max } in JSON
+    let levelRange: LevelRange | undefined;
+    if (npc.levelRange) {
+      if (Array.isArray(npc.levelRange)) {
+        // Convert array format [min, max] to object format
+        const [min, max] = npc.levelRange as unknown as [number, number];
+        levelRange = { min, max };
+      } else {
+        levelRange = npc.levelRange;
+      }
+    }
+
     const defaults: Partial<NPCData> = {
       faction: npc.faction || "unknown",
       spawnCategory:
         npc.spawnCategory ?? (npc.category === "boss" ? "world" : undefined),
       modelArchetype: npc.modelArchetype,
-      levelRange: npc.levelRange,
+      levelRange,
       stats: {
         level: npc.stats?.level ?? 1,
         health: npc.stats?.health ?? 10, // OSRS: hitpoints = max HP directly
@@ -1362,6 +1514,8 @@ export class DataManager {
         aggroRange: npc.combat?.aggroRange ?? 0, // 0 = non-aggressive by default
         combatRange:
           npc.combat?.combatRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.COMBAT_RANGE,
+        leashRange:
+          npc.combat?.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
         attackSpeedTicks:
           npc.combat?.attackSpeedTicks ??
           COMBAT_CONSTANTS.DEFAULTS.NPC.ATTACK_SPEED_TICKS,
@@ -1483,6 +1637,21 @@ export class DataManager {
     const treasureCount = Object.keys(TREASURE_LOCATIONS).length;
     if (treasureCount === 0) {
       warnings.push("No treasure locations found in TREASURE_LOCATIONS");
+    }
+
+    // Validate equipSlot values match valid EquipmentSlotName or "2h"
+    if (itemCount > 0) {
+      const validSlots = new Set<string>([
+        ...Object.values(EquipmentSlotName),
+        "2h",
+      ]);
+      for (const [itemId, item] of ITEMS) {
+        if (item.equipSlot && !validSlots.has(item.equipSlot)) {
+          errors.push(
+            `Item "${itemId}" has invalid equipSlot "${item.equipSlot}" (valid: ${[...validSlots].join(", ")})`,
+          );
+        }
+      }
     }
 
     // Validate cross-references (only if we have data)

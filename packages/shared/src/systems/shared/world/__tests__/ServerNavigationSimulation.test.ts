@@ -375,7 +375,7 @@ describe("Server Navigation Simulation - checkBuildingMovement", () => {
   it("should simulate full server two-stage navigation: outside -> door -> inside", () => {
     // Stage 1: Ground player paths to door exterior
     let playerBuildingId: string | null = null;
-    let playerFloor = 0;
+    const playerFloor = 0;
 
     const closestDoor = collisionService.findClosestDoorTile(
       BUILDING_ID,

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   // Combat & Action
   Swords,
@@ -108,6 +108,8 @@ interface MenuButtonProps {
   size?: "compact" | "small" | "normal";
   /** Custom size in pixels (overrides size preset) */
   customSize?: number;
+  /** Fluid mode - button fills container (100% width/height), icon scales to fit */
+  fluid?: boolean;
   /** Panel ID for test selectors (optional) */
   panelId?: string;
 }
@@ -119,19 +121,55 @@ export function MenuButton({
   onClick,
   size = "normal",
   customSize,
+  fluid = false,
   panelId,
 }: MenuButtonProps) {
   const theme = useThemeStore((s) => s.theme);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [measuredSize, setMeasuredSize] = useState(30); // Default fallback
 
-  // Use custom size if provided, otherwise use preset
-  const config = customSize
-    ? {
-        size: customSize,
-        iconSize: calculateIconSize(customSize),
-        borderWidth: 2,
-        strokeWidth: calculateStrokeWidth(calculateIconSize(customSize)),
+  // Measure button size for fluid mode icon scaling
+  useEffect(() => {
+    if (!fluid || !buttonRef.current) return;
+
+    const measureSize = () => {
+      if (buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        // Use the smaller dimension to keep icon square
+        const buttonSize = Math.min(rect.width, rect.height);
+        if (buttonSize > 0) {
+          setMeasuredSize(buttonSize);
+        }
       }
-    : SIZE_CONFIG[size];
+    };
+
+    // Initial measurement
+    measureSize();
+
+    // Re-measure on resize
+    const observer = new ResizeObserver(measureSize);
+    observer.observe(buttonRef.current);
+
+    return () => observer.disconnect();
+  }, [fluid]);
+
+  // Determine config based on mode
+  const config = fluid
+    ? {
+        size: undefined, // Will use 100%
+        iconSize: calculateIconSize(measuredSize),
+        borderWidth: 2,
+        strokeWidth: calculateStrokeWidth(calculateIconSize(measuredSize)),
+      }
+    : customSize
+      ? {
+          size: customSize,
+          iconSize: calculateIconSize(customSize),
+          borderWidth: 2,
+          strokeWidth: calculateStrokeWidth(calculateIconSize(customSize)),
+        }
+      : SIZE_CONFIG[size];
+
   const IconComponent = ICON_MAP[iconName];
   const [isHovered, setIsHovered] = useState(false);
   const [isPressed, setIsPressed] = useState(false);
@@ -157,13 +195,14 @@ export function MenuButton({
 
   return (
     <button
+      ref={buttonRef}
       onClick={onClick}
       title={label}
       data-panel-id={panelId}
       className="focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:scale-110"
       style={{
-        width: config.size,
-        height: config.size,
+        width: fluid ? "100%" : config.size,
+        height: fluid ? "100%" : config.size,
         borderRadius: 4, // Slightly rounded to match inventory slots
         color: theme.colors.accent.primary, // Icons always gold
         cursor: "pointer",

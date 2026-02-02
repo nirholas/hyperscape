@@ -470,6 +470,14 @@ export interface PlayerSetEmotePayload {
 }
 
 /**
+ * Fire lighting started payload (model appears during 3s lighting animation)
+ */
+export interface FireLightingStartedPayload {
+  playerId: string;
+  position: Position3D;
+}
+
+/**
  * Fire created payload
  */
 export interface FireCreatedPayload {
@@ -630,6 +638,208 @@ export interface SmithingCompletePayload {
   outputItemId: string;
   totalSmithed: number;
   totalXp: number;
+}
+
+// =========================================================================
+// CRAFTING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player initiated crafting (used needle, chisel, or gold bar on furnace)
+ */
+export interface CraftingInteractPayload {
+  playerId: string;
+  /** How the crafting was initiated */
+  triggerType: "needle" | "chisel" | "furnace";
+  /** Optional station entity ID for furnace crafting */
+  stationId?: string;
+  /** Specific input material for recipe filtering (e.g., "leather", "uncut_sapphire") */
+  inputItemId?: string;
+}
+
+/**
+ * Crafting interface opened - show available recipes to player
+ */
+export interface CraftingInterfaceOpenPayload {
+  playerId: string;
+  availableRecipes: Array<{
+    output: string;
+    name: string;
+    category: string;
+    inputs: Array<{ item: string; amount: number }>;
+    tools: string[];
+    level: number;
+    xp: number;
+    meetsLevel: boolean;
+    hasInputs: boolean;
+  }>;
+  station: string;
+}
+
+/**
+ * Request to craft a specific item
+ */
+export interface ProcessingCraftingRequestPayload {
+  playerId: string;
+  recipeId: string;
+  quantity: number;
+}
+
+/**
+ * Crafting process started
+ */
+export interface CraftingStartPayload {
+  playerId: string;
+  recipeId: string;
+}
+
+/**
+ * Crafting batch completed
+ */
+export interface CraftingCompletePayload {
+  playerId: string;
+  recipeId: string;
+  outputItemId: string;
+  totalCrafted: number;
+  totalXp: number;
+}
+
+// =========================================================================
+// FLETCHING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player initiated fletching (used knife on logs, or item-on-item like bowstring + unstrung bow)
+ */
+export interface FletchingInteractPayload {
+  playerId: string;
+  /** How the fletching was initiated */
+  triggerType: "knife" | "item_on_item";
+  /** Primary input item (e.g., "oak_logs", "bowstring") */
+  inputItemId: string;
+  /** Secondary input for item-on-item (e.g., "shortbow_u", "headless_arrow") */
+  secondaryItemId?: string;
+}
+
+/**
+ * Fletching interface opened - show available recipes to player
+ */
+export interface FletchingInterfaceOpenPayload {
+  playerId: string;
+  availableRecipes: Array<{
+    recipeId: string;
+    output: string;
+    name: string;
+    category: string;
+    outputQuantity: number;
+    inputs: Array<{ item: string; amount: number }>;
+    tools: string[];
+    level: number;
+    xp: number;
+    meetsLevel: boolean;
+    hasInputs: boolean;
+  }>;
+}
+
+/**
+ * Request to fletch a specific recipe
+ */
+export interface ProcessingFletchingRequestPayload {
+  playerId: string;
+  recipeId: string;
+  quantity: number;
+}
+
+/**
+ * Fletching process started
+ */
+export interface FletchingStartPayload {
+  playerId: string;
+  recipeId: string;
+}
+
+/**
+ * Fletching batch completed
+ */
+export interface FletchingCompletePayload {
+  playerId: string;
+  recipeId: string;
+  outputItemId: string;
+  totalCrafted: number;
+  totalXp: number;
+}
+
+// =========================================================================
+// RUNECRAFTING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player clicked on a runecrafting altar
+ */
+export interface RunecraftingInteractPayload {
+  playerId: string;
+  altarId: string;
+  runeType: string;
+}
+
+/**
+ * Runecrafting completed - runes crafted
+ */
+export interface RunecraftingCompletePayload {
+  playerId: string;
+  runeType: string;
+  runeItemId: string;
+  essenceConsumed: number;
+  runesProduced: number;
+  multiplier: number;
+  xpAwarded: number;
+}
+
+// =========================================================================
+// TANNING EVENT PAYLOADS
+// =========================================================================
+
+/**
+ * Player interacted with tanner NPC
+ */
+export interface TanningInteractPayload {
+  playerId: string;
+  npcId: string;
+}
+
+/**
+ * Tanning interface opened - show available hides to tan
+ */
+export interface TanningInterfaceOpenPayload {
+  playerId: string;
+  availableRecipes: Array<{
+    input: string;
+    output: string;
+    cost: number;
+    name: string;
+    hasHide: boolean;
+    hideCount: number;
+  }>;
+}
+
+/**
+ * Request to tan hides
+ */
+export interface TanningRequestPayload {
+  playerId: string;
+  inputItemId: string;
+  quantity: number;
+}
+
+/**
+ * Tanning completed
+ */
+export interface TanningCompletePayload {
+  playerId: string;
+  inputItemId: string;
+  outputItemId: string;
+  totalTanned: number;
+  totalCost: number;
 }
 
 // =========================================================================
@@ -965,6 +1175,7 @@ export interface EventMap {
 
   // Processing Events (Firemaking & Cooking)
   [EventType.PLAYER_SET_EMOTE]: PlayerSetEmotePayload;
+  [EventType.FIRE_LIGHTING_STARTED]: FireLightingStartedPayload;
   [EventType.FIRE_CREATED]: FireCreatedPayload;
   [EventType.FIRE_EXTINGUISHED]: FireExtinguishedPayload;
   [EventType.COOKING_COMPLETED]: CookingCompletedPayload;
@@ -987,6 +1198,30 @@ export interface EventMap {
   [EventType.SMITHING_START]: SmithingStartPayload;
   [EventType.SMITHING_COMPLETE]: SmithingCompletePayload;
   [EventType.PROCESSING_SMITHING_REQUEST]: ProcessingSmithingRequestPayload;
+
+  // Crafting Events (leather, jewelry, gem cutting)
+  [EventType.CRAFTING_INTERACT]: CraftingInteractPayload;
+  [EventType.CRAFTING_INTERFACE_OPEN]: CraftingInterfaceOpenPayload;
+  [EventType.CRAFTING_START]: CraftingStartPayload;
+  [EventType.CRAFTING_COMPLETE]: CraftingCompletePayload;
+  [EventType.PROCESSING_CRAFTING_REQUEST]: ProcessingCraftingRequestPayload;
+
+  // Fletching Events (knife + logs, stringing, arrow tipping)
+  [EventType.FLETCHING_INTERACT]: FletchingInteractPayload;
+  [EventType.FLETCHING_INTERFACE_OPEN]: FletchingInterfaceOpenPayload;
+  [EventType.FLETCHING_START]: FletchingStartPayload;
+  [EventType.FLETCHING_COMPLETE]: FletchingCompletePayload;
+  [EventType.PROCESSING_FLETCHING_REQUEST]: ProcessingFletchingRequestPayload;
+
+  // Runecrafting Events (instant altar conversion)
+  [EventType.RUNECRAFTING_INTERACT]: RunecraftingInteractPayload;
+  [EventType.RUNECRAFTING_COMPLETE]: RunecraftingCompletePayload;
+
+  // Tanning Events (NPC tanner: hides → leather)
+  [EventType.TANNING_INTERACT]: TanningInteractPayload;
+  [EventType.TANNING_INTERFACE_OPEN]: TanningInterfaceOpenPayload;
+  [EventType.TANNING_REQUEST]: TanningRequestPayload;
+  [EventType.TANNING_COMPLETE]: TanningCompletePayload;
 
   // Quest Events
   [EventType.QUEST_START_CONFIRM]: QuestStartConfirmPayload;
@@ -1138,6 +1373,38 @@ export interface XpLampAppliedPayload {
   playerId: string;
   skillId: string;
   xpAmount: number;
+}
+
+// =========================================================================
+// ACTION BAR EVENT PAYLOADS
+// =========================================================================
+
+/** Action bar slot content - can be an item, skill, spell, prayer, or combat style */
+export interface ActionBarSlotContent {
+  type: "item" | "skill" | "spell" | "prayer" | "combatstyle" | "empty";
+  id: string;
+  itemId?: string;
+  skillId?: string;
+  spellId?: string;
+  prayerId?: string;
+  combatStyleId?: string;
+  quantity?: number;
+  icon?: string;
+  label?: string;
+}
+
+/** Payload for action bar slot update events */
+export interface ActionBarSlotUpdatePayload {
+  barId: number;
+  slotIndex: number;
+  slot: ActionBarSlotContent;
+}
+
+/** Payload for action bar slot swap events */
+export interface ActionBarSlotSwapPayload {
+  barId: number;
+  fromIndex: number;
+  toIndex: number;
 }
 
 // Generic event base type

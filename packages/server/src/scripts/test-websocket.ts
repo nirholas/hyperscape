@@ -1,4 +1,3 @@
-// @ts-nocheck - Test script with optional dependencies
 import WebSocket from "ws";
 import { pack, unpack } from "msgpackr";
 

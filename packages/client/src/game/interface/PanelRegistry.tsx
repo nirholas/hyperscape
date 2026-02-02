@@ -11,15 +11,7 @@
  * @packageDocumentation
  */
 
-import React, {
-  Suspense,
-  lazy,
-  type ReactNode,
-  useRef,
-  useState,
-  useEffect,
-  useMemo,
-} from "react";
+import React, { Suspense, lazy, type ReactNode } from "react";
 import type {
   ClientWorld,
   InventorySlotItem,
@@ -184,127 +176,37 @@ export function getResponsivePanelSize(
 }
 
 // ============================================================================
-// MENUBAR DIMENSIONS (defined before PANEL_CONFIG to avoid hoisting issues)
+// MENUBAR DIMENSIONS (simplified - matches inventory panel approach)
 // ============================================================================
-
-// Menu bar configuration constants (similar to ActionBarPanel)
-const MENUBAR_MIN_BUTTONS = 4;
-const MENUBAR_MAX_BUTTONS = 10; // ALL_MENU_BUTTONS.length - defined inline to avoid circular reference
-const MENUBAR_DEFAULT_BUTTONS = 10;
 
 // Special panel IDs that open modals instead of windows
 export const MODAL_PANEL_IDS = ["map", "stats", "death"] as const;
 export type ModalPanelId = (typeof MODAL_PANEL_IDS)[number];
-const MENUBAR_BUTTON_SIZE = 30; // Size of each button (matches MenuButton compact size)
-const MENUBAR_BUTTON_GAP = 2; // Gap between buttons
-const MENUBAR_PADDING = 2; // Padding around buttons (tight wrap)
-const MENUBAR_CONTROL_SIZE = 20; // Size of +/- control buttons
-const MENUBAR_CONTROL_GAP = 4; // Gap between controls and buttons
-
-// Grid layout configuration (2 columns x N rows)
-const MENUBAR_GRID_COLUMNS = 2;
 
 /**
- * Calculate menubar dimensions for horizontal layout (1 row x N columns)
- * Based on visible controls (like ActionBarPanel)
+ * Menubar dimensions - simplified to match inventory panel sizing approach
+ *
+ * Layout: 5 columns x 2 rows for 10 buttons
+ * Uses CSS Grid with `repeat(5, 1fr)` so buttons scale with container
+ * Width matches inventory panel for consistent right-column alignment
  */
-function calcMenubarHorizontalDimensions(
-  buttonCount: number,
-  options: { isEditMode?: boolean } = {},
-): {
-  width: number;
-  height: number;
-} {
-  const { isEditMode = false } = options;
-
-  // Buttons grid width: buttons + gaps + padding
-  const buttonsWidth =
-    buttonCount * MENUBAR_BUTTON_SIZE +
-    (buttonCount - 1) * MENUBAR_BUTTON_GAP +
-    MENUBAR_PADDING * 2;
-
-  // Left side: - button only in edit mode
-  const leftWidth = isEditMode ? MENUBAR_CONTROL_SIZE + MENUBAR_CONTROL_GAP : 0;
-
-  // Right side: + button only in edit mode
-  const rightWidth = isEditMode
-    ? MENUBAR_CONTROL_GAP + MENUBAR_CONTROL_SIZE
-    : 0;
-
-  return {
-    width: leftWidth + buttonsWidth + rightWidth,
-    height: MENUBAR_BUTTON_SIZE + MENUBAR_PADDING * 2,
-  };
-}
-
-/**
- * Calculate menubar dimensions for grid layout (2 columns x N rows)
- * Based on visible controls (like ActionBarPanel)
- */
-function calcMenubarGridDimensions(
-  buttonCount: number,
-  options: { isEditMode?: boolean } = {},
-): {
-  width: number;
-  height: number;
-  rows: number;
-} {
-  const { isEditMode = false } = options;
-  const rows = Math.ceil(buttonCount / MENUBAR_GRID_COLUMNS);
-
-  // Top/bottom controls only in edit mode
-  const controlHeight = isEditMode
-    ? MENUBAR_CONTROL_SIZE + MENUBAR_CONTROL_GAP
-    : 0;
-
-  return {
-    width:
-      MENUBAR_GRID_COLUMNS * MENUBAR_BUTTON_SIZE +
-      (MENUBAR_GRID_COLUMNS - 1) * MENUBAR_BUTTON_GAP +
-      MENUBAR_PADDING * 2,
-    height:
-      rows * MENUBAR_BUTTON_SIZE +
-      (rows - 1) * MENUBAR_BUTTON_GAP +
-      MENUBAR_PADDING * 2 +
-      controlHeight * 2,
-    rows,
-  };
-}
-
-// Buffer for borders (2px total)
-const MENUBAR_BORDER_BUFFER = 2;
-
-// Pre-calculate grid dimensions for min size (allows resizing to grid layout)
-const gridDims = calcMenubarGridDimensions(MENUBAR_MAX_BUTTONS, {
-  isEditMode: false,
-});
-
-/** Exported menubar dimensions for panel config (supports both layouts) */
 export const MENUBAR_DIMENSIONS = {
-  minButtons: MENUBAR_MIN_BUTTONS,
-  maxButtons: MENUBAR_MAX_BUTTONS,
-  defaultButtons: MENUBAR_DEFAULT_BUTTONS,
-  buttonSize: MENUBAR_BUTTON_SIZE,
-  buttonGap: MENUBAR_BUTTON_GAP,
-  padding: MENUBAR_PADDING,
-  controlSize: MENUBAR_CONTROL_SIZE,
-  controlGap: MENUBAR_CONTROL_GAP,
-  gridColumns: MENUBAR_GRID_COLUMNS,
-  // Default horizontal layout (9 buttons) - normal mode (no edit controls)
-  ...calcMenubarHorizontalDimensions(MENUBAR_DEFAULT_BUTTONS, {
-    isEditMode: false,
-  }),
-  // Minimum width aligned with equipment panel (235px) for consistent right column sizing
-  // Only switches to 2-column grid layout below this width
+  // Match inventory panel width for consistent right column
   minWidth: 235,
-  minHeight:
-    calcMenubarHorizontalDimensions(MENUBAR_MIN_BUTTONS, { isEditMode: false })
-      .height + MENUBAR_BORDER_BUFFER,
-  // Maximum size (9-button horizontal layout in edit mode)
-  maxWidth:
-    calcMenubarHorizontalDimensions(MENUBAR_MAX_BUTTONS, { isEditMode: true })
-      .width + MENUBAR_BORDER_BUFFER,
-  maxHeight: gridDims.height + MENUBAR_BORDER_BUFFER,
+  // 2 rows with very compact ~20px buttons + padding (2px) + gap (1px) + border (2px)
+  // Calculation: 2 * 20 + 1 + 2*2 + 2 = 47px
+  minHeight: 47,
+  // Preferred size - very compact 2-row layout
+  width: 235,
+  height: 50,
+  // Maximum - match inventory panel maxWidth
+  maxWidth: 390,
+  maxHeight: 70,
+  // Grid configuration
+  columns: 5,
+  rows: 2,
+  gap: 1,
+  padding: 2,
 };
 
 // ============================================================================
@@ -389,8 +291,8 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Skills - 3x4 grid of skill icons with total/combat level footer
   // Mobile size matches Prayer panel for consistent tab switching
   skills: {
-    minSize: { width: 235, height: 310 },
-    preferredSize: { width: 325, height: 400 },
+    minSize: { width: 235, height: 280 },
+    preferredSize: { width: 325, height: 360 },
     maxSize: { width: 390, height: 470 },
     scrollable: false,
     resizable: true,
@@ -411,10 +313,11 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
   },
   // Prayer - grid of prayer icons with adaptive layout
+  // minSize matches right column (235px width, 280px height) for consistent alignment
   prayer: {
     minSize: {
-      width: PRAYER_PANEL_DIMENSIONS.minWidth,
-      height: PRAYER_PANEL_DIMENSIONS.minHeight,
+      width: 235,
+      height: 280,
     },
     preferredSize: {
       width: PRAYER_PANEL_DIMENSIONS.defaultWidth,
@@ -451,7 +354,7 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
   // Combat - combat stats and style selector
   combat: {
     minSize: { width: 235, height: 280 },
-    preferredSize: { width: 310, height: 360 },
+    preferredSize: { width: 310, height: 340 },
     maxSize: { width: 420, height: 470 },
     scrollable: false,
     resizable: true,
@@ -469,9 +372,10 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
   },
   // Spells - magic spellbook with spell grid
+  // minWidth matches right column (235px) for consistent alignment
   spells: {
     minSize: {
-      width: SPELLS_PANEL_DIMENSIONS.minWidth,
+      width: 235, // Match right column width for consistency
       height: SPELLS_PANEL_DIMENSIONS.minHeight,
     },
     preferredSize: {
@@ -629,9 +533,8 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
       },
     },
   },
-  // Menu bar - responsive grid of panel buttons
-  // Buttons scale to fit container, supports various grid layouts (1-5 rows)
-  // Uses content-based sizing to wrap tightly around buttons
+  // Menu bar - fluid 5x2 grid of panel buttons (matches inventory approach)
+  // Uses CSS Grid with 1fr units so buttons scale seamlessly with container
   menubar: {
     minSize: {
       width: MENUBAR_DIMENSIONS.minWidth,
@@ -647,9 +550,12 @@ export const PANEL_CONFIG: Record<string, PanelConfig> = {
     },
     scrollable: false,
     resizable: true,
-    scaleFactor: { min: 0.7, max: 1.4 },
+    scaleFactor: { min: 0.8, max: 1.2 },
     responsive: {
-      mobile: { width: MENUBAR_DIMENSIONS.minWidth, height: 100 },
+      mobile: {
+        width: MENUBAR_DIMENSIONS.minWidth,
+        height: MENUBAR_DIMENSIONS.minHeight,
+      },
       tablet: {
         width: MENUBAR_DIMENSIONS.width,
         height: MENUBAR_DIMENSIONS.height,
@@ -902,336 +808,47 @@ const ALL_MENU_BUTTONS: Array<{
   { panelId: "settings", iconName: "settings", label: "Settings" },
 ];
 
-// Menubar sizing constraints
-const MENUBAR_MIN_BUTTON_SIZE = 20; // Minimum button size in pixels (reduced for compact layouts)
-const MENUBAR_MAX_BUTTON_SIZE = 32; // Maximum button size in pixels (reduced for cleaner 1-row style)
-
 /**
- * Calculate optimal grid layout and button size based on container dimensions.
+ * Menu bar panel - displays navigation buttons in a fluid 5x2 grid
  *
- * Algorithm: Find the layout with fewest rows where buttons fit at minimum size.
- * This ensures we always prefer horizontal layouts when possible, and only add
- * rows when the width is too narrow for fewer rows.
+ * Uses CSS Grid with `repeat(5, 1fr)` so buttons scale seamlessly with container.
+ * Matches inventory panel's approach for consistent right-column sizing.
  */
-function calculateMenuBarLayout(
-  containerWidth: number,
-  containerHeight: number,
-  buttonCount: number,
-): {
-  cols: number;
-  rows: number;
-  buttonSize: number;
-  gap: number;
-  padding: number;
-} {
-  const padding = MENUBAR_PADDING;
-  const gap = MENUBAR_BUTTON_GAP;
-
-  // Available space after padding
-  const availableWidth = containerWidth - padding * 2 - MENUBAR_BORDER_BUFFER;
-  const availableHeight = containerHeight - padding * 2 - MENUBAR_BORDER_BUFFER;
-
-  // Try layouts from fewest rows to most - pick first that fits at min button size
-  for (let rows = 1; rows <= 5; rows++) {
-    const cols = Math.ceil(buttonCount / rows);
-
-    // Calculate max button size that fits in each dimension
-    const maxWidthButtonSize = (availableWidth - (cols - 1) * gap) / cols;
-    const maxHeightButtonSize = (availableHeight - (rows - 1) * gap) / rows;
-
-    // Use the smaller constraint
-    const buttonSize = Math.min(maxWidthButtonSize, maxHeightButtonSize);
-
-    // If buttons fit at minimum size, use this layout (fewest rows that fits)
-    if (buttonSize >= MENUBAR_MIN_BUTTON_SIZE) {
-      // Clamp to max button size for cleaner appearance
-      const clampedSize = Math.min(
-        Math.floor(buttonSize),
-        MENUBAR_MAX_BUTTON_SIZE,
-      );
-      return {
-        cols,
-        rows,
-        buttonSize: clampedSize,
-        gap,
-        padding,
-      };
-    }
-  }
-
-  // Fallback: use max rows (3x3 grid) with minimum button size
-  const fallbackRows = Math.ceil(Math.sqrt(buttonCount));
-  const fallbackCols = Math.ceil(buttonCount / fallbackRows);
-  return {
-    cols: fallbackCols,
-    rows: fallbackRows,
-    buttonSize: MENUBAR_MIN_BUTTON_SIZE,
-    gap,
-    padding,
-  };
-}
-
-/**
- * Calculate the content dimensions for a given button layout
- * Uses a fixed "canonical" button size for consistent snap points
- */
-function calculateMenuBarContentSize(
-  cols: number,
-  rows: number,
-  gap: number,
-  padding: number,
-  buttonSize: number = 30, // Default canonical button size
-): { width: number; height: number } {
-  return {
-    width:
-      cols * buttonSize +
-      (cols - 1) * gap +
-      padding * 2 +
-      MENUBAR_BORDER_BUFFER,
-    height:
-      rows * buttonSize +
-      (rows - 1) * gap +
-      padding * 2 +
-      MENUBAR_BORDER_BUFFER,
-  };
-}
-
-/** Menu bar panel that displays all navigation buttons with snap-to-content sizing */
 function MenuBarPanel({
   onPanelClick,
-  windowId,
 }: {
   onPanelClick?: (panelId: string) => void;
   windowId?: string;
 }): React.ReactElement {
   const theme = useThemeStore((s) => s.theme);
-  const updateWindow = useWindowStore((s) => s.updateWindow);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  // Track container size
-  const [containerSize, setContainerSize] = useState({
-    width: 300,
-    height: 50,
-  });
-
-  // Always show all buttons
-  const buttonCount = ALL_MENU_BUTTONS.length;
-
-  // Observe container size changes
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const updateSize = () => {
-      const rect = container.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setContainerSize((prev) => {
-          if (prev.width !== rect.width || prev.height !== rect.height) {
-            return { width: rect.width, height: rect.height };
-          }
-          return prev;
-        });
-      }
-    };
-
-    // Initial measurement
-    updateSize();
-
-    // Use ResizeObserver for responsive updates
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(container);
-
-    return () => observer.disconnect();
-  }, []);
-
-  // Calculate layout based on container size
-  const layout = useMemo(
-    () =>
-      calculateMenuBarLayout(
-        containerSize.width,
-        containerSize.height,
-        buttonCount,
-      ),
-    [containerSize.width, containerSize.height, buttonCount],
-  );
-
-  // Track previous row count to detect layout changes
-  const prevRowsRef = useRef<number | null>(null);
-
-  // Get equipment panel config to align minimum widths
-  const equipmentConfig = getPanelConfig("equipment");
-
-  // Use equipment panel's minWidth as the menubar's minWidth for consistent alignment
-  // This ensures the menubar stays in single-row mode until it matches other panel widths
-  const globalMinWidth = equipmentConfig.minSize.width;
-
-  const globalMaxWidth = useMemo(() => {
-    // Maximum: single-row at maximum button size
-    return calculateMenuBarContentSize(
-      buttonCount,
-      1,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      MENUBAR_MAX_BUTTON_SIZE,
-    ).width;
-  }, [buttonCount]);
-
-  const globalMinHeight = useMemo(() => {
-    // Minimum: 1-row layout at minimum button size
-    return calculateMenuBarContentSize(
-      buttonCount,
-      1,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      MENUBAR_MIN_BUTTON_SIZE,
-    ).height;
-  }, [buttonCount]);
-
-  const globalMaxHeight = useMemo(() => {
-    // Maximum: max-rows layout (e.g., 3x3 for 9 buttons)
-    const maxRows = Math.ceil(Math.sqrt(buttonCount));
-    return calculateMenuBarContentSize(
-      Math.ceil(buttonCount / maxRows),
-      maxRows,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      MENUBAR_MAX_BUTTON_SIZE,
-    ).height;
-  }, [buttonCount]);
-
-  // Get current window state for position adjustments
-  const currentWindow = useWindowStore((s) => s.windows.get(windowId || ""));
-
-  // Update window constraints and snap height when layout rows change
-  useEffect(() => {
-    if (!windowId) return;
-
-    const currentRows = layout.rows;
-    const isInitialMount = prevRowsRef.current === null;
-    const rowsChanged = prevRowsRef.current !== currentRows;
-
-    // Calculate exact content dimensions for current layout
-    const contentHeight = calculateMenuBarContentSize(
-      layout.cols,
-      currentRows,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      layout.buttonSize,
-    ).height;
-
-    const contentWidth = calculateMenuBarContentSize(
-      layout.cols,
-      currentRows,
-      MENUBAR_BUTTON_GAP,
-      MENUBAR_PADDING,
-      layout.buttonSize,
-    ).width;
-
-    // Allow height to vary between min and max possible layouts
-    // This enables resize-triggered layout transitions
-    updateWindow(windowId, {
-      minSize: { width: globalMinWidth, height: globalMinHeight },
-      maxSize: { width: globalMaxWidth, height: globalMaxHeight },
-    });
-
-    // Only snap the window size on initial mount or when rows change
-    // Do NOT auto-snap based on size mismatch - this prevents manual resizing
-    if (isInitialMount || rowsChanged) {
-      prevRowsRef.current = currentRows;
-
-      // Get viewport dimensions
-      const viewport = {
-        width: typeof window !== "undefined" ? window.innerWidth : 1920,
-        height: typeof window !== "undefined" ? window.innerHeight : 1080,
-      };
-
-      // Calculate new position to keep window on screen
-      // If window was at an edge, keep it at that edge with new size
-      let newX = currentWindow?.position.x ?? 0;
-      let newY = currentWindow?.position.y ?? 0;
-      const oldWidth = currentWindow?.size.width ?? contentWidth;
-      const oldHeight = currentWindow?.size.height ?? contentHeight;
-
-      // Edge detection threshold
-      const edgeThreshold = 15;
-
-      // Check if window was at right edge - keep right edge aligned
-      const wasAtRightEdge =
-        Math.abs(newX + oldWidth - viewport.width) < edgeThreshold;
-      if (wasAtRightEdge) {
-        newX = viewport.width - contentWidth;
-      }
-
-      // Check if window was at bottom edge - keep bottom edge aligned
-      const wasAtBottomEdge =
-        Math.abs(newY + oldHeight - viewport.height) < edgeThreshold;
-      if (wasAtBottomEdge) {
-        newY = viewport.height - contentHeight;
-      }
-
-      // Clamp to viewport to ensure window stays on screen
-      newX = Math.max(0, Math.min(newX, viewport.width - contentWidth));
-      newY = Math.max(0, Math.min(newY, viewport.height - contentHeight));
-
-      updateWindow(windowId, {
-        size: { width: contentWidth, height: contentHeight },
-        position: { x: newX, y: newY },
-      });
-    }
-  }, [
-    windowId,
-    layout.rows,
-    layout.cols,
-    layout.buttonSize,
-    globalMinWidth,
-    globalMaxWidth,
-    globalMinHeight,
-    globalMaxHeight,
-    updateWindow,
-    currentWindow?.position.x,
-    currentWindow?.position.y,
-    currentWindow?.size.width,
-    currentWindow?.size.height,
-  ]);
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: "absolute",
         inset: 0,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        overflow: "hidden",
+        display: "grid",
+        gridTemplateColumns: `repeat(${MENUBAR_DIMENSIONS.columns}, 1fr)`,
+        gridTemplateRows: `repeat(${MENUBAR_DIMENSIONS.rows}, 1fr)`,
+        gap: MENUBAR_DIMENSIONS.gap,
+        padding: MENUBAR_DIMENSIONS.padding,
+        background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
+        border: `1px solid ${theme.colors.border.default}`,
+        borderRadius: 4,
+        boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
       }}
     >
-      {/* Buttons container - fixed grid layout that fills the window */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: `repeat(${layout.cols}, ${layout.buttonSize}px)`,
-          gridTemplateRows: `repeat(${layout.rows}, ${layout.buttonSize}px)`,
-          padding: layout.padding,
-          gap: layout.gap,
-          background: `linear-gradient(180deg, ${theme.colors.background.secondary} 0%, ${theme.colors.background.primary} 100%)`,
-          border: `1px solid ${theme.colors.border.default}`,
-          borderRadius: 4,
-          boxShadow: `inset 0 2px 8px rgba(0, 0, 0, 0.5), ${theme.shadows.md}`,
-        }}
-      >
-        {ALL_MENU_BUTTONS.map((button) => (
-          <MenuButton
-            key={button.panelId}
-            iconName={button.iconName}
-            label={button.label}
-            active={false}
-            onClick={() => onPanelClick?.(button.panelId)}
-            customSize={layout.buttonSize}
-            panelId={button.panelId}
-          />
-        ))}
-      </div>
+      {ALL_MENU_BUTTONS.map((button) => (
+        <MenuButton
+          key={button.panelId}
+          iconName={button.iconName}
+          label={button.label}
+          active={false}
+          onClick={() => onPanelClick?.(button.panelId)}
+          fluid
+          panelId={button.panelId}
+        />
+      ))}
     </div>
   );
 }

@@ -59,10 +59,10 @@ export interface ArrowVisualConfig {
  * Small projectiles with subtle glow
  */
 const STRIKE_BASE: Partial<SpellVisualConfig> = {
-  size: 0.25,
-  glowIntensity: 0.3,
-  trailLength: 3,
-  trailFade: 0.4,
+  size: 0.5,
+  glowIntensity: 0.7,
+  trailLength: 4,
+  trailFade: 0.5,
   pulseSpeed: 0,
   pulseAmount: 0,
 };
@@ -72,12 +72,12 @@ const STRIKE_BASE: Partial<SpellVisualConfig> = {
  * Larger projectiles with more glow and trails
  */
 const BOLT_BASE: Partial<SpellVisualConfig> = {
-  size: 0.35,
-  glowIntensity: 0.5,
+  size: 0.7,
+  glowIntensity: 0.8,
   trailLength: 5,
-  trailFade: 0.3,
-  pulseSpeed: 4,
-  pulseAmount: 0.1,
+  trailFade: 0.4,
+  pulseSpeed: 5,
+  pulseAmount: 0.2,
 };
 
 /**
@@ -90,32 +90,28 @@ export const SPELL_VISUALS: Readonly<Record<string, SpellVisualConfig>> =
       ...STRIKE_BASE,
       color: 0xcccccc, // Light gray/white
       coreColor: 0xffffff,
-      size: 0.25,
-      glowIntensity: 0.25,
+      glowIntensity: 0.6,
     } as SpellVisualConfig,
 
     water_strike: {
       ...STRIKE_BASE,
       color: 0x3b82f6, // Blue
       coreColor: 0x93c5fd,
-      size: 0.25,
-      glowIntensity: 0.35,
+      glowIntensity: 0.75,
     } as SpellVisualConfig,
 
     earth_strike: {
       ...STRIKE_BASE,
       color: 0x8b4513, // Brown
       coreColor: 0xd2691e,
-      size: 0.25,
-      glowIntensity: 0.2,
+      glowIntensity: 0.6,
     } as SpellVisualConfig,
 
     fire_strike: {
       ...STRIKE_BASE,
       color: 0xff4500, // Orange-red
       coreColor: 0xffff00,
-      size: 0.25,
-      glowIntensity: 0.5,
+      glowIntensity: 0.85,
     } as SpellVisualConfig,
 
     // Bolt spells (Level 17-35)
@@ -123,32 +119,28 @@ export const SPELL_VISUALS: Readonly<Record<string, SpellVisualConfig>> =
       ...BOLT_BASE,
       color: 0xcccccc,
       coreColor: 0xffffff,
-      size: 0.35,
-      glowIntensity: 0.35,
+      glowIntensity: 0.7,
     } as SpellVisualConfig,
 
     water_bolt: {
       ...BOLT_BASE,
       color: 0x3b82f6,
       coreColor: 0x93c5fd,
-      size: 0.35,
-      glowIntensity: 0.45,
+      glowIntensity: 0.8,
     } as SpellVisualConfig,
 
     earth_bolt: {
       ...BOLT_BASE,
       color: 0x8b4513,
       coreColor: 0xd2691e,
-      size: 0.35,
-      glowIntensity: 0.3,
+      glowIntensity: 0.7,
     } as SpellVisualConfig,
 
     fire_bolt: {
       ...BOLT_BASE,
       color: 0xff4500,
       coreColor: 0xffff00,
-      size: 0.35,
-      glowIntensity: 0.6,
+      glowIntensity: 0.9,
     } as SpellVisualConfig,
   });
 
@@ -161,8 +153,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513, // Brown wood
       headColor: 0xa0a0a0, // Gray metal
       fletchingColor: 0xffffff, // White feathers
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0, // Straight line trajectory
     },
@@ -171,8 +163,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513,
       headColor: 0xcd7f32, // Bronze
       fletchingColor: 0xffffff,
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0,
     },
@@ -181,8 +173,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513,
       headColor: 0x71797e, // Iron gray
       fletchingColor: 0xffffff,
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0,
     },
@@ -191,8 +183,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513,
       headColor: 0xb0b0b0, // Steel
       fletchingColor: 0xffffff,
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0,
     },
@@ -201,8 +193,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513,
       headColor: 0x4169e1, // Mithril blue
       fletchingColor: 0xe0e0ff,
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0,
     },
@@ -211,8 +203,8 @@ export const ARROW_VISUALS: Readonly<Record<string, ArrowVisualConfig>> =
       shaftColor: 0x8b4513,
       headColor: 0x228b22, // Adamant green
       fletchingColor: 0xe0ffe0,
-      length: 0.6,
-      width: 0.15,
+      length: 0.35,
+      width: 0.08,
       rotateToDirection: true,
       arcHeight: 0,
     },

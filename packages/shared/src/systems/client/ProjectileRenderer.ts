@@ -40,7 +40,7 @@ import {
  * Trail sprite for spell effects
  */
 interface TrailSprite {
-  sprite: THREE.Sprite;
+  mesh: THREE.Mesh;
   /** Position in trail (0 = oldest, length-1 = newest) */
   index: number;
 }
@@ -49,7 +49,7 @@ interface TrailSprite {
  * Active projectile being rendered
  */
 interface ActiveProjectile {
-  /** Main visual - sprite for spells, Group for arrows */
+  /** Main visual - Group for both spells (multi-layer) and arrows (mesh parts) */
   sprite: THREE.Sprite | THREE.Group;
   /** Current position of projectile */
   currentPos: THREE.Vector3;
@@ -79,6 +79,20 @@ interface ActiveProjectile {
   trailPositions: THREE.Vector3[];
   /** Current trail position index */
   trailIndex: number;
+  /** Orbiting spark meshes for bolt-tier spells (animated in update) */
+  sparkMeshes?: THREE.Mesh[];
+  /** Billboard mesh children that need to face camera each frame */
+  billboardMeshes?: THREE.Mesh[];
+}
+
+/**
+ * Impact particle from a spell hit burst
+ */
+interface ImpactParticle {
+  mesh: THREE.Mesh;
+  velocity: THREE.Vector3;
+  life: number;
+  maxLife: number;
 }
 
 /**
@@ -88,6 +102,7 @@ export class ProjectileRenderer extends System {
   name = "projectile-renderer";
 
   private activeProjectiles: ActiveProjectile[] = [];
+  private activeImpactParticles: ImpactParticle[] = [];
 
   // Projectile movement constants
   private readonly PROJECTILE_SPEED = 12; // Units per second (tiles ~= 1 unit)
@@ -107,8 +122,13 @@ export class ProjectileRenderer extends System {
 
   // Cached textures to avoid per-projectile allocation
   private arrowTextures: Map<string, THREE.Texture> = new Map();
-  private spellTextures: Map<string, THREE.Texture> = new Map();
-  private trailTexture: THREE.Texture | null = null;
+
+  // DataTexture-based glow caches (WebGPU-safe, color baked into pixels)
+  // Used for both projectile layers and trail meshes via getCachedGlowTexture()
+  private spellGlowTextures: Map<string, THREE.DataTexture> = new Map();
+
+  // Shared geometry for billboard particles (reused across all projectiles)
+  private static particleGeometry: THREE.CircleGeometry | null = null;
 
   // Last trail update time
   private lastTrailUpdate = 0;
@@ -142,9 +162,8 @@ export class ProjectileRenderer extends System {
     );
     this.world.on(EventType.COMBAT_PROJECTILE_HIT, this.boundHitHandler, this);
 
-    // Pre-create textures
+    // Pre-create arrow texture
     this.createArrowTexture("default", getArrowVisual("default"));
-    this.createTrailTexture();
   }
 
   /**
@@ -277,100 +296,190 @@ export class ProjectileRenderer extends System {
   }
 
   /**
-   * Create spell texture with glow effect
+   * Get shared CircleGeometry for billboard particles.
+   * Reused across all projectile particles to avoid per-particle geometry allocation.
    */
-  private createSpellTexture(spellId: string, config: SpellVisualConfig): void {
-    if (this.spellTextures.has(spellId)) return;
-
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const size = 64;
-    canvas.width = size;
-    canvas.height = size;
-
-    // Create radial gradient for glowing orb
-    const gradient = ctx.createRadialGradient(
-      size / 2,
-      size / 2,
-      0,
-      size / 2,
-      size / 2,
-      size / 2,
-    );
-
-    // Core color (bright center)
-    const coreColor = config.coreColor ?? 0xffffff;
-    const coreR = (coreColor >> 16) & 255;
-    const coreG = (coreColor >> 8) & 255;
-    const coreB = coreColor & 255;
-
-    // Main color
-    const r = (config.color >> 16) & 255;
-    const g = (config.color >> 8) & 255;
-    const b = config.color & 255;
-
-    // Glow intensity affects gradient stops
-    const glowIntensity = config.glowIntensity;
-
-    gradient.addColorStop(0, `rgba(${coreR}, ${coreG}, ${coreB}, 1)`);
-    gradient.addColorStop(
-      0.2,
-      `rgba(${r}, ${g}, ${b}, ${0.9 * glowIntensity + 0.5})`,
-    );
-    gradient.addColorStop(
-      0.5,
-      `rgba(${r}, ${g}, ${b}, ${0.6 * glowIntensity + 0.2})`,
-    );
-    gradient.addColorStop(
-      0.8,
-      `rgba(${r}, ${g}, ${b}, ${0.3 * glowIntensity})`,
-    );
-    gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.fill();
-
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    this.spellTextures.set(spellId, texture);
+  private static getParticleGeometry(): THREE.CircleGeometry {
+    if (!ProjectileRenderer.particleGeometry) {
+      ProjectileRenderer.particleGeometry = new THREE.CircleGeometry(0.5, 16);
+    }
+    return ProjectileRenderer.particleGeometry;
   }
 
   /**
-   * Create generic trail texture (soft glow)
+   * Create a color-baked radial glow DataTexture.
+   * Color is baked directly into RGBA pixels (not via material.color) because
+   * material.color tinting doesn't reliably produce colored output in the
+   * WebGPU renderer path. Follows the RunecraftingAltarEntity pattern.
+   *
+   * @param colorHex - Hex color to bake (e.g. 0xff4500)
+   * @param size - Texture dimensions (square, e.g. 64)
+   * @param sharpness - Falloff exponent: 1.5 = soft glow, 4.0 = sharp spark
    */
-  private createTrailTexture(): void {
-    const canvas = document.createElement("canvas");
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+  private createColoredGlowTexture(
+    colorHex: number,
+    size: number,
+    sharpness: number,
+  ): THREE.DataTexture {
+    const r = (colorHex >> 16) & 0xff;
+    const g = (colorHex >> 8) & 0xff;
+    const b = colorHex & 0xff;
+    const data = new Uint8Array(size * size * 4);
+    const half = size / 2;
 
-    const size = 32;
-    canvas.width = size;
-    canvas.height = size;
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = (x + 0.5 - half) / half;
+        const dy = (y + 0.5 - half) / half;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const falloff = Math.max(0, 1 - dist);
+        const strength = Math.pow(falloff, sharpness);
+        const idx = (y * size + x) * 4;
+        data[idx] = Math.round(r * strength);
+        data[idx + 1] = Math.round(g * strength);
+        data[idx + 2] = Math.round(b * strength);
+        data[idx + 3] = Math.round(255 * strength);
+      }
+    }
 
-    const gradient = ctx.createRadialGradient(
-      size / 2,
-      size / 2,
-      0,
-      size / 2,
-      size / 2,
-      size / 2,
-    );
+    const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.needsUpdate = true;
+    return tex;
+  }
 
-    gradient.addColorStop(0, "rgba(255, 255, 255, 0.8)");
-    gradient.addColorStop(0.4, "rgba(255, 255, 255, 0.4)");
-    gradient.addColorStop(1, "rgba(255, 255, 255, 0)");
+  /**
+   * Get or create a cached DataTexture for the given color/sharpness combo.
+   * Avoids creating duplicate textures for the same visual parameters.
+   */
+  private getCachedGlowTexture(
+    colorHex: number,
+    size: number,
+    sharpness: number,
+  ): THREE.DataTexture {
+    const key = `${colorHex}-${size}-${sharpness}`;
+    let tex = this.spellGlowTextures.get(key);
+    if (!tex) {
+      tex = this.createColoredGlowTexture(colorHex, size, sharpness);
+      this.spellGlowTextures.set(key, tex);
+    }
+    return tex;
+  }
 
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
-    ctx.fill();
+  /**
+   * Create a billboard glow material with color baked into the texture.
+   * Uses CircleGeometry + MeshBasicMaterial with AdditiveBlending.
+   * Textures are cached and shared; materials are per-projectile (unique opacity).
+   */
+  private createGlowMaterial(
+    colorHex: number,
+    sharpness: number,
+    initialOpacity: number,
+  ): THREE.MeshBasicMaterial {
+    const tex = this.getCachedGlowTexture(colorHex, 64, sharpness);
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      opacity: initialOpacity,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      depthTest: true,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    // Store base opacity for fade-out calculations
+    mat.userData.baseOpacity = initialOpacity;
+    return mat;
+  }
 
-    this.trailTexture = new THREE.CanvasTexture(canvas);
-    this.trailTexture.needsUpdate = true;
+  /**
+   * Get a 3-color palette from a spell's visual config.
+   * Returns core (bright center), mid (primary element), outer (darkened trail/ambient).
+   */
+  private getSpellColorPalette(config: SpellVisualConfig): {
+    core: number;
+    mid: number;
+    outer: number;
+  } {
+    const mid = config.color;
+    const core = config.coreColor ?? 0xffffff;
+
+    // Darken mid color by ~40% for outer
+    const mr = (mid >> 16) & 0xff;
+    const mg = (mid >> 8) & 0xff;
+    const mb = mid & 0xff;
+    const outer =
+      (Math.round(mr * 0.6) << 16) |
+      (Math.round(mg * 0.6) << 8) |
+      Math.round(mb * 0.6);
+
+    return { core, mid, outer };
+  }
+
+  /**
+   * Create a multi-layer spell projectile group.
+   * Returns a THREE.Group with billboard meshes (core orb + outer glow),
+   * plus orbiting sparks for bolt-tier spells.
+   *
+   * Layer structure:
+   * - Core orb: bright center, sharp glow (sharpness 3.0)
+   * - Outer glow: element color, soft glow (sharpness 1.5), 2x size, semi-transparent
+   * - Sparks (bolt only): 2 tiny bright particles that orbit the core
+   */
+  private createSpellGroup(
+    config: SpellVisualConfig,
+    startX: number,
+    startY: number,
+    startZ: number,
+  ): {
+    group: THREE.Group;
+    sparkMeshes: THREE.Mesh[];
+    billboardMeshes: THREE.Mesh[];
+  } {
+    const palette = this.getSpellColorPalette(config);
+    const geom = ProjectileRenderer.getParticleGeometry();
+    const group = new THREE.Group();
+    const billboardMeshes: THREE.Mesh[] = [];
+    const sparkMeshes: THREE.Mesh[] = [];
+
+    // Layer 1: Outer glow — soft, larger, semi-transparent
+    const outerMat = this.createGlowMaterial(palette.mid, 1.5, 0.6);
+    const outerMesh = new THREE.Mesh(geom, outerMat);
+    const outerSize = config.size * 2.5;
+    outerMesh.scale.set(outerSize, outerSize, outerSize);
+    outerMesh.renderOrder = 998;
+    outerMesh.frustumCulled = false;
+    group.add(outerMesh);
+    billboardMeshes.push(outerMesh);
+
+    // Layer 2: Core orb — bright center, sharp
+    const coreMat = this.createGlowMaterial(palette.core, 3.0, 0.9);
+    const coreMesh = new THREE.Mesh(geom, coreMat);
+    coreMesh.scale.set(config.size, config.size, config.size);
+    coreMesh.renderOrder = 999;
+    coreMesh.frustumCulled = false;
+    group.add(coreMesh);
+    billboardMeshes.push(coreMesh);
+
+    // Layer 3: Orbiting sparks — bolt-tier spells only (have pulseSpeed > 0)
+    if (config.pulseSpeed && config.pulseSpeed > 0) {
+      for (let i = 0; i < 2; i++) {
+        const sparkMat = this.createGlowMaterial(palette.core, 4.0, 0.8);
+        const sparkMesh = new THREE.Mesh(geom, sparkMat);
+        const sparkSize = config.size * 0.3;
+        sparkMesh.scale.set(sparkSize, sparkSize, sparkSize);
+        sparkMesh.renderOrder = 999;
+        sparkMesh.frustumCulled = false;
+        group.add(sparkMesh);
+        billboardMeshes.push(sparkMesh);
+        sparkMeshes.push(sparkMesh);
+      }
+    }
+
+    group.position.set(startX, startY, startZ);
+
+    return { group, sparkMeshes, billboardMeshes };
   }
 
   /**
@@ -538,6 +647,8 @@ export class ProjectileRenderer extends System {
     // Get visual config
     let visualConfig: SpellVisualConfig | ArrowVisualConfig;
     let projectileObject: THREE.Sprite | THREE.Group;
+    let spellSparkMeshes: THREE.Mesh[] = [];
+    let spellBillboardMeshes: THREE.Mesh[] = [];
 
     if (type === "arrow") {
       // Create 3D arrow mesh that naturally points toward target
@@ -552,39 +663,25 @@ export class ProjectileRenderer extends System {
       const targetPoint = new THREE.Vector3(targetPos.x, endY, targetPos.z);
       projectileObject.lookAt(targetPoint);
     } else {
-      // Create spell sprite
+      // Create multi-layer spell projectile group
       visualConfig = getSpellVisual(spellId ?? "");
       const spellConfig = visualConfig as SpellVisualConfig;
 
-      // Create texture if not cached
-      if (spellId && !this.spellTextures.has(spellId)) {
-        this.createSpellTexture(spellId, spellConfig);
-      }
-      const texture = spellId
-        ? (this.spellTextures.get(spellId) ?? null)
-        : null;
-
-      if (!texture) {
-        return;
-      }
-
-      const material = new THREE.SpriteMaterial({
-        map: texture,
-        transparent: true,
-        depthTest: true,
-        blending: THREE.AdditiveBlending,
-      });
-
-      const sprite = new THREE.Sprite(material);
-      sprite.scale.set(spellConfig.size, spellConfig.size, 1);
-      sprite.position.set(sourcePos.x, startY, sourcePos.z);
-      projectileObject = sprite;
+      const spellResult = this.createSpellGroup(
+        spellConfig,
+        sourcePos.x,
+        startY,
+        sourcePos.z,
+      );
+      projectileObject = spellResult.group;
+      spellSparkMeshes = spellResult.sparkMeshes;
+      spellBillboardMeshes = spellResult.billboardMeshes;
     }
 
     // Add to scene
     this.world.stage.scene.add(projectileObject);
 
-    // Create trail sprites for spells
+    // Create trail meshes for spells (colored DataTexture billboards)
     const trailSprites: TrailSprite[] = [];
     const trailPositions: THREE.Vector3[] = [];
     const spellConfig = visualConfig as SpellVisualConfig;
@@ -592,29 +689,37 @@ export class ProjectileRenderer extends System {
     if (
       type === "spell" &&
       spellConfig.trailLength &&
-      spellConfig.trailLength > 0 &&
-      this.trailTexture
+      spellConfig.trailLength > 0
     ) {
       const trailLength = spellConfig.trailLength;
+      const palette = this.getSpellColorPalette(spellConfig);
+      const trailTex = this.getCachedGlowTexture(palette.outer, 32, 2.0);
+      const geom = ProjectileRenderer.getParticleGeometry();
 
       for (let i = 0; i < trailLength; i++) {
-        const trailMaterial = new THREE.SpriteMaterial({
-          map: this.trailTexture,
+        const baseOpacity = 0.35 * (1 - i / trailLength);
+        const trailMaterial = new THREE.MeshBasicMaterial({
+          map: trailTex,
           transparent: true,
-          depthTest: true,
-          blending: THREE.AdditiveBlending,
-          color: new THREE.Color(spellConfig.color),
           opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: true,
+          side: THREE.DoubleSide,
+          fog: false,
         });
+        trailMaterial.userData.baseOpacity = baseOpacity;
 
-        const trailSprite = new THREE.Sprite(trailMaterial);
+        const trailMesh = new THREE.Mesh(geom, trailMaterial);
         const trailSize = spellConfig.size * (0.3 + (i / trailLength) * 0.4);
-        trailSprite.scale.set(trailSize, trailSize, 1);
-        trailSprite.position.set(sourcePos.x, startY, sourcePos.z);
-        trailSprite.visible = false;
+        trailMesh.scale.set(trailSize, trailSize, trailSize);
+        trailMesh.position.set(sourcePos.x, startY, sourcePos.z);
+        trailMesh.visible = false;
+        trailMesh.frustumCulled = false;
+        trailMesh.renderOrder = 997;
 
-        this.world.stage.scene.add(trailSprite);
-        trailSprites.push({ sprite: trailSprite, index: i });
+        this.world.stage.scene.add(trailMesh);
+        trailSprites.push({ mesh: trailMesh, index: i });
         trailPositions.push(
           new THREE.Vector3(sourcePos.x, startY, sourcePos.z),
         );
@@ -643,6 +748,9 @@ export class ProjectileRenderer extends System {
       trailSprites,
       trailPositions,
       trailIndex: 0,
+      sparkMeshes: spellSparkMeshes.length > 0 ? spellSparkMeshes : undefined,
+      billboardMeshes:
+        spellBillboardMeshes.length > 0 ? spellBillboardMeshes : undefined,
     });
   }
 
@@ -683,8 +791,12 @@ export class ProjectileRenderer extends System {
       const proj = this.activeProjectiles[i];
       const elapsed = now - proj.startTime;
 
-      // Safety timeout
+      // Safety timeout or forced removal from hit event
       if (elapsed > proj.maxLifetime) {
+        // maxLifetime=0 means forced by hit event — spawn impact burst
+        if (proj.maxLifetime === 0) {
+          this.spawnImpactBurst(proj);
+        }
         this.removeProjectile(proj);
         this._toRemove.push(i);
         continue;
@@ -699,6 +811,7 @@ export class ProjectileRenderer extends System {
 
       // Check if we've hit the target
       if (distanceToTarget < this.HIT_THRESHOLD) {
+        this.spawnImpactBurst(proj);
         this.removeProjectile(proj);
         this._toRemove.push(i);
         continue;
@@ -741,15 +854,57 @@ export class ProjectileRenderer extends System {
         // Spell - direct movement, no arc
         proj.sprite.position.copy(proj.currentPos);
 
-        // Spell effects: pulsing
-        const spellConfig = proj.visualConfig as SpellVisualConfig;
-        if (spellConfig.pulseSpeed && spellConfig.pulseAmount) {
-          const pulse =
-            1 +
-            Math.sin(elapsed * spellConfig.pulseSpeed * 0.001) *
-              spellConfig.pulseAmount;
-          const baseSize = spellConfig.size;
-          proj.sprite.scale.set(baseSize * pulse, baseSize * pulse, 1);
+        // Billboard rotation: face all mesh children toward camera
+        const cam = this.world.camera;
+        const camQuat = cam?.quaternion;
+        if (camQuat) {
+          if (proj.billboardMeshes) {
+            for (const mesh of proj.billboardMeshes) {
+              mesh.quaternion.copy(camQuat);
+            }
+          }
+          // Trail meshes also need billboard rotation
+          for (const trail of proj.trailSprites) {
+            trail.mesh.quaternion.copy(camQuat);
+          }
+        }
+
+        // Animate bolt-tier spells: orbiting sparks + pulsing outer glow
+        if (proj.sparkMeshes && proj.sparkMeshes.length > 0) {
+          const spellConfig = proj.visualConfig as SpellVisualConfig;
+          const orbitRadius = spellConfig.size * 0.8;
+          const orbitSpeed = 6.0; // radians per second
+          const t = elapsed * 0.001;
+          const pulseSpeed = spellConfig.pulseSpeed ?? 0;
+          const pulseAmount = spellConfig.pulseAmount ?? 0;
+          const pulse = Math.sin(t * pulseSpeed * Math.PI * 2);
+
+          for (let s = 0; s < proj.sparkMeshes.length; s++) {
+            const angle = t * orbitSpeed + s * Math.PI; // Evenly spaced
+            proj.sparkMeshes[s].position.set(
+              Math.cos(angle) * orbitRadius,
+              Math.sin(angle) * orbitRadius,
+              0,
+            );
+
+            // Oscillate spark opacity
+            const sparkMat = proj.sparkMeshes[s]
+              .material as THREE.MeshBasicMaterial;
+            sparkMat.opacity =
+              (sparkMat.userData.baseOpacity ?? 0.8) * (0.7 + 0.3 * pulse);
+          }
+
+          // Pulse outer glow scale (first billboard mesh is outer glow)
+          if (
+            pulseSpeed > 0 &&
+            proj.billboardMeshes &&
+            proj.billboardMeshes[0]
+          ) {
+            const outerMesh = proj.billboardMeshes[0];
+            const baseSize = spellConfig.size * 2.5;
+            const scaledSize = baseSize * (1 + pulse * pulseAmount);
+            outerMesh.scale.setScalar(scaledSize);
+          }
         }
       }
 
@@ -771,29 +926,33 @@ export class ProjectileRenderer extends System {
       if (distanceToTarget < this.HIT_THRESHOLD * 3) {
         const fadeProgress = 1 - distanceToTarget / (this.HIT_THRESHOLD * 3);
 
-        if (proj.sprite instanceof THREE.Sprite) {
-          if (proj.sprite.material instanceof THREE.SpriteMaterial) {
-            proj.sprite.material.opacity = 1 - fadeProgress;
-          }
-
-          for (const trail of proj.trailSprites) {
-            if (trail.sprite.material instanceof THREE.SpriteMaterial) {
-              const baseOpacity = this.getTrailOpacity(
-                trail.index,
-                proj.trailSprites.length,
-                proj.visualConfig as SpellVisualConfig,
-              );
-              trail.sprite.material.opacity = baseOpacity * (1 - fadeProgress);
-            }
-          }
-        } else if (proj.sprite instanceof THREE.Group) {
+        if (proj.sprite instanceof THREE.Group) {
+          // Fade all mesh children (spell layers + arrow parts)
           proj.sprite.traverse((child) => {
             if (child instanceof THREE.Mesh && child.material) {
               const mat = child.material as THREE.MeshBasicMaterial;
               mat.transparent = true;
-              mat.opacity = 1 - fadeProgress;
+              mat.opacity =
+                (1 - fadeProgress) * (mat.userData.baseOpacity ?? 1);
             }
           });
+        } else if (proj.sprite instanceof THREE.Sprite) {
+          if (proj.sprite.material instanceof THREE.SpriteMaterial) {
+            proj.sprite.material.opacity = 1 - fadeProgress;
+          }
+        }
+
+        // Fade trail meshes
+        for (const trail of proj.trailSprites) {
+          const mat = trail.mesh.material as THREE.MeshBasicMaterial;
+          const baseOpacity =
+            mat.userData.baseOpacity ??
+            this.getTrailOpacity(
+              trail.index,
+              proj.trailSprites.length,
+              proj.visualConfig as SpellVisualConfig,
+            );
+          mat.opacity = baseOpacity * (1 - fadeProgress);
         }
       }
     }
@@ -801,6 +960,42 @@ export class ProjectileRenderer extends System {
     // Remove completed projectiles (reverse order)
     for (let i = this._toRemove.length - 1; i >= 0; i--) {
       this.activeProjectiles.splice(this._toRemove[i], 1);
+    }
+
+    // Update impact particles: move, fade, billboard, cleanup
+    const cam = this.world.camera;
+    const camQuat = cam?.quaternion;
+    for (let i = this.activeImpactParticles.length - 1; i >= 0; i--) {
+      const p = this.activeImpactParticles[i];
+      p.life += dt;
+
+      if (p.life >= p.maxLife) {
+        (p.mesh.material as THREE.Material).dispose();
+        this.world.stage?.scene.remove(p.mesh);
+        this.activeImpactParticles.splice(i, 1);
+        continue;
+      }
+
+      // Move by velocity, apply gravity-like deceleration
+      const drag = 1 - dt * 3;
+      p.velocity.x *= drag;
+      p.velocity.z *= drag;
+      p.velocity.y -= dt * 3; // gravity pull
+      p.mesh.position.addScaledVector(p.velocity, dt);
+
+      // Fade out over lifetime
+      const t = p.life / p.maxLife;
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = (1 - t) * (mat.userData.baseOpacity ?? 0.9);
+
+      // Shrink slightly
+      const scale = (1 - t * 0.5) * p.mesh.scale.x;
+      p.mesh.scale.setScalar(scale);
+
+      // Billboard
+      if (camQuat) {
+        p.mesh.quaternion.copy(camQuat);
+      }
     }
   }
 
@@ -812,7 +1007,7 @@ export class ProjectileRenderer extends System {
     proj.trailPositions[proj.trailIndex].copy(proj.sprite.position);
     proj.trailIndex = (proj.trailIndex + 1) % proj.trailPositions.length;
 
-    // Update trail sprites
+    // Update trail meshes
     for (let t = 0; t < proj.trailSprites.length; t++) {
       const trail = proj.trailSprites[t];
       // Get position from history (older positions = lower index in trail)
@@ -821,18 +1016,17 @@ export class ProjectileRenderer extends System {
         proj.trailPositions.length;
       const trailPos = proj.trailPositions[historyIndex];
 
-      trail.sprite.position.copy(trailPos);
+      trail.mesh.position.copy(trailPos);
 
       // Only show trail after we have enough history and projectile is moving
       if (progress > 0.05) {
-        trail.sprite.visible = true;
-        if (trail.sprite.material instanceof THREE.SpriteMaterial) {
-          trail.sprite.material.opacity = this.getTrailOpacity(
-            t,
-            proj.trailSprites.length,
-            proj.visualConfig as SpellVisualConfig,
-          );
-        }
+        trail.mesh.visible = true;
+        const mat = trail.mesh.material as THREE.MeshBasicMaterial;
+        mat.opacity = this.getTrailOpacity(
+          t,
+          proj.trailSprites.length,
+          proj.visualConfig as SpellVisualConfig,
+        );
       }
     }
   }
@@ -852,12 +1046,68 @@ export class ProjectileRenderer extends System {
   }
 
   /**
+   * Spawn a burst of impact particles at the projectile's current position.
+   * Particles fly outward in random XZ directions with upward drift, then fade.
+   */
+  private spawnImpactBurst(proj: ActiveProjectile): void {
+    if (proj.type !== "spell" || !this.world.stage?.scene) return;
+
+    const config = proj.visualConfig as SpellVisualConfig;
+    const palette = this.getSpellColorPalette(config);
+    const geom = ProjectileRenderer.getParticleGeometry();
+    const count = 4 + Math.floor(Math.random() * 3); // 4-6 particles
+
+    for (let i = 0; i < count; i++) {
+      const mat = this.createGlowMaterial(palette.mid, 2.5, 0.9);
+      const mesh = new THREE.Mesh(geom, mat);
+      const size = config.size * (0.2 + Math.random() * 0.3);
+      mesh.scale.set(size, size, size);
+      mesh.position.copy(proj.currentPos);
+      mesh.renderOrder = 1000;
+      mesh.frustumCulled = false;
+
+      // Random outward velocity in XZ + upward drift
+      const angle = Math.random() * Math.PI * 2;
+      const speed = 1.5 + Math.random() * 2.5;
+      const velocity = new THREE.Vector3(
+        Math.cos(angle) * speed,
+        1.0 + Math.random() * 1.5,
+        Math.sin(angle) * speed,
+      );
+
+      const maxLife = 0.3 + Math.random() * 0.2; // 0.3-0.5s
+
+      this.world.stage.scene.add(mesh);
+      this.activeImpactParticles.push({ mesh, velocity, life: 0, maxLife });
+    }
+  }
+
+  /**
    * Remove a projectile and its trail from the scene
    */
   private removeProjectile(proj: ActiveProjectile): void {
+    // Dispose materials for billboard meshes (textures are cached and shared, not disposed here)
+    if (proj.billboardMeshes) {
+      for (const mesh of proj.billboardMeshes) {
+        (mesh.material as THREE.Material).dispose();
+      }
+    }
+
+    // Dispose arrow mesh materials (shaft + head)
+    if (proj.type === "arrow" && proj.sprite instanceof THREE.Group) {
+      proj.sprite.traverse((child) => {
+        if (child instanceof THREE.Mesh && child.material) {
+          (child.material as THREE.Material).dispose();
+        }
+      });
+    }
+
     this.world.stage.scene.remove(proj.sprite);
+
+    // Dispose trail mesh materials
     for (const trail of proj.trailSprites) {
-      this.world.stage.scene.remove(trail.sprite);
+      (trail.mesh.material as THREE.Material).dispose();
+      this.world.stage.scene.remove(trail.mesh);
     }
   }
 
@@ -881,10 +1131,29 @@ export class ProjectileRenderer extends System {
     }
     this.activeProjectiles = [];
 
-    // Clear texture caches (let GC handle actual disposal)
+    // Clean up impact particles
+    for (const p of this.activeImpactParticles) {
+      (p.mesh.material as THREE.Material).dispose();
+      this.world.stage?.scene.remove(p.mesh);
+    }
+    this.activeImpactParticles = [];
+
+    // Dispose and clear all texture caches
+    for (const tex of this.arrowTextures.values()) {
+      tex.dispose();
+    }
     this.arrowTextures.clear();
-    this.spellTextures.clear();
-    this.trailTexture = null;
+
+    for (const tex of this.spellGlowTextures.values()) {
+      tex.dispose();
+    }
+    this.spellGlowTextures.clear();
+
+    // Dispose shared geometry
+    if (ProjectileRenderer.particleGeometry) {
+      ProjectileRenderer.particleGeometry.dispose();
+      ProjectileRenderer.particleGeometry = null;
+    }
 
     super.destroy();
   }

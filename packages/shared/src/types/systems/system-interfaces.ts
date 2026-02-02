@@ -34,6 +34,12 @@ import type {
   ItemRow,
 } from "../network/database";
 import type { FlatZone } from "../world/terrain";
+import type {
+  DuelRules,
+  DuelState,
+  EquipmentSlotRestriction,
+  StakedItem,
+} from "../game/duel-types";
 
 // ============================================================================
 // CORE SYSTEM INTERFACES
@@ -181,9 +187,7 @@ export interface DatabaseSystem extends System {
   ): Promise<void>;
 
   // Equipment methods
-  getPlayerEquipment(playerId: string): EquipmentRow[];
   getPlayerEquipmentAsync(playerId: string): Promise<EquipmentRow[]>;
-  savePlayerEquipment(playerId: string, equipment: EquipmentSaveItem[]): void;
   savePlayerEquipmentAsync(
     playerId: string,
     equipment: EquipmentSaveItem[],
@@ -472,6 +476,31 @@ export interface DuelOperationResult {
 }
 
 /**
+ * Server-side duel session info returned by DuelSystem query methods.
+ * Provides the common fields that callers need without exposing
+ * internal implementation details.
+ */
+export interface DuelSessionInfo {
+  duelId: string;
+  state: DuelState;
+  challengerId: string;
+  challengerName: string;
+  targetId: string;
+  targetName: string;
+  rules: DuelRules;
+  challengerStakes: StakedItem[];
+  targetStakes: StakedItem[];
+  challengerAccepted: boolean;
+  targetAccepted: boolean;
+  arenaId: number | null;
+  createdAt: number;
+  countdownStartedAt?: number;
+  fightStartedAt?: number;
+  finishedAt?: number;
+  winnerId?: string;
+}
+
+/**
  * DuelSystem - Server-authoritative player-to-player dueling (OSRS-accurate)
  *
  * Manages duel sessions with rules negotiation, stakes, and combat enforcement.
@@ -505,8 +534,8 @@ export interface DuelSystem extends System {
   ): DuelOperationResult & { duelId?: string };
 
   // Session Management
-  getDuelSession(duelId: string): unknown | undefined;
-  getPlayerDuel(playerId: string): unknown | undefined;
+  getDuelSession(duelId: string): DuelSessionInfo | undefined;
+  getPlayerDuel(playerId: string): DuelSessionInfo | undefined;
   getPlayerDuelId(playerId: string): string | undefined;
   isPlayerInDuel(playerId: string): boolean;
   cancelDuel(
@@ -519,12 +548,12 @@ export interface DuelSystem extends System {
   toggleRule(
     duelId: string,
     playerId: string,
-    rule: string,
+    rule: keyof DuelRules,
   ): DuelOperationResult;
   toggleEquipmentRestriction(
     duelId: string,
     playerId: string,
-    slot: string,
+    slot: EquipmentSlotRestriction,
   ): DuelOperationResult;
   acceptRules(duelId: string, playerId: string): DuelOperationResult;
 
@@ -553,7 +582,7 @@ export interface DuelSystem extends System {
 
   // Rule Queries (for CombatSystem integration)
   isPlayerInActiveDuel(playerId: string): boolean;
-  getPlayerDuelRules(playerId: string): unknown | null;
+  getPlayerDuelRules(playerId: string): DuelRules | null;
   canMove(playerId: string): boolean;
   canForfeit(playerId: string): boolean;
   canUseRanged(playerId: string): boolean;
@@ -677,7 +706,10 @@ export interface XPDrop {
     | "firemaking"
     | "cooking"
     | "smithing"
-    | "agility";
+    | "agility"
+    | "crafting"
+    | "fletching"
+    | "runecrafting";
   amount: number;
   timestamp: number;
   playerId: string;

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
-import { useThemeStore, useMobileLayout } from "@/ui";
+import { useThemeStore, useMobileLayout, useWindowStore } from "@/ui";
 import { EventType, getAvailableStyles, WeaponType } from "@hyperscape/shared";
 import type {
   ClientWorld,
@@ -702,6 +702,43 @@ export function CombatPanel({ world, stats, equipment }: CombatPanelProps) {
     if (!actions?.actionMethods?.changeAttackStyle) return;
 
     actions.actionMethods.changeAttackStyle(playerId, next);
+
+    // OSRS-accurate: selecting autocast opens the spells panel for spell selection
+    if (next === "autocast") {
+      const store = useWindowStore.getState();
+      const windows = Array.from(store.windows.values());
+      const existing = windows.find((w) =>
+        w.tabs.some((t) => t.content === "spells"),
+      );
+      if (existing) {
+        const tabIndex = existing.tabs.findIndex((t) => t.content === "spells");
+        if (tabIndex >= 0) {
+          store.updateWindow(existing.id, {
+            activeTabIndex: tabIndex,
+            visible: true,
+          });
+          store.bringToFront(existing.id);
+        }
+      } else {
+        store.createWindow({
+          id: `panel-spells-${Date.now()}`,
+          position: {
+            x: Math.max(100, window.innerWidth / 2 - 200),
+            y: Math.max(100, window.innerHeight / 2 - 150),
+          },
+          size: { width: 400, height: 350 },
+          minSize: { width: 250, height: 200 },
+          tabs: [
+            {
+              id: "spells",
+              label: "Spells",
+              content: "spells",
+              closeable: true,
+            },
+          ],
+        });
+      }
+    }
   };
 
   const toggleAutoRetaliate = () => {

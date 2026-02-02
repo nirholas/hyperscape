@@ -62,7 +62,7 @@
 
 import * as THREE from "three";
 import * as THREE_WEBGPU from "three/webgpu";
-import { MeshBasicNodeMaterial, MeshStandardNodeMaterial } from "three/webgpu";
+import { MeshBasicNodeMaterial } from "three/webgpu";
 import { ProcgenTreeInstancer } from "./ProcgenTreeInstancer";
 import type { World } from "../../../core/World";
 import {

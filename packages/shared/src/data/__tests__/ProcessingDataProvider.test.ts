@@ -1,7 +1,7 @@
 /**
  * ProcessingDataProvider Unit Tests
  *
- * Tests for smelting and smithing data lookup functions.
+ * Tests for smelting, smithing, crafting, and tanning data lookup functions.
  * These are pure data tests - no mocks needed (follows project philosophy).
  *
  * Note: These tests require the item manifest to be loaded. DataManager
@@ -23,6 +23,8 @@ describe("ProcessingDataProvider", () => {
   let provider: ProcessingDataProvider;
   let hasSmithingData = false;
   let hasSmeltingData = false;
+  let hasCraftingData = false;
+  let hasTanningData = false;
 
   // Initialize DataManager to load items.json before running tests
   beforeAll(async () => {
@@ -33,6 +35,8 @@ describe("ProcessingDataProvider", () => {
       providerInstance.rebuild(); // Force rebuild after DataManager loads
       hasSmithingData = providerInstance.getSmithableItemIds().size > 0;
       hasSmeltingData = providerInstance.getSmeltableBarIds().size > 0;
+      hasCraftingData = providerInstance.getCraftableItemIds().size > 0;
+      hasTanningData = providerInstance.getAllTanningRecipes().length > 0;
     } catch {
       // In CI/test environments, manifest loading may fail - tests will skip
       console.warn(
@@ -359,6 +363,288 @@ describe("ProcessingDataProvider", () => {
   });
 
   // ============================================================================
+  // CRAFTING RECIPE TESTS
+  // ============================================================================
+
+  describe("getCraftingRecipe", () => {
+    it("returns null for non-existent recipe", () => {
+      expect(provider.getCraftingRecipe("fake_item_xyz")).toBeNull();
+    });
+
+    it("returns null for empty string", () => {
+      expect(provider.getCraftingRecipe("")).toBeNull();
+    });
+
+    it("returns recipe data for leather_gloves (if data loaded)", () => {
+      const recipe = provider.getCraftingRecipe("leather_gloves");
+      if (!hasCraftingData) return;
+
+      expect(recipe).not.toBeNull();
+      if (recipe) {
+        expect(recipe.output).toBe("leather_gloves");
+        expect(recipe.category).toBe("leather");
+        expect(recipe.level).toBe(1);
+        expect(recipe.xp).toBeGreaterThan(0);
+        expect(recipe.inputs.length).toBeGreaterThan(0);
+        expect(recipe.inputs[0].item).toBe("leather");
+        expect(recipe.inputs[0].amount).toBe(1);
+        expect(recipe.tools).toContain("needle");
+      }
+    });
+
+    it("returns recipe data for gold_ring jewelry (if data loaded)", () => {
+      const recipe = provider.getCraftingRecipe("gold_ring");
+      if (!hasCraftingData) return;
+
+      expect(recipe).not.toBeNull();
+      if (recipe) {
+        expect(recipe.category).toBe("jewelry");
+        expect(recipe.station).toBe("furnace");
+        expect(recipe.tools).toContain("ring_mould");
+        expect(recipe.inputs[0].item).toBe("gold_bar");
+      }
+    });
+
+    it("returns recipe data for gem cutting (if data loaded)", () => {
+      const recipe = provider.getCraftingRecipe("sapphire");
+      if (!hasCraftingData) return;
+
+      expect(recipe).not.toBeNull();
+      if (recipe) {
+        expect(recipe.category).toBe("gem_cutting");
+        expect(recipe.station).toBe("none");
+        expect(recipe.tools).toContain("chisel");
+        expect(recipe.inputs[0].item).toBe("uncut_sapphire");
+        expect(recipe.level).toBe(20);
+      }
+    });
+
+    it("has correct structure for all recipes (if data loaded)", () => {
+      const recipes = provider.getAllCraftingRecipes();
+      if (recipes.length === 0) return;
+
+      for (const recipe of recipes) {
+        expect(recipe.output).toBeTruthy();
+        expect(typeof recipe.output).toBe("string");
+        expect(recipe.category).toBeTruthy();
+        expect(typeof recipe.category).toBe("string");
+        expect(recipe.level).toBeGreaterThanOrEqual(1);
+        expect(recipe.level).toBeLessThanOrEqual(99);
+        expect(recipe.xp).toBeGreaterThan(0);
+        expect(recipe.ticks).toBeGreaterThan(0);
+        expect(Array.isArray(recipe.inputs)).toBe(true);
+        expect(recipe.inputs.length).toBeGreaterThan(0);
+        for (const input of recipe.inputs) {
+          expect(input.item).toBeTruthy();
+          expect(input.amount).toBeGreaterThan(0);
+        }
+      }
+    });
+  });
+
+  describe("isCraftableItem", () => {
+    it("returns true for valid craftable item (if data loaded)", () => {
+      if (!hasCraftingData) return;
+      expect(provider.isCraftableItem("leather_gloves")).toBe(true);
+      expect(provider.isCraftableItem("sapphire")).toBe(true);
+    });
+
+    it("returns false for non-craftable items", () => {
+      expect(provider.isCraftableItem("bronze_bar")).toBe(false);
+      expect(provider.isCraftableItem("fake_item_xyz")).toBe(false);
+    });
+  });
+
+  describe("getCraftingRecipesByCategory", () => {
+    it("returns empty array for non-existent category", () => {
+      const result = provider.getCraftingRecipesByCategory("fake_category");
+      expect(result).toEqual([]);
+    });
+
+    it("returns leather recipes (if data loaded)", () => {
+      const recipes = provider.getCraftingRecipesByCategory("leather");
+      if (!hasCraftingData) return;
+
+      expect(recipes.length).toBeGreaterThan(0);
+      for (const recipe of recipes) {
+        expect(recipe.category).toBe("leather");
+      }
+    });
+
+    it("returns gem_cutting recipes (if data loaded)", () => {
+      const recipes = provider.getCraftingRecipesByCategory("gem_cutting");
+      if (!hasCraftingData) return;
+
+      expect(recipes.length).toBeGreaterThan(0);
+      for (const recipe of recipes) {
+        expect(recipe.category).toBe("gem_cutting");
+        expect(recipe.tools).toContain("chisel");
+      }
+    });
+
+    it("returns jewelry recipes that require furnace (if data loaded)", () => {
+      const recipes = provider.getCraftingRecipesByCategory("jewelry");
+      if (!hasCraftingData) return;
+
+      expect(recipes.length).toBeGreaterThan(0);
+      for (const recipe of recipes) {
+        expect(recipe.category).toBe("jewelry");
+        expect(recipe.station).toBe("furnace");
+      }
+    });
+  });
+
+  describe("getCraftingCategories", () => {
+    it("returns all categories (if data loaded)", () => {
+      const categories = provider.getCraftingCategories();
+      if (!hasCraftingData) return;
+
+      expect(categories.length).toBeGreaterThan(0);
+      expect(categories).toContain("leather");
+      expect(categories).toContain("gem_cutting");
+      expect(categories).toContain("jewelry");
+    });
+  });
+
+  describe("getAvailableCraftingRecipes", () => {
+    it("filters by crafting level (if data loaded)", () => {
+      if (!hasCraftingData) return;
+
+      const level1 = provider.getAvailableCraftingRecipes(1);
+      const level99 = provider.getAvailableCraftingRecipes(99);
+
+      // Higher level should have at least as many recipes
+      expect(level99.length).toBeGreaterThanOrEqual(level1.length);
+
+      // Level 1 should include leather_gloves (level 1)
+      const hasGloves = level1.some((r) => r.output === "leather_gloves");
+      expect(hasGloves).toBe(true);
+
+      // Level 1 should NOT include sapphire (level 20)
+      const hasSapphire = level1.some((r) => r.output === "sapphire");
+      expect(hasSapphire).toBe(false);
+    });
+  });
+
+  describe("getCraftingRecipesByStation", () => {
+    it("returns furnace recipes (if data loaded)", () => {
+      if (!hasCraftingData) return;
+
+      const furnaceRecipes = provider.getCraftingRecipesByStation("furnace");
+      expect(furnaceRecipes.length).toBeGreaterThan(0);
+      for (const recipe of furnaceRecipes) {
+        expect(recipe.station).toBe("furnace");
+      }
+    });
+
+    it("returns non-station recipes (if data loaded)", () => {
+      if (!hasCraftingData) return;
+
+      const noneRecipes = provider.getCraftingRecipesByStation("none");
+      expect(noneRecipes.length).toBeGreaterThan(0);
+      for (const recipe of noneRecipes) {
+        expect(recipe.station).toBe("none");
+      }
+    });
+  });
+
+  describe("crafting level/xp/ticks accessors", () => {
+    it("returns level requirement for crafting item (if data loaded)", () => {
+      if (!hasCraftingData) return;
+      expect(provider.getCraftingLevel("leather_gloves")).toBe(1);
+      expect(provider.getCraftingLevel("sapphire")).toBe(20);
+    });
+
+    it("returns default level for unknown items", () => {
+      expect(provider.getCraftingLevel("fake_item")).toBe(1);
+    });
+
+    it("returns xp for crafting item (if data loaded)", () => {
+      if (!hasCraftingData) return;
+      expect(provider.getCraftingXP("leather_gloves")).toBeGreaterThan(0);
+      expect(provider.getCraftingXP("sapphire")).toBe(50);
+    });
+
+    it("returns ticks for crafting item (if data loaded)", () => {
+      if (!hasCraftingData) return;
+      expect(provider.getCraftingTicks("leather_gloves")).toBe(3);
+      expect(provider.getCraftingTicks("sapphire")).toBe(2);
+    });
+  });
+
+  // ============================================================================
+  // TANNING RECIPE TESTS
+  // ============================================================================
+
+  describe("getTanningRecipe", () => {
+    it("returns null for non-existent recipe", () => {
+      expect(provider.getTanningRecipe("fake_hide_xyz")).toBeNull();
+    });
+
+    it("returns null for empty string", () => {
+      expect(provider.getTanningRecipe("")).toBeNull();
+    });
+
+    it("returns recipe for cowhide (if data loaded)", () => {
+      const recipe = provider.getTanningRecipe("cowhide");
+      if (!hasTanningData) return;
+
+      expect(recipe).not.toBeNull();
+      if (recipe) {
+        expect(recipe.input).toBe("cowhide");
+        expect(recipe.output).toBe("leather");
+        expect(recipe.cost).toBe(1);
+        expect(recipe.name).toBeTruthy();
+      }
+    });
+
+    it("returns recipe for green_dragonhide (if data loaded)", () => {
+      const recipe = provider.getTanningRecipe("green_dragonhide");
+      if (!hasTanningData) return;
+
+      expect(recipe).not.toBeNull();
+      if (recipe) {
+        expect(recipe.input).toBe("green_dragonhide");
+        expect(recipe.output).toBe("green_dragon_leather");
+        expect(recipe.cost).toBe(20);
+      }
+    });
+  });
+
+  describe("getAllTanningRecipes", () => {
+    it("returns array (may be empty if data not loaded)", () => {
+      const recipes = provider.getAllTanningRecipes();
+      expect(Array.isArray(recipes)).toBe(true);
+    });
+
+    it("has correct structure for all recipes (if data loaded)", () => {
+      const recipes = provider.getAllTanningRecipes();
+      if (recipes.length === 0) return;
+
+      for (const recipe of recipes) {
+        expect(recipe.input).toBeTruthy();
+        expect(typeof recipe.input).toBe("string");
+        expect(recipe.output).toBeTruthy();
+        expect(typeof recipe.output).toBe("string");
+        expect(recipe.cost).toBeGreaterThanOrEqual(0);
+        expect(recipe.name).toBeTruthy();
+      }
+    });
+  });
+
+  describe("isTannableItem", () => {
+    it("returns true for cowhide (if data loaded)", () => {
+      if (!hasTanningData) return;
+      expect(provider.isTannableItem("cowhide")).toBe(true);
+    });
+
+    it("returns false for non-tannable items", () => {
+      expect(provider.isTannableItem("bronze_sword")).toBe(false);
+      expect(provider.isTannableItem("fake_item")).toBe(false);
+    });
+  });
+
+  // ============================================================================
   // DATA INTEGRITY TESTS
   // ============================================================================
 
@@ -401,12 +687,49 @@ describe("ProcessingDataProvider", () => {
       }
     });
 
+    it("all crafting recipes have valid inputs (if data loaded)", () => {
+      const recipes = provider.getAllCraftingRecipes();
+      if (recipes.length === 0) return;
+
+      for (const recipe of recipes) {
+        expect(
+          recipe.inputs.length,
+          `Crafting recipe ${recipe.output} has no inputs`,
+        ).toBeGreaterThan(0);
+
+        for (const input of recipe.inputs) {
+          expect(
+            input.item,
+            `Crafting recipe ${recipe.output} has empty input item`,
+          ).toBeTruthy();
+          expect(
+            input.amount,
+            `Crafting recipe ${recipe.output} input ${input.item} has invalid amount`,
+          ).toBeGreaterThan(0);
+        }
+      }
+    });
+
+    it("all tanning recipes produce different output than input (if data loaded)", () => {
+      const recipes = provider.getAllTanningRecipes();
+      if (recipes.length === 0) return;
+
+      for (const recipe of recipes) {
+        expect(
+          recipe.input !== recipe.output,
+          `Tanning recipe ${recipe.input} produces same item as input`,
+        ).toBe(true);
+      }
+    });
+
     it("provider summary reflects initialization state", () => {
       const summary = provider.getSummary();
       expect(summary.isInitialized).toBe(true);
       // Counts may be 0 if manifests weren't loaded
       expect(typeof summary.smeltableBars).toBe("number");
       expect(typeof summary.smithingRecipes).toBe("number");
+      expect(typeof summary.craftingRecipes).toBe("number");
+      expect(typeof summary.tanningRecipes).toBe("number");
     });
   });
 });

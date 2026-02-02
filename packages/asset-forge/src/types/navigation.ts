@@ -6,6 +6,7 @@ export type NavigationView =
   | "handRigging"
   | "armorFitting"
   | "retargetAnimate"
+  | "batchSprites"
   | "worldBuilder"
   | "worldEditor" // New: Uses real game systems
   | "manifests"
@@ -19,3 +20,19 @@ export type NavigationView =
   | "grassGen"
   | "flowerGen"
   | "vegetationGen";
+
+export interface NavigationState {
+  currentView: NavigationView;
+  selectedAssetId: string | null;
+  navigationHistory: NavigationView[];
+}
+
+export interface NavigationContextValue extends NavigationState {
+  // Navigation actions
+  navigateTo: (view: NavigationView) => void;
+  navigateToAsset: (assetId: string) => void;
+  goBack: () => void;
+
+  // Navigation helpers
+  canGoBack: boolean;
+}

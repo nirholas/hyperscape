@@ -179,6 +179,8 @@ export class RoadNetworkSystem extends System {
   private passabilityGrid: Set<string> | null = null;
   /** Whether passability grid is currently being built */
   private passabilityGridBuilding = false;
+  /** Actual step size used for passability grid (may be larger than pathStepSize for big worlds) */
+  private passabilityGridStepSize: number = 20;
 
   constructor(world: World) {
     super(world);
@@ -273,6 +275,15 @@ export class RoadNetworkSystem extends System {
       this.validateNetworkConnectivity(towns);
     }
     await this.buildTileCacheAsync();
+
+    // Update signpost destinations now that roads are generated
+    this.townSystem.updateSignpostDestinations(
+      this.roads.map((r) => ({
+        id: r.id,
+        fromTownId: r.fromTownId,
+        toTownId: r.toTownId,
+      })),
+    );
 
     Logger.system(
       "RoadNetworkSystem",
@@ -1603,14 +1614,12 @@ export class RoadNetworkSystem extends System {
 
   /**
    * Build passability grid for the entire world.
-   * Pre-computes terrain height at all grid points to avoid repeated lookups during BFS.
-   * Grid covers world bounds with spacing equal to pathStepSize.
+   * Pre-computes terrain height at grid points to avoid repeated lookups during BFS.
    *
-   * Performance: For a 2000m world with 20m step size:
-   * - Grid points: 100 x 100 = 10,000 points
-   * - Memory: ~800KB for Set<string> keys
-   * - Build time: ~50-100ms (one-time cost)
-   * - Savings: Eliminates ~50-200 getHeightAt() calls per road (BFS iterations)
+   * ADAPTIVE RESOLUTION: For large worlds, uses coarser grid to stay under 40k points.
+   * - This prevents the grid from taking >15 seconds on large worlds.
+   * - BFS pathfinding still works - it just uses coarser water detection.
+   * - For a 10km world: uses 60m step → 28,000 points instead of 250,000
    */
   private async buildPassabilityGridAsync(): Promise<void> {
     if (this.passabilityGrid || this.passabilityGridBuilding) {
@@ -1619,7 +1628,22 @@ export class RoadNetworkSystem extends System {
 
     this.passabilityGridBuilding = true;
     const startTime = performance.now();
-    const { pathStepSize } = this.config;
+
+    // ADAPTIVE GRID RESOLUTION - limit to ~40,000 points max for <5s build time
+    const MAX_GRID_POINTS = 40000;
+    const worldSize = this.worldHalfSize * 2;
+    const baseStep = this.config.pathStepSize;
+
+    // Calculate step size to stay under MAX_GRID_POINTS
+    // gridPoints = (worldSize / step)² ≤ MAX_GRID_POINTS
+    // step ≥ worldSize / sqrt(MAX_GRID_POINTS)
+    const minStepForLimit = worldSize / Math.sqrt(MAX_GRID_POINTS);
+    const gridStepSize = Math.max(
+      baseStep,
+      Math.ceil(minStepForLimit / baseStep) * baseStep,
+    );
+    this.passabilityGridStepSize = gridStepSize;
+
     const grid = new Set<string>();
 
     // Grid bounds: -worldHalfSize to +worldHalfSize
@@ -1627,15 +1651,15 @@ export class RoadNetworkSystem extends System {
     const maxCoord = this.worldHalfSize;
 
     // Snap bounds to grid
-    const gridMin = Math.floor(minCoord / pathStepSize) * pathStepSize;
-    const gridMax = Math.ceil(maxCoord / pathStepSize) * pathStepSize;
+    const gridMin = Math.floor(minCoord / gridStepSize) * gridStepSize;
+    const gridMax = Math.ceil(maxCoord / gridStepSize) * gridStepSize;
 
     // Yield interval to prevent main thread blocking
-    const YIELD_INTERVAL = 1000; // Yield every 1000 grid points
+    const YIELD_INTERVAL = 2000; // Yield every 2000 grid points
     let pointsProcessed = 0;
 
-    for (let x = gridMin; x <= gridMax; x += pathStepSize) {
-      for (let z = gridMin; z <= gridMax; z += pathStepSize) {
+    for (let x = gridMin; x <= gridMax; x += gridStepSize) {
+      for (let z = gridMin; z <= gridMax; z += gridStepSize) {
         // Check if passable (above water threshold)
         const height = this.terrainSystem?.getHeightAt(x, z) ?? WATER_THRESHOLD;
         if (height >= WATER_THRESHOLD) {
@@ -1654,16 +1678,17 @@ export class RoadNetworkSystem extends System {
     this.passabilityGridBuilding = false;
 
     const elapsed = performance.now() - startTime;
-    const gridSize = ((gridMax - gridMin) / pathStepSize + 1) ** 2;
     const passableCount = grid.size;
     const waterPercent = (
-      ((gridSize - passableCount) / gridSize) *
+      ((pointsProcessed - passableCount) / pointsProcessed) *
       100
     ).toFixed(1);
 
     Logger.system(
       "RoadNetworkSystem",
-      `Passability grid built: ${passableCount.toLocaleString()}/${gridSize.toLocaleString()} passable (${waterPercent}% water) in ${elapsed.toFixed(0)}ms`,
+      `Passability grid built: ${passableCount.toLocaleString()}/${pointsProcessed.toLocaleString()} passable ` +
+        `(${waterPercent}% water) in ${elapsed.toFixed(0)}ms ` +
+        `(step: ${gridStepSize}m for ${worldSize}m world)`,
     );
   }
 
@@ -1675,10 +1700,10 @@ export class RoadNetworkSystem extends System {
   private isPassable(x: number, z: number): boolean {
     // Use pre-computed grid if available (O(1) lookup)
     if (this.passabilityGrid) {
-      // Snap to grid coordinates
-      const { pathStepSize } = this.config;
-      const gridX = Math.round(x / pathStepSize) * pathStepSize;
-      const gridZ = Math.round(z / pathStepSize) * pathStepSize;
+      // Snap to grid coordinates using actual grid step size
+      const step = this.passabilityGridStepSize;
+      const gridX = Math.round(x / step) * step;
+      const gridZ = Math.round(z / step) * step;
       return this.passabilityGrid.has(`${gridX},${gridZ}`);
     }
 
@@ -1947,6 +1972,7 @@ export class RoadNetworkSystem extends System {
                   Math.abs(clipped.x1 - p1.x) > EDGE_EPSILON ||
                   Math.abs(clipped.z1 - p1.z) > EDGE_EPSILON
                 ) {
+                  // Use road direction to disambiguate corner crossings
                   const edge = this.getEdgeAtPoint(
                     clipped.x1,
                     clipped.z1,
@@ -1955,6 +1981,7 @@ export class RoadNetworkSystem extends System {
                     tileMinZ,
                     tileMaxZ,
                     EDGE_EPSILON,
+                    segDir, // Pass direction for corner handling
                   );
                   if (edge) {
                     this.recordBoundaryExitForClip(
@@ -1974,6 +2001,7 @@ export class RoadNetworkSystem extends System {
                   Math.abs(clipped.x2 - p2.x) > EDGE_EPSILON ||
                   Math.abs(clipped.z2 - p2.z) > EDGE_EPSILON
                 ) {
+                  // Use road direction to disambiguate corner crossings
                   const edge = this.getEdgeAtPoint(
                     clipped.x2,
                     clipped.z2,
@@ -1982,6 +2010,7 @@ export class RoadNetworkSystem extends System {
                     tileMinZ,
                     tileMaxZ,
                     EDGE_EPSILON,
+                    segDir, // Pass direction for corner handling
                   );
                   if (edge) {
                     this.recordBoundaryExitForClip(
@@ -2036,6 +2065,11 @@ export class RoadNetworkSystem extends System {
   /**
    * Determine which tile edge a point is on, if any.
    * Returns the edge name or null if not on an edge.
+   *
+   * For corner cases (point near two edges), uses the road direction to determine
+   * the primary crossing edge - the edge perpendicular to the dominant direction component.
+   *
+   * @param direction - Optional road direction in radians (used for corner disambiguation)
    */
   private getEdgeAtPoint(
     x: number,
@@ -2045,12 +2079,43 @@ export class RoadNetworkSystem extends System {
     tileMinZ: number,
     tileMaxZ: number,
     epsilon: number,
+    direction?: number,
   ): TileEdge | null {
-    // Check each edge - prioritize exact matches
-    if (Math.abs(x - tileMinX) <= epsilon) return "west";
-    if (Math.abs(x - tileMaxX) <= epsilon) return "east";
-    if (Math.abs(z - tileMinZ) <= epsilon) return "south";
-    if (Math.abs(z - tileMaxZ) <= epsilon) return "north";
+    const nearWest = Math.abs(x - tileMinX) <= epsilon;
+    const nearEast = Math.abs(x - tileMaxX) <= epsilon;
+    const nearSouth = Math.abs(z - tileMinZ) <= epsilon;
+    const nearNorth = Math.abs(z - tileMaxZ) <= epsilon;
+
+    // Count how many edges we're near
+    const edgeCount =
+      (nearWest ? 1 : 0) +
+      (nearEast ? 1 : 0) +
+      (nearSouth ? 1 : 0) +
+      (nearNorth ? 1 : 0);
+
+    // Corner case: near two edges
+    // Use road direction to determine primary edge (perpendicular to dominant direction)
+    if (edgeCount >= 2 && direction !== undefined) {
+      const dirX = Math.abs(Math.cos(direction));
+      const dirZ = Math.abs(Math.sin(direction));
+
+      // If road is moving more in X direction, it crosses east/west edges
+      if (dirX > dirZ) {
+        if (nearWest) return "west";
+        if (nearEast) return "east";
+      } else {
+        // Road is moving more in Z direction, it crosses north/south edges
+        if (nearSouth) return "south";
+        if (nearNorth) return "north";
+      }
+    }
+
+    // Normal case: near exactly one edge, or fallback for corners without direction
+    if (nearWest) return "west";
+    if (nearEast) return "east";
+    if (nearSouth) return "south";
+    if (nearNorth) return "north";
+
     return null;
   }
 
@@ -2357,6 +2422,7 @@ export class RoadNetworkSystem extends System {
 
   /**
    * Generate stub segments for road entries from adjacent tiles.
+   * Uses the actual road direction (not just perpendicular to edge) for seamless continuity.
    */
   private generateEntryStubSegments(
     tileX: number,
@@ -2370,7 +2436,18 @@ export class RoadNetworkSystem extends System {
     for (const entry of entries) {
       const localX = entry.position.x - tileMinX;
       const localZ = entry.position.z - tileMinZ;
-      const dir = RoadNetworkSystem.DIRECTION_INTO_TILE[entry.edge];
+
+      // Use actual road direction for seamless continuity across tiles.
+      // entry.direction is the direction the road was heading when it exited the adjacent tile.
+      // For roads at angles (not perpendicular to edges), this preserves the road's trajectory.
+      // Fallback to perpendicular direction only if entry.direction is missing/invalid.
+      let dir: number;
+      if (typeof entry.direction === "number" && isFinite(entry.direction)) {
+        dir = entry.direction;
+      } else {
+        // Fallback: use perpendicular direction into tile (legacy behavior)
+        dir = RoadNetworkSystem.DIRECTION_INTO_TILE[entry.edge];
+      }
 
       // Calculate stub endpoint, clamped to tile bounds
       const endX = Math.max(
@@ -2580,13 +2657,17 @@ export class RoadNetworkSystem extends System {
    * Generate a road influence texture for GPU grass masking.
    * The texture covers the world and stores road influence in the red channel.
    *
-   * @param textureSize - Size of the texture (power of 2 recommended)
+   * AUTO-RESOLUTION: If textureSize is not provided, automatically calculates
+   * a resolution that ensures roads are at least 2 pixels wide for proper sampling.
+   * This prevents sub-pixel roads from being missed by grass/flower culling.
+   *
+   * @param textureSize - Size of the texture (power of 2 recommended). If 0, auto-calculate.
    * @param worldSize - Size of the world in meters (default: from config)
    * @param extraBlendWidth - Additional blend width for grass fade (default: 3m)
    * @returns Float32 DataTexture with road influence values
    */
   generateRoadInfluenceTexture(
-    textureSize: number = 512,
+    textureSize: number = 0, // 0 = auto-calculate
     worldSize?: number,
     extraBlendWidth: number = 3,
   ): {
@@ -2605,20 +2686,60 @@ export class RoadNetworkSystem extends System {
 
     // Get world size from config or use provided value
     const actualWorldSize = worldSize ?? this.worldHalfSize * 2;
-    const metersPerPixel = actualWorldSize / textureSize;
+
+    // Auto-calculate texture resolution to ensure roads are at least 2 pixels wide
+    // This prevents sub-pixel roads from being missed by grass/flower culling
+    let finalTextureSize: number;
+    if (textureSize === 0) {
+      // Target: road width should span at least 2 pixels
+      // road influence extends halfWidth + extraBlendWidth, so use full influence width
+      const roadInfluenceWidth = this.config.roadWidth / 2 + extraBlendWidth;
+      const minPixelsPerRoadInfluence = 2;
+      const metersPerPixelTarget =
+        roadInfluenceWidth / minPixelsPerRoadInfluence;
+      const minResolution = Math.ceil(actualWorldSize / metersPerPixelTarget);
+
+      // Round up to nearest power of 2, capped at 2048 for performance
+      finalTextureSize = Math.min(
+        2048,
+        Math.pow(2, Math.ceil(Math.log2(Math.max(256, minResolution)))),
+      );
+
+      Logger.system(
+        "RoadNetworkSystem",
+        `Auto-calculated road texture size: ${finalTextureSize} ` +
+          `(road influence width: ${roadInfluenceWidth.toFixed(1)}m, ` +
+          `world: ${actualWorldSize}m)`,
+      );
+    } else {
+      finalTextureSize = textureSize;
+    }
+
+    const metersPerPixel = actualWorldSize / finalTextureSize;
+
+    // Warn if roads are still sub-pixel (shouldn't happen with auto-calc)
+    const roadHalfWidth = this.config.roadWidth / 2;
+    const pixelsPerRoadCenter = roadHalfWidth / metersPerPixel;
+    if (pixelsPerRoadCenter < 1) {
+      Logger.systemWarn(
+        "RoadNetworkSystem",
+        `Road centers may be sub-pixel: ${pixelsPerRoadCenter.toFixed(2)} pixels per road half-width. ` +
+          `Consider increasing texture size above ${finalTextureSize}.`,
+      );
+    }
 
     // Create texture data (single channel float)
-    const data = new Float32Array(textureSize * textureSize);
+    const data = new Float32Array(finalTextureSize * finalTextureSize);
 
     // Calculate road influence for each texel
     // UV (0,0) = world (-halfSize, -halfSize), UV (1,1) = world (halfSize, halfSize)
     const halfWorld = actualWorldSize / 2;
 
-    for (let y = 0; y < textureSize; y++) {
-      for (let x = 0; x < textureSize; x++) {
+    for (let y = 0; y < finalTextureSize; y++) {
+      for (let x = 0; x < finalTextureSize; x++) {
         // Convert texel to world coordinates
-        const worldX = (x / textureSize) * actualWorldSize - halfWorld;
-        const worldZ = (y / textureSize) * actualWorldSize - halfWorld;
+        const worldX = (x / finalTextureSize) * actualWorldSize - halfWorld;
+        const worldZ = (y / finalTextureSize) * actualWorldSize - halfWorld;
 
         // Get road influence at this position
         const influence = this.getRoadInfluenceAt(
@@ -2626,19 +2747,20 @@ export class RoadNetworkSystem extends System {
           worldZ,
           extraBlendWidth,
         );
-        data[y * textureSize + x] = influence;
+        data[y * finalTextureSize + x] = influence;
       }
     }
 
     Logger.system(
       "RoadNetworkSystem",
-      `Generated road influence texture (CPU): ${textureSize}x${textureSize}, ${metersPerPixel.toFixed(1)}m/pixel`,
+      `Generated road influence texture (CPU): ${finalTextureSize}x${finalTextureSize}, ` +
+        `${metersPerPixel.toFixed(1)}m/pixel, ${pixelsPerRoadCenter.toFixed(1)} pixels per road half-width`,
     );
 
     return {
       data,
-      width: textureSize,
-      height: textureSize,
+      width: finalTextureSize,
+      height: finalTextureSize,
       worldSize: actualWorldSize,
     };
   }

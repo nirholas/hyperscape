@@ -7,16 +7,15 @@
  * - handleDuelAcceptRules: Accept current rules configuration
  */
 
-import type { World, DuelRules } from "@hyperscape/shared";
-import { type DuelEquipmentSlot } from "@hyperscape/shared";
+import type { World, DuelRules, DuelEquipmentSlot } from "@hyperscape/shared";
 import type { ServerSocket } from "../../../../shared/types";
 import {
-  getDuelSystem,
   sendDuelError,
   sendToSocket,
-  getPlayerId,
   getSocketByPlayerId,
   rateLimiter,
+  withDuelAuth,
+  DUEL_PACKETS,
 } from "./helpers";
 
 // ============================================================================
@@ -31,17 +30,9 @@ export function handleDuelToggleRule(
   data: { duelId: string; rule: keyof DuelRules },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   const { duelId, rule } = data;
 
@@ -84,13 +75,13 @@ export function handleDuelToggleRule(
     modifiedBy: playerId,
   };
 
-  sendToSocket(socket, "duelRulesUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.RULES_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelRulesUpdated", updatePayload);
+    sendToSocket(opponentSocket, DUEL_PACKETS.RULES_UPDATED, updatePayload);
   }
 }
 
@@ -106,17 +97,9 @@ export function handleDuelToggleEquipment(
   data: { duelId: string; slot: DuelEquipmentSlot },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   const { duelId, slot } = data;
 
@@ -132,7 +115,6 @@ export function handleDuelToggleEquipment(
     "gloves",
     "boots",
     "ring",
-    "ammo",
   ];
 
   if (!validSlots.includes(slot)) {
@@ -160,13 +142,13 @@ export function handleDuelToggleEquipment(
     modifiedBy: playerId,
   };
 
-  sendToSocket(socket, "duelEquipmentUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.EQUIPMENT_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelEquipmentUpdated", updatePayload);
+    sendToSocket(opponentSocket, DUEL_PACKETS.EQUIPMENT_UPDATED, updatePayload);
   }
 }
 
@@ -182,21 +164,13 @@ export function handleDuelAcceptRules(
   data: { duelId: string },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   // Rate limit accept operations to prevent spam
   if (!rateLimiter.tryOperation(playerId)) {
     sendDuelError(socket, "Please wait before accepting", "RATE_LIMITED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
     return;
   }
 
@@ -225,13 +199,17 @@ export function handleDuelAcceptRules(
     movedToStakes,
   };
 
-  sendToSocket(socket, "duelAcceptanceUpdated", updatePayload);
+  sendToSocket(socket, DUEL_PACKETS.ACCEPTANCE_UPDATED, updatePayload);
 
   const opponentId =
     playerId === session.challengerId ? session.targetId : session.challengerId;
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelAcceptanceUpdated", updatePayload);
+    sendToSocket(
+      opponentSocket,
+      DUEL_PACKETS.ACCEPTANCE_UPDATED,
+      updatePayload,
+    );
   }
 
   // If moved to stakes screen, send state change notification
@@ -243,9 +221,9 @@ export function handleDuelAcceptRules(
       equipmentRestrictions: session.equipmentRestrictions,
     };
 
-    sendToSocket(socket, "duelStateChanged", statePayload);
+    sendToSocket(socket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     if (opponentSocket) {
-      sendToSocket(opponentSocket, "duelStateChanged", statePayload);
+      sendToSocket(opponentSocket, DUEL_PACKETS.STATE_CHANGED, statePayload);
     }
   }
 }
@@ -262,17 +240,9 @@ export function handleDuelCancel(
   data: { duelId: string },
   world: World,
 ): void {
-  const playerId = getPlayerId(socket);
-  if (!playerId) {
-    sendDuelError(socket, "Not authenticated", "NOT_AUTHENTICATED");
-    return;
-  }
-
-  const duelSystem = getDuelSystem(world);
-  if (!duelSystem) {
-    sendDuelError(socket, "Duel system unavailable", "SYSTEM_ERROR");
-    return;
-  }
+  const auth = withDuelAuth(socket, world);
+  if (!auth) return;
+  const { playerId, duelSystem } = auth;
 
   const { duelId } = data;
 
@@ -306,10 +276,10 @@ export function handleDuelCancel(
     cancelledBy: playerId,
   };
 
-  sendToSocket(socket, "duelCancelled", cancelPayload);
+  sendToSocket(socket, DUEL_PACKETS.CANCELLED, cancelPayload);
 
   const opponentSocket = getSocketByPlayerId(world, opponentId);
   if (opponentSocket) {
-    sendToSocket(opponentSocket, "duelCancelled", cancelPayload);
+    sendToSocket(opponentSocket, DUEL_PACKETS.CANCELLED, cancelPayload);
   }
 }

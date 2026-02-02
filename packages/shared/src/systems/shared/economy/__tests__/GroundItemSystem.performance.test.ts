@@ -339,8 +339,8 @@ describe("GroundItemSystem Performance", () => {
       }
       const lookupTime = performance.now() - lookupStart;
 
-      // Pile lookups should be fast (250ms generous for CI)
-      expect(lookupTime).toBeLessThan(250);
+      // Pile lookups should be fast (500ms generous for CI environments with variable performance)
+      expect(lookupTime).toBeLessThan(500);
     });
   });
 

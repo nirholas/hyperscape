@@ -445,7 +445,7 @@ export interface StationLocation {
   /** Unique instance ID for this station */
   id: string;
   /** Station type - must match type in stations.json */
-  type: "bank" | "furnace" | "anvil" | "altar" | "range";
+  type: "bank" | "furnace" | "anvil" | "altar" | "range" | "runecrafting_altar";
   /** World position (Y will be grounded to terrain) */
   position: WorldPosition;
   /** Optional rotation in degrees (Y-axis only, default: 0) */
@@ -867,7 +867,9 @@ export type TownLandmarkType =
   | "crate" // Cargo decoration
   | "lamppost" // Street lighting
   | "tree" // Decorative tree
-  | "planter"; // Flower planter
+  | "planter" // Flower planter
+  | "fence_post" // Fence post at lot boundaries
+  | "fence_gate"; // Gate in fence (at building entrances)
 
 /**
  * Landmark/decoration placed in the town
@@ -883,6 +885,22 @@ export interface TownLandmark {
   rotation: number;
   /** Size in meters */
   size: { width: number; depth: number; height: number };
+  /** Optional metadata for specific landmark types */
+  metadata?: TownLandmarkMetadata;
+}
+
+/**
+ * Metadata for specific landmark types
+ */
+export interface TownLandmarkMetadata {
+  /** For signposts: destination town name */
+  destination?: string;
+  /** For signposts: destination town ID */
+  destinationId?: string;
+  /** For fence posts: which building lot this belongs to */
+  lotBuildingId?: string;
+  /** For fence posts: corner index (0-3 for rectangular lots) */
+  cornerIndex?: number;
 }
 
 /**

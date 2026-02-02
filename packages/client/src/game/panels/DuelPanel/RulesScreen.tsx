@@ -18,6 +18,7 @@ import {
   type DuelEquipmentSlot,
   DUEL_RULE_DEFINITIONS,
   EQUIPMENT_SLOT_LABELS,
+  EQUIPMENT_SLOTS_ORDERED,
 } from "@hyperscape/shared";
 
 // ============================================================================
@@ -248,23 +249,21 @@ export function RulesScreen({
       <div style={styles.sectionStyle}>
         <div style={styles.sectionTitleStyle}>Disabled Equipment</div>
         <div style={styles.gridStyle}>
-          {(Object.keys(EQUIPMENT_SLOT_LABELS) as DuelEquipmentSlot[]).map(
-            (slot) => (
-              <div
-                key={slot}
-                style={getCheckboxStyle(theme, equipmentRestrictions[slot])}
-                onClick={() => handleEquipmentToggle(slot)}
-              >
-                <input
-                  type="checkbox"
-                  checked={equipmentRestrictions[slot]}
-                  onChange={() => {}}
-                  style={{ cursor: "pointer" }}
-                />
-                <span>No {EQUIPMENT_SLOT_LABELS[slot]}</span>
-              </div>
-            ),
-          )}
+          {EQUIPMENT_SLOTS_ORDERED.map((slot: DuelEquipmentSlot) => (
+            <div
+              key={slot}
+              style={getCheckboxStyle(theme, equipmentRestrictions[slot])}
+              onClick={() => handleEquipmentToggle(slot)}
+            >
+              <input
+                type="checkbox"
+                checked={equipmentRestrictions[slot]}
+                onChange={() => {}}
+                style={{ cursor: "pointer" }}
+              />
+              <span>No {EQUIPMENT_SLOT_LABELS[slot]}</span>
+            </div>
+          ))}
         </div>
       </div>
 

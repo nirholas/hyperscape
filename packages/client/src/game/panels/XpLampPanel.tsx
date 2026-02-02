@@ -43,6 +43,9 @@ const SKILLS: SkillInfo[] = [
   { id: "firemaking", label: "Firemaking", icon: "🔥" },
   { id: "woodcutting", label: "Woodcutting", icon: "🪓" },
   { id: "agility", label: "Agility", icon: "🏃" },
+  { id: "crafting", label: "Crafting", icon: "🧵" },
+  { id: "fletching", label: "Fletching", icon: "🏹" },
+  { id: "runecrafting", label: "Runecrafting", icon: "🔮" },
 ];
 
 export function XpLampPanel({

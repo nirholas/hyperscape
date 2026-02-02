@@ -72,7 +72,7 @@ export function findShorePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = 5.4,
+    waterThreshold = 9.0,
     shoreMaxHeight = 20.0,
     minSpacing = 6,
   } = options;
@@ -140,7 +140,7 @@ export function findWaterEdgePoints(
 ): ShorePoint[] {
   const {
     sampleInterval = 1, // 1m = 1 tile for tile-accurate sampling
-    waterThreshold = 5.4,
+    waterThreshold = 9.0,
     shoreMaxHeight = 20.0,
     minSpacing = 6,
   } = options;

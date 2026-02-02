@@ -270,19 +270,6 @@ export function GrassDebugPanel({ world }: GrassDebugPanelProps) {
     [world],
   );
 
-  // Helper to create value change handlers (reduces boilerplate)
-  const makeHandler = <T,>(
-    setState: React.Dispatch<React.SetStateAction<T>>,
-    setter?: (v: T) => void,
-  ) =>
-    useCallback(
-      (v: T) => {
-        setState(v);
-        setter?.(v);
-      },
-      [setter],
-    );
-
   // Handler for refreshing terrain color projection
   const handleRefreshColors = useCallback(
     () => grassSystem?.renderTerrainProjection?.(),
@@ -347,58 +334,103 @@ export function GrassDebugPanel({ world }: GrassDebugPanelProps) {
   }, [grassEnabled, grassSystem]);
 
   // Consolidated change handlers (setState + call system API)
-  const handleWindStrengthChange = makeHandler(
-    setWindStrength,
-    grassSystem?.setWindStrength,
+  const handleWindStrengthChange = useCallback(
+    (v: number) => {
+      setWindStrength(v);
+      grassSystem?.setWindStrength?.(v);
+    },
+    [grassSystem],
   );
-  const handleWindSpeedChange = makeHandler(
-    setWindSpeed,
-    grassSystem?.setWindSpeed,
+  const handleWindSpeedChange = useCallback(
+    (v: number) => {
+      setWindSpeed(v);
+      grassSystem?.setWindSpeed?.(v);
+    },
+    [grassSystem],
   );
-  const handleWindScaleChange = makeHandler(
-    setWindScale,
-    grassSystem?.setWindScale,
+  const handleWindScaleChange = useCallback(
+    (v: number) => {
+      setWindScale(v);
+      grassSystem?.setWindScale?.(v);
+    },
+    [grassSystem],
   );
-  const handleFadeStartChange = makeHandler(
-    setFadeStart,
-    grassSystem?.setFadeStart,
+  const handleFadeStartChange = useCallback(
+    (v: number) => {
+      setFadeStart(v);
+      grassSystem?.setFadeStart?.(v);
+    },
+    [grassSystem],
   );
-  const handleFadeEndChange = makeHandler(setFadeEnd, grassSystem?.setFadeEnd);
-  const handleCullingR0Change = makeHandler(
-    setCullingR0,
-    grassSystem?.setCullingR0,
+  const handleFadeEndChange = useCallback(
+    (v: number) => {
+      setFadeEnd(v);
+      grassSystem?.setFadeEnd?.(v);
+    },
+    [grassSystem],
   );
-  const handleCullingR1Change = makeHandler(
-    setCullingR1,
-    grassSystem?.setCullingR1,
+  const handleCullingR0Change = useCallback(
+    (v: number) => {
+      setCullingR0(v);
+      grassSystem?.setCullingR0?.(v);
+    },
+    [grassSystem],
   );
-  const handleCullingPMinChange = makeHandler(
-    setCullingPMin,
-    grassSystem?.setCullingPMin,
+  const handleCullingR1Change = useCallback(
+    (v: number) => {
+      setCullingR1(v);
+      grassSystem?.setCullingR1?.(v);
+    },
+    [grassSystem],
   );
-  const handleTrailRadiusChange = makeHandler(
-    setTrailRadius,
-    grassSystem?.setTrailRadius,
+  const handleCullingPMinChange = useCallback(
+    (v: number) => {
+      setCullingPMin(v);
+      grassSystem?.setCullingPMin?.(v);
+    },
+    [grassSystem],
   );
-  const handleDayNightMixChange = makeHandler(
-    setDayNightMix,
-    grassSystem?.setDayNightMix,
+  const handleTrailRadiusChange = useCallback(
+    (v: number) => {
+      setTrailRadius(v);
+      grassSystem?.setTrailRadius?.(v);
+    },
+    [grassSystem],
   );
-  const handleLod1FadeInStartChange = makeHandler(
-    setLod1FadeInStart,
-    grassSystem?.setLOD1FadeInStart,
+  const handleDayNightMixChange = useCallback(
+    (v: number) => {
+      setDayNightMix(v);
+      grassSystem?.setDayNightMix?.(v);
+    },
+    [grassSystem],
   );
-  const handleLod1FadeInEndChange = makeHandler(
-    setLod1FadeInEnd,
-    grassSystem?.setLOD1FadeInEnd,
+  const handleLod1FadeInStartChange = useCallback(
+    (v: number) => {
+      setLod1FadeInStart(v);
+      grassSystem?.setLOD1FadeInStart?.(v);
+    },
+    [grassSystem],
   );
-  const handleLod1FadeOutStartChange = makeHandler(
-    setLod1FadeOutStart,
-    grassSystem?.setLOD1FadeOutStart,
+  const handleLod1FadeInEndChange = useCallback(
+    (v: number) => {
+      setLod1FadeInEnd(v);
+      grassSystem?.setLOD1FadeInEnd?.(v);
+    },
+    [grassSystem],
   );
-  const handleLod1FadeOutEndChange = makeHandler(
-    setLod1FadeOutEnd,
-    grassSystem?.setLOD1FadeOutEnd,
+  const handleLod1FadeOutStartChange = useCallback(
+    (v: number) => {
+      setLod1FadeOutStart(v);
+      grassSystem?.setLOD1FadeOutStart?.(v);
+    },
+    [grassSystem],
+  );
+  const handleLod1FadeOutEndChange = useCallback(
+    (v: number) => {
+      setLod1FadeOutEnd(v);
+      grassSystem?.setLOD1FadeOutEnd?.(v);
+    },
+    [grassSystem],
   );
 
   // Color handlers need special treatment (3 args)

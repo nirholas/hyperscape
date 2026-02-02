@@ -10,6 +10,11 @@
  * - Handle chunk resets
  * - Query inactive chunks for cleanup
  *
+ * Rate Limiting:
+ * - Uses a semaphore to limit concurrent save operations
+ * - Prevents connection pool exhaustion during bulk chunk saves
+ * - Queues excess operations rather than failing them
+ *
  * Used by: World system, terrain generation, entity spawning
  */
 
@@ -19,11 +24,52 @@ import * as schema from "../schema";
 import type { WorldChunkRow, ItemRow } from "../../shared/types";
 
 /**
+ * Simple semaphore for limiting concurrent operations
+ * Prevents connection pool exhaustion during bulk saves
+ */
+class Semaphore {
+  private available: number;
+  private waiting: Array<() => void> = [];
+
+  constructor(concurrency: number) {
+    this.available = concurrency;
+  }
+
+  async acquire(): Promise<void> {
+    if (this.available > 0) {
+      this.available--;
+      return;
+    }
+    return new Promise<void>((resolve) => {
+      this.waiting.push(resolve);
+    });
+  }
+
+  release(): void {
+    if (this.waiting.length > 0) {
+      const next = this.waiting.shift();
+      if (next) next();
+    } else {
+      this.available++;
+    }
+  }
+}
+
+/**
  * WorldChunkRepository class
  *
  * Provides all world chunk persistence operations.
+ * Uses a semaphore to limit concurrent save operations and prevent
+ * connection pool exhaustion during bulk chunk saves (e.g., server startup).
  */
 export class WorldChunkRepository extends BaseRepository {
+  /**
+   * Semaphore to limit concurrent chunk save operations
+   * Limit to 5 concurrent saves to leave headroom for other database operations
+   * (pool has 20 connections, so 5 saves + other systems = safe margin)
+   */
+  private static saveSemaphore = new Semaphore(5);
+
   /**
    * Load world chunk data from database
    *
@@ -62,6 +108,9 @@ export class WorldChunkRepository extends BaseRepository {
    * Saves or updates persistent chunk data. Uses upsert (INSERT ... ON CONFLICT UPDATE)
    * to handle both new and existing chunks.
    *
+   * Rate limited via semaphore to prevent connection pool exhaustion when
+   * many chunks are saved simultaneously (e.g., during server startup or player movement).
+   *
    * @param chunkData - Chunk data to save (coordinates, serialized data, last active time)
    */
   async saveWorldChunkAsync(chunkData: {
@@ -76,21 +125,29 @@ export class WorldChunkRepository extends BaseRepository {
 
     this.ensureDatabase();
 
-    await this.db
-      .insert(schema.worldChunks)
-      .values({
-        chunkX: chunkData.chunkX,
-        chunkZ: chunkData.chunkZ,
-        data: chunkData.data,
-        lastActive: Date.now(),
-      })
-      .onConflictDoUpdate({
-        target: [schema.worldChunks.chunkX, schema.worldChunks.chunkZ],
-        set: {
+    // Acquire semaphore to limit concurrent saves
+    await WorldChunkRepository.saveSemaphore.acquire();
+
+    try {
+      await this.db
+        .insert(schema.worldChunks)
+        .values({
+          chunkX: chunkData.chunkX,
+          chunkZ: chunkData.chunkZ,
           data: chunkData.data,
           lastActive: Date.now(),
-        },
-      });
+        })
+        .onConflictDoUpdate({
+          target: [schema.worldChunks.chunkX, schema.worldChunks.chunkZ],
+          set: {
+            data: chunkData.data,
+            lastActive: Date.now(),
+          },
+        });
+    } finally {
+      // Always release semaphore, even on error
+      WorldChunkRepository.saveSemaphore.release();
+    }
   }
 
   /**
@@ -159,6 +216,8 @@ export class WorldChunkRepository extends BaseRepository {
    * Updates the number of players currently in a chunk.
    * Used for chunk activity tracking and resource management.
    *
+   * Rate limited via semaphore to prevent connection pool exhaustion.
+   *
    * @param chunkX - Chunk X coordinate
    * @param chunkZ - Chunk Z coordinate
    * @param playerCount - Number of players in chunk
@@ -175,15 +234,22 @@ export class WorldChunkRepository extends BaseRepository {
 
     this.ensureDatabase();
 
-    await this.db
-      .update(schema.worldChunks)
-      .set({ playerCount })
-      .where(
-        and(
-          eq(schema.worldChunks.chunkX, chunkX),
-          eq(schema.worldChunks.chunkZ, chunkZ),
-        ),
-      );
+    // Acquire semaphore to limit concurrent updates
+    await WorldChunkRepository.saveSemaphore.acquire();
+
+    try {
+      await this.db
+        .update(schema.worldChunks)
+        .set({ playerCount })
+        .where(
+          and(
+            eq(schema.worldChunks.chunkX, chunkX),
+            eq(schema.worldChunks.chunkZ, chunkZ),
+          ),
+        );
+    } finally {
+      WorldChunkRepository.saveSemaphore.release();
+    }
   }
 
   /**

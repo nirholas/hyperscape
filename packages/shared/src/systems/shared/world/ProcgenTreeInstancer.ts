@@ -3702,7 +3702,7 @@ export class ProcgenTreeInstancer {
     if (!env) return;
 
     // Get sun direction (direction TO the sun for SSS calculation)
-    let sunDir = this._lightDir;
+    const sunDir = this._lightDir;
     if (env.lightDirection) {
       // lightDirection points FROM the light, so negate it to get direction TO sun
       sunDir.copy(env.lightDirection).negate();

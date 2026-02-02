@@ -398,6 +398,7 @@ export class DatabaseSystem extends SystemBase {
     cooking: { level: number; xp: number };
     smithing: { level: number; xp: number };
     agility: { level: number; xp: number };
+    crafting: { level: number; xp: number };
   } | null> {
     return this.characterRepository.getCharacterSkills(characterId);
   }
@@ -1079,25 +1080,6 @@ export class DatabaseSystem extends SystemBase {
    */
   savePlayerInventory(playerId: string, items: InventorySaveItem[]): void {
     this.trackAsyncOperation(this.savePlayerInventoryAsync(playerId, items));
-  }
-
-  /**
-   * @deprecated Use getPlayerEquipmentAsync instead
-   * @returns Empty array (use async method to get real data)
-   */
-  getPlayerEquipment(_playerId: string): EquipmentRow[] {
-    console.warn(
-      "[DatabaseSystem] getPlayerEquipment called synchronously - use getPlayerEquipmentAsync instead",
-    );
-    return [];
-  }
-
-  /**
-   * Save player equipment (fire-and-forget)
-   * Tracks the operation for graceful shutdown
-   */
-  savePlayerEquipment(playerId: string, items: EquipmentSaveItem[]): void {
-    this.trackAsyncOperation(this.savePlayerEquipmentAsync(playerId, items));
   }
 
   /**

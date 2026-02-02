@@ -63,6 +63,198 @@ export interface SmeltingRecipeManifest {
 }
 
 /**
+ * Crafting recipe input from recipes/crafting.json
+ */
+export interface CraftingRecipeInput {
+  item: string;
+  amount: number;
+}
+
+/**
+ * Crafting consumable from recipes/crafting.json
+ */
+export interface CraftingConsumable {
+  item: string;
+  uses: number;
+}
+
+/**
+ * Crafting recipe from recipes/crafting.json
+ */
+export interface CraftingRecipeManifest {
+  output: string;
+  category: string;
+  inputs: CraftingRecipeInput[];
+  tools: string[];
+  consumables: CraftingConsumable[];
+  level: number;
+  xp: number;
+  ticks: number;
+  station: string;
+}
+
+/**
+ * Full manifest structure for recipes/crafting.json
+ */
+export interface CraftingManifest {
+  recipes: CraftingRecipeManifest[];
+}
+
+/**
+ * Tanning recipe from recipes/tanning.json
+ */
+export interface TanningRecipeManifest {
+  input: string;
+  output: string;
+  cost: number;
+  name: string;
+}
+
+/**
+ * Full manifest structure for recipes/tanning.json
+ */
+export interface TanningManifest {
+  recipes: TanningRecipeManifest[];
+}
+
+/**
+ * Fletching recipe input from recipes/fletching.json
+ */
+export interface FletchingRecipeInput {
+  item: string;
+  amount: number;
+}
+
+/**
+ * Fletching recipe from recipes/fletching.json
+ */
+export interface FletchingRecipeManifest {
+  output: string;
+  outputQuantity: number;
+  category: string;
+  inputs: FletchingRecipeInput[];
+  tools: string[];
+  level: number;
+  xp: number;
+  ticks: number;
+  skill: string;
+}
+
+/**
+ * Full manifest structure for recipes/fletching.json
+ */
+export interface FletchingManifest {
+  recipes: FletchingRecipeManifest[];
+}
+
+/**
+ * Runecrafting recipe from recipes/runecrafting.json
+ */
+export interface RunecraftingRecipeManifest {
+  runeType: string;
+  runeItemId: string;
+  levelRequired: number;
+  xpPerEssence: number;
+  essenceTypes: string[];
+  multiRuneLevels: number[];
+}
+
+/**
+ * Full manifest structure for recipes/runecrafting.json
+ */
+export interface RunecraftingManifest {
+  recipes: RunecraftingRecipeManifest[];
+}
+
+/**
+ * Tanning recipe data for runtime use
+ */
+export interface TanningRecipeData {
+  /** Input hide item ID (e.g., "cowhide") */
+  input: string;
+  /** Output leather item ID (e.g., "leather") */
+  output: string;
+  /** Coin cost per hide tanned */
+  cost: number;
+  /** Display name */
+  name: string;
+}
+
+/**
+ * Fletching recipe data for runtime use.
+ * Keyed by recipeId (output:primaryInput) since multiple recipes can share an output (e.g., arrow shafts from different logs).
+ */
+export interface FletchingRecipeData {
+  /** Unique recipe ID (auto-generated as output:primaryInput) */
+  recipeId: string;
+  /** Output item ID */
+  output: string;
+  /** Display name for the output item */
+  name: string;
+  /** Number of items produced per action (e.g., 15 arrow shafts per log) */
+  outputQuantity: number;
+  /** Category for UI grouping (arrow_shafts, headless_arrows, shortbows, longbows, stringing, arrows) */
+  category: string;
+  /** Input materials required */
+  inputs: FletchingRecipeInput[];
+  /** Tool item IDs required in inventory (not consumed). Empty for no-tool recipes like stringing */
+  tools: string[];
+  /** Fletching level required */
+  level: number;
+  /** XP granted per action (total for all outputQuantity items) */
+  xp: number;
+  /** Time in game ticks (600ms per tick) */
+  ticks: number;
+}
+
+/**
+ * Runecrafting recipe data for runtime use.
+ * Keyed by runeType (e.g., "air", "water", "chaos").
+ */
+export interface RunecraftingRecipeData {
+  /** Rune type identifier (e.g., "air", "mind", "water") */
+  runeType: string;
+  /** Output rune item ID (e.g., "air_rune") */
+  runeItemId: string;
+  /** Display name for the rune */
+  name: string;
+  /** Runecrafting level required */
+  levelRequired: number;
+  /** XP granted per essence converted */
+  xpPerEssence: number;
+  /** Essence item IDs that can be used (e.g., ["rune_essence", "pure_essence"]) */
+  essenceTypes: string[];
+  /** Levels at which the player crafts an additional rune per essence (sorted ascending) */
+  multiRuneLevels: number[];
+}
+
+/**
+ * Crafting recipe data for runtime use
+ */
+export interface CraftingRecipeData {
+  /** Output item ID */
+  output: string;
+  /** Display name for the item */
+  name: string;
+  /** Category for UI grouping (leather, studded, dragonhide, jewelry, gem_cutting) */
+  category: string;
+  /** Input materials required */
+  inputs: CraftingRecipeInput[];
+  /** Tool item IDs required in inventory (not consumed) */
+  tools: string[];
+  /** Consumable items with limited uses (e.g., thread with 5 uses) */
+  consumables: CraftingConsumable[];
+  /** Crafting level required */
+  level: number;
+  /** XP granted per item made */
+  xp: number;
+  /** Time in game ticks (600ms per tick) */
+  ticks: number;
+  /** Station required ("none" or "furnace") */
+  station: string;
+}
+
+/**
  * Smithing recipe from recipes/smithing.json
  */
 export interface SmithingRecipeManifest {
@@ -73,6 +265,8 @@ export interface SmithingRecipeManifest {
   xp: number;
   ticks: number;
   category: string;
+  /** Number of items produced per action (default: 1). Used for arrowtips (15 per action). */
+  outputQuantity?: number;
 }
 
 /**
@@ -124,6 +318,8 @@ export interface SmithingRecipeData {
   category: SmithingCategory;
   /** Time in game ticks (600ms per tick). Default: 4 */
   ticks: number;
+  /** Number of items produced per action. Default: 1. Arrowtips produce 15. */
+  outputQuantity: number;
 }
 
 /**
@@ -201,11 +397,37 @@ export class ProcessingDataProvider {
   private smithableItemIds = new Set<string>();
   private smithingRecipesByBar = new Map<string, SmithingRecipeData[]>();
 
+  // Crafting lookup tables (built from recipes/crafting.json)
+  private craftingRecipeMap = new Map<string, CraftingRecipeData>();
+  private craftableItemIds = new Set<string>();
+  private craftingRecipesByCategory = new Map<string, CraftingRecipeData[]>();
+  private craftingInputsByTool = new Map<string, Set<string>>();
+  private allCraftingInputIds = new Set<string>();
+
+  // Fletching lookup tables (built from recipes/fletching.json)
+  private fletchingRecipeMap = new Map<string, FletchingRecipeData>();
+  private fletchableItemIds = new Set<string>();
+  private fletchingRecipesByCategory = new Map<string, FletchingRecipeData[]>();
+  private fletchingRecipesByInput = new Map<string, FletchingRecipeData[]>();
+  private fletchingInputsByTool = new Map<string, Set<string>>();
+  private allFletchingInputIds = new Set<string>();
+
+  // Runecrafting lookup tables (built from recipes/runecrafting.json)
+  private runecraftingRecipeMap = new Map<string, RunecraftingRecipeData>();
+  private runecraftingEssenceTypes = new Set<string>();
+
   // Loaded recipe manifests (set by DataManager)
   private cookingManifest: CookingManifest | null = null;
   private firemakingManifest: FiremakingManifest | null = null;
   private smeltingManifest: SmeltingManifest | null = null;
   private smithingManifest: SmithingManifest | null = null;
+  private craftingManifest: CraftingManifest | null = null;
+  private tanningManifest: TanningManifest | null = null;
+  private fletchingManifest: FletchingManifest | null = null;
+  private runecraftingManifest: RunecraftingManifest | null = null;
+
+  // Tanning lookup tables
+  private tanningRecipeMap = new Map<string, TanningRecipeData>();
 
   // ============================================================================
   // PRE-ALLOCATED BUFFERS (Memory optimization - avoid allocation in hot paths)
@@ -262,6 +484,34 @@ export class ProcessingDataProvider {
   }
 
   /**
+   * Load crafting recipes from manifest
+   */
+  public loadCraftingRecipes(manifest: CraftingManifest): void {
+    this.craftingManifest = manifest;
+  }
+
+  /**
+   * Load tanning recipes from manifest
+   */
+  public loadTanningRecipes(manifest: TanningManifest): void {
+    this.tanningManifest = manifest;
+  }
+
+  /**
+   * Load fletching recipes from manifest
+   */
+  public loadFletchingRecipes(manifest: FletchingManifest): void {
+    this.fletchingManifest = manifest;
+  }
+
+  /**
+   * Load runecrafting recipes from manifest
+   */
+  public loadRunecraftingRecipes(manifest: RunecraftingManifest): void {
+    this.runecraftingManifest = manifest;
+  }
+
+  /**
    * Check if recipe manifests are loaded
    */
   public hasRecipeManifests(): boolean {
@@ -269,7 +519,11 @@ export class ProcessingDataProvider {
       this.cookingManifest ||
       this.firemakingManifest ||
       this.smeltingManifest ||
-      this.smithingManifest
+      this.smithingManifest ||
+      this.craftingManifest ||
+      this.tanningManifest ||
+      this.fletchingManifest ||
+      this.runecraftingManifest
     );
   }
 
@@ -308,10 +562,26 @@ export class ProcessingDataProvider {
       this.buildSmithingDataFromItems();
     }
 
+    if (this.craftingManifest) {
+      this.buildCraftingDataFromManifest();
+    }
+
+    if (this.tanningManifest) {
+      this.buildTanningDataFromManifest();
+    }
+
+    if (this.fletchingManifest) {
+      this.buildFletchingDataFromManifest();
+    }
+
+    if (this.runecraftingManifest) {
+      this.buildRunecraftingDataFromManifest();
+    }
+
     this.isInitialized = true;
 
     console.log(
-      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items`,
+      `[ProcessingDataProvider] Initialized: ${this.cookableItemIds.size} cookable items, ${this.burneableLogIds.size} burnable logs, ${this.smeltableBarIds.size} smeltable bars, ${this.smithableItemIds.size} smithable items, ${this.craftableItemIds.size} craftable items, ${this.tanningRecipeMap.size} tanning recipes, ${this.fletchingRecipeMap.size} fletching recipes, ${this.runecraftingRecipeMap.size} runecrafting recipes`,
     );
   }
 
@@ -328,6 +598,20 @@ export class ProcessingDataProvider {
     this.smithingRecipeMap.clear();
     this.smithableItemIds.clear();
     this.smithingRecipesByBar.clear();
+    this.craftingRecipeMap.clear();
+    this.craftableItemIds.clear();
+    this.craftingRecipesByCategory.clear();
+    this.craftingInputsByTool.clear();
+    this.allCraftingInputIds.clear();
+    this.tanningRecipeMap.clear();
+    this.fletchingRecipeMap.clear();
+    this.fletchableItemIds.clear();
+    this.fletchingRecipesByCategory.clear();
+    this.fletchingRecipesByInput.clear();
+    this.fletchingInputsByTool.clear();
+    this.allFletchingInputIds.clear();
+    this.runecraftingRecipeMap.clear();
+    this.runecraftingEssenceTypes.clear();
     this.isInitialized = false;
     this.initialize();
   }
@@ -341,6 +625,14 @@ export class ProcessingDataProvider {
    */
   private buildCookingDataFromManifest(): void {
     if (!this.cookingManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.cookingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] cookingManifest.recipes is missing or invalid, skipping cooking data",
+      );
+      return;
+    }
 
     for (const recipe of this.cookingManifest.recipes) {
       const cookingData: CookingItemData = {
@@ -365,6 +657,14 @@ export class ProcessingDataProvider {
   private buildFiremakingDataFromManifest(): void {
     if (!this.firemakingManifest) return;
 
+    // Validate recipes array exists
+    if (!Array.isArray(this.firemakingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] firemakingManifest.recipes is missing or invalid, skipping firemaking data",
+      );
+      return;
+    }
+
     for (const recipe of this.firemakingManifest.recipes) {
       const firemakingData: FiremakingItemData = {
         logId: recipe.log,
@@ -381,6 +681,14 @@ export class ProcessingDataProvider {
    */
   private buildSmeltingDataFromManifest(): void {
     if (!this.smeltingManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.smeltingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] smeltingManifest.recipes is missing or invalid, skipping smelting data",
+      );
+      return;
+    }
 
     for (const recipe of this.smeltingManifest.recipes) {
       // Parse inputs to extract primary ore, secondary ore, and coal count
@@ -419,6 +727,14 @@ export class ProcessingDataProvider {
   private buildSmithingDataFromManifest(): void {
     if (!this.smithingManifest) return;
 
+    // Validate recipes array exists
+    if (!Array.isArray(this.smithingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] smithingManifest.recipes is missing or invalid, skipping smithing data",
+      );
+      return;
+    }
+
     for (const recipe of this.smithingManifest.recipes) {
       // Get item name from ITEMS map
       const item = ITEMS.get(recipe.output);
@@ -433,6 +749,7 @@ export class ProcessingDataProvider {
         xp: recipe.xp,
         category: recipe.category as SmithingCategory,
         ticks: recipe.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+        outputQuantity: recipe.outputQuantity ?? 1,
       };
 
       // Add to main map (keyed by output item ID)
@@ -529,6 +846,7 @@ export class ProcessingDataProvider {
           category: item.smithing.category as SmithingCategory,
           ticks:
             item.smithing.ticks ?? SMITHING_CONSTANTS.DEFAULT_SMITHING_TICKS,
+          outputQuantity: item.smithing.outputQuantity ?? 1,
         };
 
         // Add to main map (keyed by output item ID)
@@ -1020,6 +1338,869 @@ export class ProcessingDataProvider {
   }
 
   // ==========================================================================
+  // BUILD CRAFTING DATA FROM MANIFEST
+  // ==========================================================================
+
+  /**
+   * Build crafting lookup tables from recipes/crafting.json
+   */
+  private buildCraftingDataFromManifest(): void {
+    if (!this.craftingManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.craftingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] craftingManifest.recipes is missing or invalid, skipping crafting data",
+      );
+      return;
+    }
+
+    const VALID_STATIONS = new Set(["none", "furnace"]);
+    const errors: string[] = [];
+
+    for (let i = 0; i < this.craftingManifest.recipes.length; i++) {
+      const recipe = this.craftingManifest.recipes[i];
+      const label = recipe.output || `index ${i}`;
+
+      // Required string fields
+      if (!recipe.output || typeof recipe.output !== "string") {
+        errors.push(`[${label}] missing or invalid 'output'`);
+        continue;
+      }
+      if (!recipe.category || typeof recipe.category !== "string") {
+        errors.push(`[${label}] missing or invalid 'category'`);
+        continue;
+      }
+
+      // Level: integer in [1, 99]
+      if (
+        typeof recipe.level !== "number" ||
+        !Number.isFinite(recipe.level) ||
+        recipe.level < 1 ||
+        recipe.level > 99
+      ) {
+        errors.push(`[${label}] level must be 1–99, got ${recipe.level}`);
+        continue;
+      }
+
+      // XP > 0
+      if (
+        typeof recipe.xp !== "number" ||
+        !Number.isFinite(recipe.xp) ||
+        recipe.xp <= 0
+      ) {
+        errors.push(`[${label}] xp must be > 0, got ${recipe.xp}`);
+        continue;
+      }
+
+      // Ticks > 0
+      if (
+        typeof recipe.ticks !== "number" ||
+        !Number.isFinite(recipe.ticks) ||
+        recipe.ticks <= 0
+      ) {
+        errors.push(`[${label}] ticks must be > 0, got ${recipe.ticks}`);
+        continue;
+      }
+
+      // Station must be "none" or "furnace"
+      if (!VALID_STATIONS.has(recipe.station)) {
+        errors.push(
+          `[${label}] station must be 'none' or 'furnace', got '${recipe.station}'`,
+        );
+        continue;
+      }
+
+      // Inputs: non-empty array with valid entries
+      if (!Array.isArray(recipe.inputs) || recipe.inputs.length === 0) {
+        errors.push(`[${label}] inputs must be a non-empty array`);
+        continue;
+      }
+
+      let inputsValid = true;
+      for (const inp of recipe.inputs) {
+        if (!inp.item || typeof inp.item !== "string") {
+          errors.push(`[${label}] input has missing/invalid 'item'`);
+          inputsValid = false;
+          break;
+        }
+        if (
+          typeof inp.amount !== "number" ||
+          !Number.isFinite(inp.amount) ||
+          inp.amount < 1
+        ) {
+          errors.push(
+            `[${label}] input '${inp.item}' has invalid amount: ${inp.amount}`,
+          );
+          inputsValid = false;
+          break;
+        }
+        if (!ITEMS.has(inp.item)) {
+          errors.push(
+            `[${label}] input '${inp.item}' not found in ITEMS manifest`,
+          );
+          inputsValid = false;
+          break;
+        }
+      }
+      if (!inputsValid) continue;
+
+      // Tools: validate each exists in ITEMS
+      if (!Array.isArray(recipe.tools)) {
+        errors.push(`[${label}] tools must be an array`);
+        continue;
+      }
+      let toolsValid = true;
+      for (const tool of recipe.tools) {
+        if (!tool || typeof tool !== "string") {
+          errors.push(`[${label}] tool has invalid ID`);
+          toolsValid = false;
+          break;
+        }
+        if (!ITEMS.has(tool)) {
+          errors.push(`[${label}] tool '${tool}' not found in ITEMS manifest`);
+          toolsValid = false;
+          break;
+        }
+      }
+      if (!toolsValid) continue;
+
+      // Consumables: validate if present
+      const consumables = recipe.consumables || [];
+      if (!Array.isArray(consumables)) {
+        errors.push(`[${label}] consumables must be an array`);
+        continue;
+      }
+      let consumablesValid = true;
+      for (const con of consumables) {
+        if (!con.item || typeof con.item !== "string") {
+          errors.push(`[${label}] consumable has missing/invalid 'item'`);
+          consumablesValid = false;
+          break;
+        }
+        if (
+          typeof con.uses !== "number" ||
+          !Number.isFinite(con.uses) ||
+          con.uses < 1
+        ) {
+          errors.push(
+            `[${label}] consumable '${con.item}' has invalid uses: ${con.uses}`,
+          );
+          consumablesValid = false;
+          break;
+        }
+      }
+      if (!consumablesValid) continue;
+
+      // Output item should exist in ITEMS
+      if (!ITEMS.has(recipe.output)) {
+        errors.push(`[${label}] output not found in ITEMS manifest`);
+        continue;
+      }
+
+      // ---- Validated — build runtime data ----
+
+      const item = ITEMS.get(recipe.output);
+      const name = item?.name || recipe.output;
+
+      const recipeData: CraftingRecipeData = {
+        output: recipe.output,
+        name,
+        category: recipe.category,
+        inputs: recipe.inputs,
+        tools: recipe.tools,
+        consumables: consumables,
+        level: recipe.level,
+        xp: recipe.xp,
+        ticks: recipe.ticks,
+        station: recipe.station,
+      };
+
+      this.craftingRecipeMap.set(recipe.output, recipeData);
+      this.craftableItemIds.add(recipe.output);
+
+      const categoryRecipes =
+        this.craftingRecipesByCategory.get(recipe.category) || [];
+      categoryRecipes.push(recipeData);
+      this.craftingRecipesByCategory.set(recipe.category, categoryRecipes);
+
+      // Build tool → input item lookups for TargetValidator
+      for (const tool of recipe.tools) {
+        if (!this.craftingInputsByTool.has(tool)) {
+          this.craftingInputsByTool.set(tool, new Set<string>());
+        }
+        const toolInputs = this.craftingInputsByTool.get(tool)!;
+        for (const input of recipe.inputs) {
+          toolInputs.add(input.item);
+          this.allCraftingInputIds.add(input.item);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      console.warn(
+        `[ProcessingDataProvider] Crafting manifest validation errors (${errors.length}):\n  ${errors.join("\n  ")}`,
+      );
+    }
+  }
+
+  // ==========================================================================
+  // BUILD FLETCHING DATA FROM MANIFEST
+  // ==========================================================================
+
+  /**
+   * Build fletching lookup tables from recipes/fletching.json
+   */
+  private buildFletchingDataFromManifest(): void {
+    if (!this.fletchingManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.fletchingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] fletchingManifest.recipes is missing or invalid, skipping fletching data",
+      );
+      return;
+    }
+
+    const errors: string[] = [];
+
+    for (let i = 0; i < this.fletchingManifest.recipes.length; i++) {
+      const recipe = this.fletchingManifest.recipes[i];
+      const label = recipe.output || `index ${i}`;
+
+      // Required string fields
+      if (!recipe.output || typeof recipe.output !== "string") {
+        errors.push(`[${label}] missing or invalid 'output'`);
+        continue;
+      }
+      if (!recipe.category || typeof recipe.category !== "string") {
+        errors.push(`[${label}] missing or invalid 'category'`);
+        continue;
+      }
+
+      // Skill must be "fletching"
+      if (recipe.skill !== "fletching") {
+        errors.push(
+          `[${label}] skill must be 'fletching', got '${recipe.skill}'`,
+        );
+        continue;
+      }
+
+      // Level: integer in [1, 99]
+      if (
+        typeof recipe.level !== "number" ||
+        !Number.isFinite(recipe.level) ||
+        recipe.level < 1 ||
+        recipe.level > 99
+      ) {
+        errors.push(`[${label}] level must be 1–99, got ${recipe.level}`);
+        continue;
+      }
+
+      // XP > 0
+      if (
+        typeof recipe.xp !== "number" ||
+        !Number.isFinite(recipe.xp) ||
+        recipe.xp <= 0
+      ) {
+        errors.push(`[${label}] xp must be > 0, got ${recipe.xp}`);
+        continue;
+      }
+
+      // Ticks > 0
+      if (
+        typeof recipe.ticks !== "number" ||
+        !Number.isFinite(recipe.ticks) ||
+        recipe.ticks <= 0
+      ) {
+        errors.push(`[${label}] ticks must be > 0, got ${recipe.ticks}`);
+        continue;
+      }
+
+      // OutputQuantity >= 1
+      const outputQuantity = recipe.outputQuantity ?? 1;
+      if (
+        typeof outputQuantity !== "number" ||
+        !Number.isFinite(outputQuantity) ||
+        outputQuantity < 1
+      ) {
+        errors.push(
+          `[${label}] outputQuantity must be >= 1, got ${outputQuantity}`,
+        );
+        continue;
+      }
+
+      // Inputs: non-empty array with valid entries
+      if (!Array.isArray(recipe.inputs) || recipe.inputs.length === 0) {
+        errors.push(`[${label}] inputs must be a non-empty array`);
+        continue;
+      }
+
+      let inputsValid = true;
+      for (const inp of recipe.inputs) {
+        if (!inp.item || typeof inp.item !== "string") {
+          errors.push(`[${label}] input has missing/invalid 'item'`);
+          inputsValid = false;
+          break;
+        }
+        if (
+          typeof inp.amount !== "number" ||
+          !Number.isFinite(inp.amount) ||
+          inp.amount < 1
+        ) {
+          errors.push(
+            `[${label}] input '${inp.item}' has invalid amount: ${inp.amount}`,
+          );
+          inputsValid = false;
+          break;
+        }
+        if (!ITEMS.has(inp.item)) {
+          errors.push(
+            `[${label}] input '${inp.item}' not found in ITEMS manifest`,
+          );
+          inputsValid = false;
+          break;
+        }
+      }
+      if (!inputsValid) continue;
+
+      // Tools: validate each exists in ITEMS (can be empty for no-tool recipes)
+      const tools = recipe.tools || [];
+      if (!Array.isArray(tools)) {
+        errors.push(`[${label}] tools must be an array`);
+        continue;
+      }
+      let toolsValid = true;
+      for (const tool of tools) {
+        if (!tool || typeof tool !== "string") {
+          errors.push(`[${label}] tool has invalid ID`);
+          toolsValid = false;
+          break;
+        }
+        if (!ITEMS.has(tool)) {
+          errors.push(`[${label}] tool '${tool}' not found in ITEMS manifest`);
+          toolsValid = false;
+          break;
+        }
+      }
+      if (!toolsValid) continue;
+
+      // Output item should exist in ITEMS
+      if (!ITEMS.has(recipe.output)) {
+        errors.push(`[${label}] output not found in ITEMS manifest`);
+        continue;
+      }
+
+      // ---- Validated — build runtime data ----
+
+      const item = ITEMS.get(recipe.output);
+      const name = item?.name || recipe.output;
+
+      // Generate unique recipe ID from output + primary input
+      const primaryInput = recipe.inputs[0].item;
+      const recipeId = `${recipe.output}:${primaryInput}`;
+
+      const recipeData: FletchingRecipeData = {
+        recipeId,
+        output: recipe.output,
+        name,
+        outputQuantity,
+        category: recipe.category,
+        inputs: recipe.inputs,
+        tools,
+        level: recipe.level,
+        xp: recipe.xp,
+        ticks: recipe.ticks,
+      };
+
+      // Add to main map (keyed by unique recipeId)
+      this.fletchingRecipeMap.set(recipeId, recipeData);
+      this.fletchableItemIds.add(recipe.output);
+
+      // Category grouping
+      const categoryRecipes =
+        this.fletchingRecipesByCategory.get(recipe.category) || [];
+      categoryRecipes.push(recipeData);
+      this.fletchingRecipesByCategory.set(recipe.category, categoryRecipes);
+
+      // Input-based lookups (for filtering when player uses item on item)
+      for (const inp of recipe.inputs) {
+        const inputRecipes = this.fletchingRecipesByInput.get(inp.item) || [];
+        inputRecipes.push(recipeData);
+        this.fletchingRecipesByInput.set(inp.item, inputRecipes);
+        this.allFletchingInputIds.add(inp.item);
+      }
+
+      // Build tool → input item lookups
+      for (const tool of tools) {
+        if (!this.fletchingInputsByTool.has(tool)) {
+          this.fletchingInputsByTool.set(tool, new Set<string>());
+        }
+        const toolInputs = this.fletchingInputsByTool.get(tool)!;
+        for (const input of recipe.inputs) {
+          toolInputs.add(input.item);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      console.warn(
+        `[ProcessingDataProvider] Fletching manifest validation errors (${errors.length}):\n  ${errors.join("\n  ")}`,
+      );
+    }
+  }
+
+  // ==========================================================================
+  // CRAFTING ACCESSORS
+  // ==========================================================================
+
+  /**
+   * Get valid crafting input item IDs for a tool.
+   * e.g., "needle" → leather, green_dragon_leather, etc.
+   * e.g., "chisel" → uncut_sapphire, uncut_emerald, etc.
+   */
+  public getCraftingInputsForTool(toolId: string): Set<string> {
+    this.ensureInitialized();
+    return this.craftingInputsByTool.get(toolId) || new Set<string>();
+  }
+
+  /**
+   * Check if an item is a crafting input in any recipe.
+   */
+  public isCraftingInput(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.allCraftingInputIds.has(itemId);
+  }
+
+  /**
+   * Get the tool ID required for a crafting input item.
+   * Returns the first matching tool or null if not found.
+   */
+  public getCraftingToolForInput(inputItemId: string): string | null {
+    this.ensureInitialized();
+    for (const [toolId, inputs] of this.craftingInputsByTool) {
+      if (inputs.has(inputItemId)) {
+        return toolId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if an item is craftable
+   */
+  public isCraftableItem(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.craftableItemIds.has(itemId);
+  }
+
+  /**
+   * Get crafting recipe data for an output item
+   */
+  public getCraftingRecipe(outputItemId: string): CraftingRecipeData | null {
+    this.ensureInitialized();
+    return this.craftingRecipeMap.get(outputItemId) || null;
+  }
+
+  /**
+   * Get all craftable item IDs
+   */
+  public getCraftableItemIds(): Set<string> {
+    this.ensureInitialized();
+    return this.craftableItemIds;
+  }
+
+  /**
+   * Get all crafting recipes
+   */
+  public getAllCraftingRecipes(): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values());
+  }
+
+  /**
+   * Get crafting recipes for a specific category
+   */
+  public getCraftingRecipesByCategory(category: string): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return this.craftingRecipesByCategory.get(category) || [];
+  }
+
+  /**
+   * Get all crafting category names
+   */
+  public getCraftingCategories(): string[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipesByCategory.keys());
+  }
+
+  /**
+   * Get crafting level requirement for an item
+   */
+  public getCraftingLevel(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.level ?? 1;
+  }
+
+  /**
+   * Get crafting XP for an item
+   */
+  public getCraftingXP(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.xp ?? 0;
+  }
+
+  /**
+   * Get crafting ticks for an item
+   */
+  public getCraftingTicks(outputItemId: string): number {
+    const recipe = this.getCraftingRecipe(outputItemId);
+    return recipe?.ticks ?? 3;
+  }
+
+  /**
+   * Get all recipes the player can make with their crafting level
+   */
+  public getAvailableCraftingRecipes(
+    craftingLevel: number,
+  ): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values()).filter(
+      (recipe) => recipe.level <= craftingLevel,
+    );
+  }
+
+  /**
+   * Get crafting recipes that require a specific station
+   */
+  public getCraftingRecipesByStation(station: string): CraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.craftingRecipeMap.values()).filter(
+      (recipe) => recipe.station === station,
+    );
+  }
+
+  // ==========================================================================
+  // TANNING DATA
+  // ==========================================================================
+
+  /**
+   * Build tanning data from manifest
+   */
+  private buildTanningDataFromManifest(): void {
+    if (!this.tanningManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.tanningManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] tanningManifest.recipes is missing or invalid, skipping tanning data",
+      );
+      return;
+    }
+
+    for (const recipe of this.tanningManifest.recipes) {
+      const data: TanningRecipeData = {
+        input: recipe.input,
+        output: recipe.output,
+        cost: recipe.cost,
+        name: recipe.name,
+      };
+      this.tanningRecipeMap.set(recipe.input, data);
+    }
+  }
+
+  /**
+   * Get tanning recipe by input hide item ID
+   */
+  public getTanningRecipe(inputItemId: string): TanningRecipeData | null {
+    this.ensureInitialized();
+    return this.tanningRecipeMap.get(inputItemId) || null;
+  }
+
+  /**
+   * Get all tanning recipes
+   */
+  public getAllTanningRecipes(): TanningRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.tanningRecipeMap.values());
+  }
+
+  /**
+   * Check if an item can be tanned
+   */
+  public isTannableItem(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.tanningRecipeMap.has(itemId);
+  }
+
+  // ==========================================================================
+  // FLETCHING ACCESSORS
+  // ==========================================================================
+
+  /**
+   * Get valid fletching input item IDs for a tool.
+   * e.g., "knife" → logs, oak_logs, willow_logs, etc.
+   */
+  public getFletchingInputsForTool(toolId: string): Set<string> {
+    this.ensureInitialized();
+    return this.fletchingInputsByTool.get(toolId) || new Set<string>();
+  }
+
+  /**
+   * Check if an item is a fletching input in any recipe.
+   */
+  public isFletchingInput(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.allFletchingInputIds.has(itemId);
+  }
+
+  /**
+   * Get the tool ID required for a fletching input item.
+   * Returns the first matching tool or null if not found (no-tool recipes return null).
+   */
+  public getFletchingToolForInput(inputItemId: string): string | null {
+    this.ensureInitialized();
+    for (const [toolId, inputs] of this.fletchingInputsByTool) {
+      if (inputs.has(inputItemId)) {
+        return toolId;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Check if an item is a fletchable output
+   */
+  public isFletchableItem(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.fletchableItemIds.has(itemId);
+  }
+
+  /**
+   * Get fletching recipe by its unique recipe ID (output:primaryInput)
+   */
+  public getFletchingRecipe(recipeId: string): FletchingRecipeData | null {
+    this.ensureInitialized();
+    return this.fletchingRecipeMap.get(recipeId) || null;
+  }
+
+  /**
+   * Get all fletchable item IDs (output items)
+   */
+  public getFletchableItemIds(): Set<string> {
+    this.ensureInitialized();
+    return this.fletchableItemIds;
+  }
+
+  /**
+   * Get all fletching recipes
+   */
+  public getAllFletchingRecipes(): FletchingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.fletchingRecipeMap.values());
+  }
+
+  /**
+   * Get fletching recipes for a specific category
+   */
+  public getFletchingRecipesByCategory(
+    category: string,
+  ): FletchingRecipeData[] {
+    this.ensureInitialized();
+    return this.fletchingRecipesByCategory.get(category) || [];
+  }
+
+  /**
+   * Get all fletching category names
+   */
+  public getFletchingCategories(): string[] {
+    this.ensureInitialized();
+    return Array.from(this.fletchingRecipesByCategory.keys());
+  }
+
+  /**
+   * Get all fletching recipes that use a specific input item.
+   * Used for filtering when player uses knife on a specific log type.
+   */
+  public getFletchingRecipesForInput(
+    inputItemId: string,
+  ): FletchingRecipeData[] {
+    this.ensureInitialized();
+    return this.fletchingRecipesByInput.get(inputItemId) || [];
+  }
+
+  /**
+   * Get fletching recipes that match BOTH input items (for item-on-item interactions).
+   * e.g., bowstring + shortbow_u → stringing recipe, arrowtips + headless_arrow → tipping recipe.
+   */
+  public getFletchingRecipesForInputPair(
+    itemA: string,
+    itemB: string,
+  ): FletchingRecipeData[] {
+    this.ensureInitialized();
+    const recipesA = this.fletchingRecipesByInput.get(itemA) || [];
+    return recipesA.filter((recipe) =>
+      recipe.inputs.some((inp) => inp.item === itemB),
+    );
+  }
+
+  // ==========================================================================
+  // BUILD RUNECRAFTING DATA FROM MANIFEST
+  // ==========================================================================
+
+  /**
+   * Build runecrafting lookup tables from recipes/runecrafting.json
+   */
+  private buildRunecraftingDataFromManifest(): void {
+    if (!this.runecraftingManifest) return;
+
+    // Validate recipes array exists
+    if (!Array.isArray(this.runecraftingManifest.recipes)) {
+      console.warn(
+        "[ProcessingDataProvider] runecraftingManifest.recipes is missing or invalid, skipping runecrafting data",
+      );
+      return;
+    }
+
+    const errors: string[] = [];
+
+    for (let i = 0; i < this.runecraftingManifest.recipes.length; i++) {
+      const recipe = this.runecraftingManifest.recipes[i];
+      const label = recipe.runeType || `index ${i}`;
+
+      // Required string fields
+      if (!recipe.runeType || typeof recipe.runeType !== "string") {
+        errors.push(`[${label}] missing or invalid 'runeType'`);
+        continue;
+      }
+      if (!recipe.runeItemId || typeof recipe.runeItemId !== "string") {
+        errors.push(`[${label}] missing or invalid 'runeItemId'`);
+        continue;
+      }
+
+      // Level: integer in [1, 99]
+      if (
+        typeof recipe.levelRequired !== "number" ||
+        !Number.isFinite(recipe.levelRequired) ||
+        recipe.levelRequired < 1 ||
+        recipe.levelRequired > 99
+      ) {
+        errors.push(
+          `[${label}] levelRequired must be 1–99, got ${recipe.levelRequired}`,
+        );
+        continue;
+      }
+
+      // XP > 0
+      if (
+        typeof recipe.xpPerEssence !== "number" ||
+        !Number.isFinite(recipe.xpPerEssence) ||
+        recipe.xpPerEssence <= 0
+      ) {
+        errors.push(
+          `[${label}] xpPerEssence must be > 0, got ${recipe.xpPerEssence}`,
+        );
+        continue;
+      }
+
+      // Essence types: non-empty array
+      if (
+        !Array.isArray(recipe.essenceTypes) ||
+        recipe.essenceTypes.length === 0
+      ) {
+        errors.push(`[${label}] essenceTypes must be a non-empty array`);
+        continue;
+      }
+
+      // Multi-rune levels: must be an array of numbers (can be empty)
+      if (!Array.isArray(recipe.multiRuneLevels)) {
+        errors.push(`[${label}] multiRuneLevels must be an array`);
+        continue;
+      }
+
+      // ---- Validated — build runtime data ----
+
+      const item = ITEMS.get(recipe.runeItemId);
+      const name = item?.name || recipe.runeItemId;
+
+      const recipeData: RunecraftingRecipeData = {
+        runeType: recipe.runeType,
+        runeItemId: recipe.runeItemId,
+        name,
+        levelRequired: recipe.levelRequired,
+        xpPerEssence: recipe.xpPerEssence,
+        essenceTypes: recipe.essenceTypes,
+        multiRuneLevels: [...recipe.multiRuneLevels].sort((a, b) => a - b),
+      };
+
+      this.runecraftingRecipeMap.set(recipe.runeType, recipeData);
+
+      for (const essenceType of recipe.essenceTypes) {
+        this.runecraftingEssenceTypes.add(essenceType);
+      }
+    }
+
+    if (errors.length > 0) {
+      console.warn(
+        `[ProcessingDataProvider] Runecrafting manifest validation errors (${errors.length}):\n  ${errors.join("\n  ")}`,
+      );
+    }
+  }
+
+  // ==========================================================================
+  // RUNECRAFTING ACCESSORS
+  // ==========================================================================
+
+  /**
+   * Get runecrafting recipe by rune type (e.g., "air", "water", "chaos")
+   */
+  public getRunecraftingRecipe(
+    runeType: string,
+  ): RunecraftingRecipeData | null {
+    this.ensureInitialized();
+    return this.runecraftingRecipeMap.get(runeType) || null;
+  }
+
+  /**
+   * Get all runecrafting recipes
+   */
+  public getAllRunecraftingRecipes(): RunecraftingRecipeData[] {
+    this.ensureInitialized();
+    return Array.from(this.runecraftingRecipeMap.values());
+  }
+
+  /**
+   * Check if an item is a runecrafting essence
+   */
+  public isRunecraftingEssence(itemId: string): boolean {
+    this.ensureInitialized();
+    return this.runecraftingEssenceTypes.has(itemId);
+  }
+
+  /**
+   * Calculate the multi-rune multiplier for a given rune type and level.
+   * Returns how many runes are produced per essence at the given level.
+   *
+   * In OSRS, each threshold in multiRuneLevels grants +1 rune per essence.
+   * e.g., air rune thresholds [11, 22, 33, ...]: at level 22, you get 3 runes per essence.
+   */
+  public getRunecraftingMultiplier(runeType: string, level: number): number {
+    this.ensureInitialized();
+    const recipe = this.runecraftingRecipeMap.get(runeType);
+    if (!recipe) return 1;
+
+    let multiplier = 1;
+    for (const threshold of recipe.multiRuneLevels) {
+      if (level >= threshold) {
+        multiplier++;
+      } else {
+        break; // Sorted ascending, no need to check further
+      }
+    }
+    return multiplier;
+  }
+
+  // ==========================================================================
   // UTILITY
   // ==========================================================================
 
@@ -1048,6 +2229,10 @@ export class ProcessingDataProvider {
     burnableLogs: number;
     smeltableBars: number;
     smithingRecipes: number;
+    craftingRecipes: number;
+    tanningRecipes: number;
+    fletchingRecipes: number;
+    runecraftingRecipes: number;
     isInitialized: boolean;
   } {
     this.ensureInitialized();
@@ -1056,6 +2241,10 @@ export class ProcessingDataProvider {
       burnableLogs: this.burneableLogIds.size,
       smeltableBars: this.smeltableBarIds.size,
       smithingRecipes: this.smithingRecipeMap.size,
+      craftingRecipes: this.craftingRecipeMap.size,
+      tanningRecipes: this.tanningRecipeMap.size,
+      fletchingRecipes: this.fletchingRecipeMap.size,
+      runecraftingRecipes: this.runecraftingRecipeMap.size,
       isInitialized: this.isInitialized,
     };
   }

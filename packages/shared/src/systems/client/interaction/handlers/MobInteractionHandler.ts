@@ -23,6 +23,7 @@ import { getPlayerWeaponRange } from "../../../../utils/game/CombatUtils";
 import { calculateCombatLevel } from "../../../../utils/game/CombatLevelCalculator";
 import type { Player } from "../../../../types/core/core";
 import { CONTEXT_MENU_COLORS } from "../../../../constants/GameConstants";
+import { EventType } from "../../../../types/events/event-types";
 
 /**
  * Mob entity interface for type safety
@@ -131,6 +132,14 @@ export class MobInteractionHandler extends BaseInteractionHandler {
     if (this.actionQueue.isDebounced(debounceKey, TIMING.ATTACK_DEBOUNCE_MS)) {
       return;
     }
+
+    // Immediately face the target on the client — no server round-trip needed.
+    // This makes the player visually rotate toward the mob as soon as they click,
+    // which is essential for ranged/magic attacks where the player stays stationary.
+    this.world.emit(EventType.COMBAT_FACE_TARGET, {
+      playerId: player.data.id,
+      targetId: target.entityId,
+    });
 
     // Server-authoritative attack system:
     // Send attack request immediately - server handles OSRS-style pathfinding

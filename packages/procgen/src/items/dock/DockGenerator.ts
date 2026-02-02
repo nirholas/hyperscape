@@ -26,7 +26,11 @@ import type {
   DockGeometryArrays,
 } from "./types";
 import { DockStyle } from "./types";
-import type { ShorelinePoint, ItemCollisionData } from "../types";
+import type {
+  ShorelinePoint,
+  ItemCollisionData,
+  WoodTypeValue,
+} from "../types";
 import { DEFAULT_DOCK_PARAMS, getDockPreset, mergeDockParams } from "./presets";
 import {
   createPlankGeometries,
@@ -35,6 +39,8 @@ import {
   createMooringGeometries,
   computeFlatNormals,
 } from "./DockGeometry";
+// @ts-ignore - TSL module uses dynamic typing
+import { createDockMaterial } from "./DockMaterialTSL";
 import { createRng, type RNG } from "../../math/Random.js";
 
 // ============================================================================
@@ -133,8 +139,13 @@ export class DockGenerator {
     // Build geometry
     const geometryArrays = this.buildDock(layout, recipe);
 
-    // Create mesh
-    const mesh = this.createMesh(geometryArrays, layout);
+    // Create mesh with WebGPU TSL material
+    const mesh = this.createMesh(
+      geometryArrays,
+      layout,
+      recipe.woodType,
+      waterLevel,
+    );
 
     // Generate collision data
     const collision = this.generateCollisionData(layout, shorelinePoint);
@@ -205,8 +216,15 @@ export class DockGenerator {
     );
 
     // Generate railings if enabled
+    // Skip end railing if T or L section will be attached
     const railings: RailingData[] = [];
     if (recipe.hasRailing) {
+      const hasTSection =
+        recipe.style === DockStyle.TShaped &&
+        recipe.tSectionWidthRange !== undefined;
+      const hasLSection =
+        recipe.style === DockStyle.LShaped &&
+        recipe.lSectionLengthRange !== undefined;
       railings.push(
         ...this.generateRailings(
           recipe,
@@ -214,6 +232,7 @@ export class DockGenerator {
           width,
           direction,
           0, // deckY relative to local origin
+          { skipEndRailing: hasTSection || hasLSection },
         ),
       );
     }
@@ -391,6 +410,8 @@ export class DockGenerator {
 
   /**
    * Generate railing data for dock edges
+   * @param skipEndRailing - If true, don't generate end railing (for junction with T/L sections)
+   * @param skipStartRailing - If true, start side railings further along (for L-section junction)
    */
   private generateRailings(
     recipe: DockRecipe,
@@ -398,8 +419,10 @@ export class DockGenerator {
     width: number,
     direction: { x: number; z: number },
     deckY: number,
+    options: { skipEndRailing?: boolean; skipStartSection?: number } = {},
   ): RailingData[] {
     const railings: RailingData[] = [];
+    const { skipEndRailing = false, skipStartSection = 0 } = options;
 
     // Perpendicular direction
     const perpX = -direction.z;
@@ -407,11 +430,11 @@ export class DockGenerator {
 
     const halfWidth = width / 2;
 
-    // Left side railing
+    // Left side railing (optionally starting further along)
     const leftStart = {
-      x: perpX * halfWidth,
+      x: perpX * halfWidth + direction.x * skipStartSection,
       y: deckY,
-      z: perpZ * halfWidth,
+      z: perpZ * halfWidth + direction.z * skipStartSection,
     };
     const leftEnd = {
       x: direction.x * length + perpX * halfWidth,
@@ -428,11 +451,11 @@ export class DockGenerator {
       ),
     );
 
-    // Right side railing
+    // Right side railing (optionally starting further along)
     const rightStart = {
-      x: -perpX * halfWidth,
+      x: -perpX * halfWidth + direction.x * skipStartSection,
       y: deckY,
-      z: -perpZ * halfWidth,
+      z: -perpZ * halfWidth + direction.z * skipStartSection,
     };
     const rightEnd = {
       x: direction.x * length - perpX * halfWidth,
@@ -449,17 +472,19 @@ export class DockGenerator {
       ),
     );
 
-    // End railing (at water end)
-    const endLeft = leftEnd;
-    const endRight = rightEnd;
-    railings.push(
-      this.createRailing(
-        endLeft,
-        endRight,
-        recipe.railingHeight,
-        recipe.railingPostSpacing,
-      ),
-    );
+    // End railing (at water end) - skip if junction with T/L section
+    if (!skipEndRailing) {
+      const endLeft = leftEnd;
+      const endRight = rightEnd;
+      railings.push(
+        this.createRailing(
+          endLeft,
+          endRight,
+          recipe.railingHeight,
+          recipe.railingPostSpacing,
+        ),
+      );
+    }
 
     return railings;
   }
@@ -586,8 +611,8 @@ export class DockGenerator {
           y: deckY,
           z: centerZ + perpZ * distAlongT,
         },
-        // Plank's length runs parallel to main direction
-        rotation: Math.atan2(perpX, perpZ),
+        // Plank's length runs parallel to main direction (perpendicular to T's extension)
+        rotation: Math.atan2(direction.x, direction.z),
         width: recipe.plankWidth,
         length: mainWidth, // Spans the main dock's width
         thickness: PLANK_THICKNESS,
@@ -688,7 +713,8 @@ export class DockGenerator {
         ),
       );
 
-      // Side railings along the perpendicular span (left and right of T)
+      // Front railing along the outer water edge (at +direction)
+      // This is the edge furthest from shore, running across the T
       railings.push(
         this.createRailing(
           {
@@ -706,22 +732,8 @@ export class DockGenerator {
         ),
       );
 
-      railings.push(
-        this.createRailing(
-          {
-            x: centerX + perpX * halfTWidth - direction.x * halfMainWidthRail,
-            y: deckY,
-            z: centerZ + perpZ * halfTWidth - direction.z * halfMainWidthRail,
-          },
-          {
-            x: centerX - perpX * halfTWidth - direction.x * halfMainWidthRail,
-            y: deckY,
-            z: centerZ - perpZ * halfTWidth - direction.z * halfMainWidthRail,
-          },
-          recipe.railingHeight,
-          recipe.railingPostSpacing,
-        ),
-      );
+      // NOTE: Back edge (at -direction) intentionally has NO railing
+      // This is the junction with the main dock where players walk through
     }
 
     return {
@@ -790,14 +802,17 @@ export class DockGenerator {
     }
 
     // Generate railings
+    // Skip start section equal to half main dock width to avoid blocking junction
     const railings: RailingData[] = [];
     if (recipe.hasRailing) {
+      const junctionClearance = mainWidth / 2;
       const lRailings = this.generateRailings(
         recipe,
         lLength,
         mainWidth,
         lDirection,
         deckY,
+        { skipStartSection: junctionClearance },
       );
 
       // Offset railings
@@ -883,14 +898,20 @@ export class DockGenerator {
   }
 
   /**
-   * Create the final mesh from geometry arrays
+   * Create the final mesh from geometry arrays using WebGPU TSL material
    */
   private createMesh(
     arrays: DockGeometryArrays,
     layout: DockLayout,
+    woodType: WoodTypeValue,
+    waterLevel: number,
   ): THREE.Group {
     const group = new THREE.Group();
     group.name = "Dock";
+
+    // Create WebGPU TSL material for wood
+    const { material, uniforms } = createDockMaterial(woodType);
+    uniforms.waterLevel.value = waterLevel;
 
     // Helper to merge and add geometry
     const addMergedMesh = (
@@ -917,13 +938,7 @@ export class DockGenerator {
 
       merged.computeBoundingSphere();
 
-      // Create mesh with vertex colors
-      const material = new THREE.MeshStandardMaterial({
-        vertexColors: true,
-        roughness: 0.85,
-        metalness: 0.0,
-      });
-
+      // Create mesh with WebGPU TSL material
       const mesh = new THREE.Mesh(merged, material);
       mesh.name = name;
       mesh.castShadow = true;

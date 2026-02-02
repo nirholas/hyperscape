@@ -62,6 +62,7 @@ function createMockContext(
     setTarget: () => {},
     canAttack: () => false,
     performAttack: () => {},
+    onEnterCombatRange: () => {},
     isInCombat: () => false,
     exitCombat: () => {},
     getSpawnPoint: () => config.spawnPoint,
@@ -91,6 +92,7 @@ function createMockContext(
       countUnoccupied: () => 0,
     }),
     isWalkable: () => true,
+    tryStepOutCardinal: () => false,
   };
 }
 
@@ -118,7 +120,7 @@ describe("OSRS-Accurate Leash Behavior", () => {
       expect(nextState).not.toBe(MobAIState.RETURN);
     });
 
-    it("stops NPC when exceeding leash range", () => {
+    it("returns NPC to spawn when exceeding leash range", () => {
       const chaseState = new ChaseState();
 
       // NPC at 11 tiles from spawn (beyond 10 tile leash)
@@ -135,8 +137,8 @@ describe("OSRS-Accurate Leash Behavior", () => {
       chaseState.enter(context);
       const nextState = chaseState.update(context, 0.016);
 
-      // Should leash - beyond leash range
-      expect(nextState).toBe(MobAIState.IDLE);
+      // RS-accurate: Mob returns to spawn when exceeding leash range
+      expect(nextState).toBe(MobAIState.RETURN);
     });
 
     it("uses leashRange not wanderRadius for leash check", () => {
@@ -164,7 +166,7 @@ describe("OSRS-Accurate Leash Behavior", () => {
   });
 
   describe("immediate stop behavior", () => {
-    it("transitions to IDLE, not RETURN, on leash", () => {
+    it("transitions to RETURN on leash (walks back to spawn)", () => {
       const chaseState = new ChaseState();
 
       const context = createMockContext({
@@ -178,12 +180,12 @@ describe("OSRS-Accurate Leash Behavior", () => {
       chaseState.enter(context);
       const nextState = chaseState.update(context, 0.016);
 
-      // Must be IDLE, never RETURN
-      expect(nextState).toBe(MobAIState.IDLE);
-      expect(nextState).not.toBe(MobAIState.RETURN);
+      // RS-accurate: Mob returns to spawn when player exceeds aggression range
+      // Prevents ranged farming exploit where mobs stand idle at leash edge
+      expect(nextState).toBe(MobAIState.RETURN);
     });
 
-    it("AttackState also uses IDLE not RETURN on leash", () => {
+    it("AttackState also returns to spawn on leash", () => {
       const attackState = new AttackState();
 
       const context = createMockContext({
@@ -197,9 +199,9 @@ describe("OSRS-Accurate Leash Behavior", () => {
       attackState.enter(context);
       const nextState = attackState.update(context, 0.016);
 
-      // Must be IDLE, never RETURN
-      expect(nextState).toBe(MobAIState.IDLE);
-      expect(nextState).not.toBe(MobAIState.RETURN);
+      // RS-accurate: Mob returns to spawn when player exceeds aggression range
+      // Prevents ranged farming exploit where mobs stand idle at leash edge
+      expect(nextState).toBe(MobAIState.RETURN);
     });
 
     it("calls exitCombat when leashed to allow immediate re-aggro", () => {
@@ -272,11 +274,11 @@ describe("OSRS-Accurate Leash Behavior", () => {
       expect(nextState).not.toBe(MobAIState.RETURN);
     });
 
-    it("handles player just beyond aggression boundary (should leash)", () => {
+    it("handles player just beyond aggression boundary (returns to spawn)", () => {
       const chaseState = new ChaseState();
 
       // Player just beyond aggression range
-      // OSRS-accurate: Leash is based on PLAYER distance from spawn
+      // RS-accurate: Leash is based on PLAYER distance from spawn
       const context = createMockContext({
         distanceFromSpawn: 10,
         leashRange: 10,
@@ -289,8 +291,8 @@ describe("OSRS-Accurate Leash Behavior", () => {
       chaseState.enter(context);
       const nextState = chaseState.update(context, 0.016);
 
-      // Just beyond boundary, should leash
-      expect(nextState).toBe(MobAIState.IDLE);
+      // RS-accurate: Mob returns to spawn when player exceeds aggression range
+      expect(nextState).toBe(MobAIState.RETURN);
     });
 
     it("handles custom leash range from config", () => {
@@ -312,7 +314,7 @@ describe("OSRS-Accurate Leash Behavior", () => {
       expect(nextState).not.toBe(MobAIState.RETURN);
     });
 
-    it("handles zero leash range (leashes immediately when leaving spawn)", () => {
+    it("handles zero leash range (returns to spawn immediately when leaving)", () => {
       const chaseState = new ChaseState();
 
       const context = createMockContext({
@@ -325,8 +327,8 @@ describe("OSRS-Accurate Leash Behavior", () => {
       chaseState.enter(context);
       const nextState = chaseState.update(context, 0.016);
 
-      // Any distance > 0 should leash with leashRange of 0
-      expect(nextState).toBe(MobAIState.IDLE);
+      // RS-accurate: Mob returns to spawn when exceeding leash range
+      expect(nextState).toBe(MobAIState.RETURN);
     });
 
     it("returns IDLE when target becomes null (not RETURN)", () => {

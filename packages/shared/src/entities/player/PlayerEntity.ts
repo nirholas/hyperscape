@@ -115,6 +115,7 @@ export class PlayerEntity extends CombatantEntity {
         defense: { level: 1, xp: 0 },
         constitution: { level: 10, xp: 1154 },
         ranged: { level: 1, xp: 0 },
+        magic: { level: 1, xp: 0 },
         prayer: { level: 1, xp: 0 },
         woodcutting: { level: 1, xp: 0 },
         mining: { level: 1, xp: 0 },
@@ -122,6 +123,10 @@ export class PlayerEntity extends CombatantEntity {
         firemaking: { level: 1, xp: 0 },
         cooking: { level: 1, xp: 0 },
         smithing: { level: 1, xp: 0 },
+        agility: { level: 1, xp: 0 },
+        crafting: { level: 1, xp: 0 },
+        fletching: { level: 1, xp: 0 },
+        runecrafting: { level: 1, xp: 0 },
       };
     }
 
@@ -195,13 +200,22 @@ export class PlayerEntity extends CombatantEntity {
           ranged: playerData.skills.ranged,
           magic: { level: 1, xp: 0 },
           constitution: playerData.skills.constitution,
-          prayer: playerData.skills.prayer || { level: 1, xp: 0 },
+          prayer: {
+            level: playerData.skills.prayer?.level || 1,
+            xp: playerData.skills.prayer?.xp || 0,
+            points: 1,
+            maxPoints: 1,
+          },
           woodcutting: playerData.skills.woodcutting,
           mining: playerData.skills.mining,
           fishing: playerData.skills.fishing,
           firemaking: playerData.skills.firemaking,
           cooking: playerData.skills.cooking,
           smithing: playerData.skills.smithing || { level: 1, xp: 0 },
+          agility: playerData.skills.agility || { level: 1, xp: 0 },
+          crafting: playerData.skills.crafting || { level: 1, xp: 0 },
+          fletching: playerData.skills.fletching || { level: 1, xp: 0 },
+          runecrafting: playerData.skills.runecrafting || { level: 1, xp: 0 },
           // Placeholder for complex fields - will be initialized by systems
           activePrayers: [] as PrayerComponent,
           equipment: {} as EquipmentComponent,
@@ -350,6 +364,9 @@ export class PlayerEntity extends CombatantEntity {
         cooking: defaultSkill,
         smithing: defaultSkill,
         agility: defaultSkill,
+        crafting: defaultSkill,
+        fletching: defaultSkill,
+        runecrafting: defaultSkill,
       },
 
       // Equipment - initially empty
@@ -485,19 +502,22 @@ export class PlayerEntity extends CombatantEntity {
 
     this.addComponent("stats", {
       // Combat skills - store FULL SkillData objects for SkillsSystem
-      attack: playerData.skills.attack,
-      strength: playerData.skills.strength,
-      defense: playerData.skills.defense,
-      constitution: playerData.skills.constitution,
-      ranged: playerData.skills.ranged,
+      attack: playerData.skills.attack || defaultSkill,
+      strength: playerData.skills.strength || defaultSkill,
+      defense: playerData.skills.defense || defaultSkill,
+      constitution: playerData.skills.constitution || defaultSkill,
+      ranged: playerData.skills.ranged || defaultSkill,
       // Non-combat skills
-      woodcutting: playerData.skills.woodcutting,
-      mining: playerData.skills.mining,
-      fishing: playerData.skills.fishing,
-      firemaking: playerData.skills.firemaking,
-      cooking: playerData.skills.cooking,
-      smithing: playerData.skills.smithing || { level: 1, xp: 0 },
-      agility: playerData.skills.agility || { level: 1, xp: 0 },
+      woodcutting: playerData.skills.woodcutting || defaultSkill,
+      mining: playerData.skills.mining || defaultSkill,
+      fishing: playerData.skills.fishing || defaultSkill,
+      firemaking: playerData.skills.firemaking || defaultSkill,
+      cooking: playerData.skills.cooking || defaultSkill,
+      smithing: playerData.skills.smithing || defaultSkill,
+      agility: playerData.skills.agility || defaultSkill,
+      crafting: playerData.skills.crafting || defaultSkill,
+      fletching: playerData.skills.fletching || defaultSkill,
+      runecrafting: playerData.skills.runecrafting || defaultSkill,
       // Additional stats from StatsComponent interface
       combatLevel: 3, // Will be calculated by skills system
       totalLevel: 9, // Sum of all skill levels
@@ -516,7 +536,7 @@ export class PlayerEntity extends CombatantEntity {
         points: playerData.skills.prayer?.level || 1, // Points default to level
         maxPoints: playerData.skills.prayer?.level || 1, // Max points equal level
       },
-      magic: { level: 1, xp: 0 },
+      magic: playerData.skills.magic || defaultSkill,
     });
   }
 

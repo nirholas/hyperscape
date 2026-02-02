@@ -237,50 +237,6 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
     return { valid: violations.length === 0, violations };
   }
 
-  /**
-   * Check if a path enters building through a door tile
-   */
-  function verifyPathEntersThroughDoor(path: TileCoord[]): {
-    valid: boolean;
-    doorTile: TileCoord | null;
-    entryIndex: number;
-  } {
-    // Get door openings to check for valid entry points
-    const floor0 = collisionService
-      .getBuilding(BUILDING_ID)
-      ?.floors.find((f) => f.floorIndex === 0);
-
-    // Find where path transitions from outside to inside
-    for (let i = 0; i < path.length - 1; i++) {
-      const current = path[i];
-      const next = path[i + 1];
-
-      const currentInFootprint =
-        collisionService.isTileInBuildingFootprint(current.x, current.z) !==
-        null;
-      const nextInFootprint =
-        collisionService.isTileInBuildingFootprint(next.x, next.z) !== null;
-
-      if (!currentInFootprint && nextInFootprint) {
-        // This is the entry step - next tile should have door openings
-        const doorOpenings = collisionService.getDoorOpeningsAtTile(
-          next.x,
-          next.z,
-          0,
-        );
-
-        if (doorOpenings.length === 0) {
-          return { valid: false, doorTile: null, entryIndex: i };
-        }
-
-        return { valid: true, doorTile: next, entryIndex: i };
-      }
-    }
-
-    // Path never enters building (might already be inside or never reaches it)
-    return { valid: true, doorTile: null, entryIndex: -1 };
-  }
-
   it("should get building info", () => {
     const building = collisionService.getBuilding(BUILDING_ID);
     expect(building).not.toBeNull();
@@ -470,7 +426,7 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
 
       // Verify combined path doesn't pass through walls
       const fullPath = [...stage1Path, doorInterior, ...stage2Path.slice(1)];
-      const fullIntegrity = verifyPathIntegrity(fullPath, 0);
+      verifyPathIntegrity(fullPath, 0);
 
       results.push(
         `✅ ${approach.name}: Stage1=${stage1Path.length} tiles, Stage2=${stage2Path.length} tiles, ` +
@@ -500,7 +456,6 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
     );
 
     let wallsBlocking = 0;
-    let wallsNotBlocking = 0;
     const failures: string[] = [];
 
     for (const wall of solidWalls) {
@@ -525,7 +480,6 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
       if (blocked) {
         wallsBlocking++;
       } else {
-        wallsNotBlocking++;
         failures.push(
           `Wall at (${wall.tileX},${wall.tileZ}) side=${wall.side} NOT blocking!`,
         );
@@ -675,7 +629,7 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
     expect(stage2Integrity.valid).toBe(true);
 
     // Simulate climbing stairs
-    const stairTransition = collisionService.handleStairTransition(
+    collisionService.handleStairTransition(
       "test-player" as unknown as import("../../../../types/core/identifiers").EntityID,
       doorInterior,
       stairTile,
@@ -795,7 +749,6 @@ describe("Wall Integrity Navigation - Comprehensive Verification", () => {
 
   it("should verify ground player CANNOT enter through non-door tiles", () => {
     const building = collisionService.getBuilding(BUILDING_ID)!;
-    const bbox = building.boundingBox;
 
     // Pick a non-door tile on the building edge
     const floor0 = building.floors.find((f) => f.floorIndex === 0)!;

@@ -39,9 +39,10 @@ import {
   isNotedItem,
   getPrimaryAction,
   CONTEXT_MENU_COLORS,
+  INVENTORY_CONSTANTS,
   type PrimaryActionType,
 } from "@hyperscape/shared";
-import { getItemIcon } from "@/utils";
+import { ItemIcon } from "@/ui/components/ItemIcon";
 import { dispatchInventoryAction } from "../systems/InventoryActionDispatcher";
 import type { ClientWorld, InventorySlotItem } from "../../types";
 import { CoinAmountModal } from "./BankPanel/components/modals/CoinAmountModal";
@@ -49,9 +50,9 @@ import { CoinPouch } from "./inventory";
 
 /**
  * Maximum inventory slots (OSRS-style: 28 slots)
- * Matches INPUT_LIMITS.MAX_INVENTORY_SLOTS from shared constants
+ * Uses INVENTORY_CONSTANTS from shared package as single source of truth
  */
-const MAX_SLOTS = 28;
+const MAX_SLOTS = INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS;
 
 type InventorySlotViewItem = Pick<
   InventorySlotItem,
@@ -511,10 +512,10 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
         background: isOver
           ? "rgba(242, 208, 138, 0.15)" // Gold tint when dragging over
           : isEmpty
-            ? "rgba(16, 16, 18, 0.95)" // Aligned with theme BG_PRIMARY
+            ? "var(--color-slot-empty)" // Use theme slot.empty color
             : isItemNoted
               ? "linear-gradient(180deg, rgba(215, 200, 165, 0.95) 0%, rgba(235, 225, 195, 0.95) 100%)" // Parchment - lighter at bottom for emboss
-              : "rgba(20, 20, 22, 0.95)", // Aligned with theme BG_SECONDARY
+              : "var(--color-slot-filled)", // Use theme slot.filled color
         // Embossed shadows: dark on top/left, subtle light on bottom/right
         boxShadow: isSourceItem
           ? "0 0 8px rgba(255, 255, 255, 0.6)" // OSRS: White glow on source item
@@ -555,7 +556,7 @@ const DraggableInventorySlot = memo(function DraggableInventorySlot({
             fontSize: "clamp(14px, min(50cqw, 50cqh), 28px)",
           }}
         >
-          {getItemIcon(item.itemId)}
+          <ItemIcon itemId={item.itemId} size={48} />
         </div>
       )}
 
@@ -1378,40 +1379,6 @@ export function InventoryPanel({
       <DragOverlay>
         {activeItem
           ? (() => {
-              // Get icon for drag overlay
-              const getOverlayIcon = (itemId: string) => {
-                if (
-                  itemId.includes("sword") ||
-                  itemId.includes("dagger") ||
-                  itemId.includes("scimitar")
-                )
-                  return "⚔️";
-                if (itemId.includes("shield") || itemId.includes("defender"))
-                  return "🛡️";
-                if (
-                  itemId.includes("helmet") ||
-                  itemId.includes("helm") ||
-                  itemId.includes("hat")
-                )
-                  return "⛑️";
-                if (itemId.includes("boots") || itemId.includes("boot"))
-                  return "👢";
-                if (
-                  itemId.includes("fish") ||
-                  itemId.includes("lobster") ||
-                  itemId.includes("shark")
-                )
-                  return "🐟";
-                if (itemId.includes("log") || itemId.includes("wood"))
-                  return "🪵";
-                if (itemId.includes("ore") || itemId.includes("bar"))
-                  return "⛏️";
-                if (itemId.includes("coin")) return "💰";
-                if (itemId.includes("potion") || itemId.includes("vial"))
-                  return "🧪";
-                if (itemId.includes("axe")) return "🪓";
-                return itemId.substring(0, 2).toUpperCase();
-              };
               const qtyDisplay =
                 activeItem.quantity > 1
                   ? formatQuantity(activeItem.quantity)
@@ -1429,7 +1396,10 @@ export function InventoryPanel({
                     boxShadow: theme.shadows.lg,
                   }}
                 >
-                  {getOverlayIcon(activeItem.itemId)}
+                  <ItemIcon
+                    itemId={activeItem.itemId}
+                    size={dragSlotSize ? dragSlotSize * 0.85 : 36}
+                  />
                   {qtyDisplay && (
                     <div
                       className="absolute bottom-0.5 right-0.5 font-bold rounded px-0.5 py-0.5 leading-none"

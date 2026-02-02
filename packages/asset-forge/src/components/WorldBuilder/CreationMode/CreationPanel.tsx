@@ -19,6 +19,7 @@ import {
   ChevronDown,
   ChevronRight,
   X,
+  Home,
 } from "lucide-react";
 import React, { useCallback } from "react";
 
@@ -728,6 +729,82 @@ export const CreationPanel: React.FC<CreationPanelProps> = ({
               </div>
             </div>
           </div>
+        </Section>
+
+        {/* Town Landmarks Settings */}
+        <Section
+          title="Town Landmarks"
+          icon={<Home className="w-4 h-4" />}
+          expanded={expandedSections.has("landmarks")}
+          onToggle={() => toggleSection("landmarks")}
+        >
+          <ToggleInput
+            label="Fences"
+            checked={config.towns.landmarks.fencesEnabled}
+            onChange={(v) =>
+              actions.updateTownConfig({
+                landmarks: { ...config.towns.landmarks, fencesEnabled: v },
+              })
+            }
+            hint="Place fence posts around building lots"
+          />
+          {config.towns.landmarks.fencesEnabled && (
+            <SliderInput
+              label="Fence Density"
+              value={config.towns.landmarks.fenceDensity * 100}
+              onChange={(v) =>
+                actions.updateTownConfig({
+                  landmarks: {
+                    ...config.towns.landmarks,
+                    fenceDensity: v / 100,
+                  },
+                })
+              }
+              min={10}
+              max={100}
+              step={10}
+              hint="Percentage of valid corners with fence posts"
+            />
+          )}
+          <ToggleInput
+            label="Village Lampposts"
+            checked={config.towns.landmarks.lamppostsInVillages}
+            onChange={(v) =>
+              actions.updateTownConfig({
+                landmarks: {
+                  ...config.towns.landmarks,
+                  lamppostsInVillages: v,
+                },
+              })
+            }
+            hint="Add lampposts to villages (always enabled for towns)"
+          />
+          <ToggleInput
+            label="Market Stalls"
+            checked={config.towns.landmarks.marketStallsEnabled}
+            onChange={(v) =>
+              actions.updateTownConfig({
+                landmarks: {
+                  ...config.towns.landmarks,
+                  marketStallsEnabled: v,
+                },
+              })
+            }
+            hint="Place market stalls in town plazas"
+          />
+          <ToggleInput
+            label="Decorations"
+            checked={config.towns.landmarks.decorationsEnabled}
+            onChange={(v) =>
+              actions.updateTownConfig({
+                landmarks: {
+                  ...config.towns.landmarks,
+                  decorationsEnabled: v,
+                },
+              })
+            }
+            hint="Add barrels, crates, planters near buildings"
+          />
         </Section>
 
         {/* Road Settings */}

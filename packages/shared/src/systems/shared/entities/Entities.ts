@@ -66,10 +66,26 @@ import { ItemEntity } from "../../../entities/world/ItemEntity";
 import { ResourceEntity } from "../../../entities/world/ResourceEntity";
 import { HeadstoneEntity } from "../../../entities/world/HeadstoneEntity";
 import { BankEntity } from "../../../entities/world/BankEntity";
-import { FurnaceEntity } from "../../../entities/world/FurnaceEntity";
-import { AnvilEntity } from "../../../entities/world/AnvilEntity";
-import { AltarEntity } from "../../../entities/world/AltarEntity";
-import { RangeEntity } from "../../../entities/world/RangeEntity";
+import {
+  FurnaceEntity,
+  type FurnaceEntityConfig,
+} from "../../../entities/world/FurnaceEntity";
+import {
+  AnvilEntity,
+  type AnvilEntityConfig,
+} from "../../../entities/world/AnvilEntity";
+import {
+  AltarEntity,
+  type AltarEntityConfig,
+} from "../../../entities/world/AltarEntity";
+import {
+  RunecraftingAltarEntity,
+  type RunecraftingAltarEntityConfig,
+} from "../../../entities/world/RunecraftingAltarEntity";
+import {
+  RangeEntity,
+  type RangeEntityConfig,
+} from "../../../entities/world/RangeEntity";
 import type {
   ComponentDefinition,
   EntityConstructor,
@@ -80,10 +96,6 @@ import type {
 } from "../../../types/index";
 import { EventType } from "../../../types/events";
 import { SystemBase } from "../infrastructure/SystemBase";
-import type { FurnaceEntityConfig } from "../../../entities/world/FurnaceEntity";
-import type { AnvilEntityConfig } from "../../../entities/world/AnvilEntity";
-import type { AltarEntityConfig } from "../../../entities/world/AltarEntity";
-import type { RangeEntityConfig } from "../../../entities/world/RangeEntity";
 import type {
   MobEntityConfig,
   NPCEntityConfig,
@@ -420,6 +432,8 @@ export class Entities extends SystemBase implements IEntities {
       const weight = (networkData.weight as number) || 0;
       const rarity = (networkData.rarity as string) || "common";
       const modelPath = (networkData.model as string) || null;
+      const modelScale = networkData.modelScale as number | undefined;
+      const groundOffset = networkData.groundOffset as number | undefined;
 
       const itemConfig: ItemEntityConfig = {
         id: data.id,
@@ -458,6 +472,8 @@ export class Entities extends SystemBase implements IEntities {
         modelPath: modelPath || "",
         iconPath: "",
         healAmount: 0,
+        modelScale: modelScale,
+        groundOffset: groundOffset,
         properties: {
           movementComponent: null,
           combatComponent: null,
@@ -956,6 +972,39 @@ export class Entities extends SystemBase implements IEntities {
       this.items.set(entity.id, entity);
 
       // Initialize entity if it has an init method
+      if (entity.init) {
+        (entity.init() as Promise<void>)?.catch((err) =>
+          this.logger.error(`Entity ${entity.id} async init failed`, err),
+        );
+      }
+
+      return entity;
+    } else if (data.type === "runecrafting_altar") {
+      // Build RunecraftingAltarEntity from network data
+      const positionArray = (data.position || [0, 40, 0]) as [
+        number,
+        number,
+        number,
+      ];
+      const runeType = (data.runeType as string) || "air";
+      const name =
+        data.name ||
+        `${runeType.charAt(0).toUpperCase()}${runeType.slice(1)} Altar`;
+
+      const rcAltarConfig: RunecraftingAltarEntityConfig = {
+        id: data.id,
+        name: name,
+        position: {
+          x: positionArray[0],
+          y: positionArray[1],
+          z: positionArray[2],
+        },
+        runeType: (data.runeType as string) || "air",
+      };
+
+      const entity = new RunecraftingAltarEntity(this.world, rcAltarConfig);
+      this.items.set(entity.id, entity);
+
       if (entity.init) {
         (entity.init() as Promise<void>)?.catch((err) =>
           this.logger.error(`Entity ${entity.id} async init failed`, err),

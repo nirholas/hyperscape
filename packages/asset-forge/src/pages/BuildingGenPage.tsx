@@ -10,6 +10,13 @@
  * - Navigation mesh visualization and pathfinding testing
  */
 
+import type {
+  BuildingViewerHandle,
+  TownViewerHandle,
+  PathInfo,
+  NavStats,
+  NavigationVisualizerOptions,
+} from "@hyperscape/procgen/building/viewer";
 import {
   Building2,
   MapPin,
@@ -35,13 +42,6 @@ import React, {
 
 import type { BuildingPreset } from "@/types/ProcgenPresets";
 import { notify } from "@/utils/notify";
-import type {
-  BuildingViewerHandle,
-  TownViewerHandle,
-  PathInfo,
-  NavStats,
-  NavigationVisualizerOptions,
-} from "@hyperscape/procgen/building/viewer";
 
 // API base
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3401";

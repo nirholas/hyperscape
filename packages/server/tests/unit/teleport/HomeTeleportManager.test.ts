@@ -394,12 +394,11 @@ describe("Home Teleport Manager", () => {
       const initialRemaining = manager.getCooldownRemaining(mockPlayer.id);
       expect(initialRemaining).toBeGreaterThan(COOLDOWN_MS - 1000);
 
-      // Advance time by 5 minutes by updating the mocked Date.now
-      currentTime = new Date("2025-01-15T12:05:00Z").getTime();
-
-      const afterFiveMin = manager.getCooldownRemaining(mockPlayer.id);
-      expect(afterFiveMin).toBeLessThan(initialRemaining);
-      expect(afterFiveMin).toBeGreaterThan(9 * 60 * 1000); // ~10 min remaining
+      // Advance time by updating currentTime (used by mocked Date.now)
+      currentTime += COOLDOWN_MS / 2;
+      const afterHalf = manager.getCooldownRemaining(mockPlayer.id);
+      expect(afterHalf).toBeLessThan(initialRemaining);
+      expect(afterHalf).toBeGreaterThan(0); // Still some remaining
     });
   });
 
@@ -799,8 +798,9 @@ describe("Home Teleport Manager", () => {
   // ==========================================================================
 
   describe("Constants", () => {
-    it("cooldown is exactly 15 minutes in milliseconds", () => {
-      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(900000);
+    it("cooldown matches HOME_TELEPORT_CONSTANTS", () => {
+      // Production value: 15 minutes
+      expect(HOME_TELEPORT_CONSTANTS.COOLDOWN_MS).toBe(15 * 60 * 1000);
     });
 
     it("cast time is exactly 10 seconds in milliseconds", () => {

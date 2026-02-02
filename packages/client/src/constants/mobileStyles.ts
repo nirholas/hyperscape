@@ -12,6 +12,8 @@
  * @packageDocumentation
  */
 
+import { INVENTORY_CONSTANTS } from "@hyperscape/shared";
+
 /** Minimum touch target size (48px per Material Design guidelines) */
 export const MOBILE_TOUCH_TARGET = 48;
 
@@ -55,17 +57,17 @@ export const MOBILE_INVENTORY_GRID = {
   /** Number of rows in mobile inventory (7 like OSRS) */
   rows: 7,
   /** Total slots (4 * 7 = 28, OSRS standard) */
-  totalSlots: 28,
+  totalSlots: INVENTORY_CONSTANTS.MAX_INVENTORY_SLOTS,
   /** Gap between slots */
   gap: 3,
 } as const;
 
 /** Equipment panel configuration for mobile */
 export const MOBILE_EQUIPMENT = {
-  /** Number of columns in mobile equipment grid */
-  columns: 2,
+  /** Number of columns in mobile equipment grid (3-column OSRS paperdoll) */
+  columns: 3,
   /** Slot height */
-  slotHeight: 58,
+  slotHeight: 52,
   /** Gap between slots */
   gap: 6,
   /** Padding inside panel */

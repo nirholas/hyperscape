@@ -149,6 +149,12 @@ export function handleAttackPlayer(
       // Both in active duels - verify they're opponents
       const attackerDuel = duelSystem.getPlayerDuel(attackerId);
       if (attackerDuel) {
+        // Block combat during COUNTDOWN — fight hasn't started yet
+        if (attackerDuel.state === "COUNTDOWN") {
+          sendCombatError(socket, "The duel hasn't started yet!");
+          return;
+        }
+
         const isOpponent =
           (attackerDuel.challengerId === attackerId &&
             attackerDuel.targetId === targetPlayerId) ||
@@ -159,9 +165,31 @@ export function handleAttackPlayer(
           isDuelCombat = true;
 
           // Enforce duel combat rules (OSRS-accurate)
-          // Currently melee-only, but check the rule anyway
           if (duelSystem.canUseMelee && !duelSystem.canUseMelee(attackerId)) {
             sendCombatError(socket, "Melee attacks are disabled in this duel.");
+            return;
+          }
+          // Ranged/Magic/SpecialAttack rule enforcement
+          // These activate when ranged/magic combat is implemented
+          if (duelSystem.canUseRanged && !duelSystem.canUseRanged(attackerId)) {
+            sendCombatError(
+              socket,
+              "Ranged attacks are disabled in this duel.",
+            );
+            return;
+          }
+          if (duelSystem.canUseMagic && !duelSystem.canUseMagic(attackerId)) {
+            sendCombatError(socket, "Magic attacks are disabled in this duel.");
+            return;
+          }
+          if (
+            duelSystem.canUseSpecialAttack &&
+            !duelSystem.canUseSpecialAttack(attackerId)
+          ) {
+            sendCombatError(
+              socket,
+              "Special attacks are disabled in this duel.",
+            );
             return;
           }
         } else {
@@ -171,6 +199,10 @@ export function handleAttackPlayer(
       }
     } else if (attackerInDuel) {
       sendCombatError(socket, "You can only attack your duel opponent.");
+      return;
+    } else if (targetInDuel) {
+      // Non-duelist attacking a duelist — block this
+      sendCombatError(socket, "That player is in a duel.");
       return;
     }
   }

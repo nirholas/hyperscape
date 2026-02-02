@@ -39,6 +39,11 @@ interface PlayerEquipment {
   helmet: EquipmentSlot;
   body: EquipmentSlot;
   legs: EquipmentSlot;
+  boots: EquipmentSlot;
+  gloves: EquipmentSlot;
+  cape: EquipmentSlot;
+  amulet: EquipmentSlot;
+  ring: EquipmentSlot;
   arrows: EquipmentSlot;
 }
 
@@ -157,6 +162,11 @@ class MockEquipmentManager {
       helmet: emptySlot(),
       body: emptySlot(),
       legs: emptySlot(),
+      boots: emptySlot(),
+      gloves: emptySlot(),
+      cape: emptySlot(),
+      amulet: emptySlot(),
+      ring: emptySlot(),
       arrows: emptySlot(),
     });
     this.log("PLAYER_REGISTERED", { playerId });
@@ -259,6 +269,11 @@ class MockEquipmentManager {
       helmet: equipment.helmet.itemId,
       body: equipment.body.itemId,
       legs: equipment.legs.itemId,
+      boots: equipment.boots.itemId,
+      gloves: equipment.gloves.itemId,
+      cape: equipment.cape.itemId,
+      amulet: equipment.amulet.itemId,
+      ring: equipment.ring.itemId,
       arrows: equipment.arrows.itemId,
     };
 
@@ -279,6 +294,11 @@ class MockEquipmentManager {
       helmet: equipment.helmet.itemId,
       body: equipment.body.itemId,
       legs: equipment.legs.itemId,
+      boots: equipment.boots.itemId,
+      gloves: equipment.gloves.itemId,
+      cape: equipment.cape.itemId,
+      amulet: equipment.amulet.itemId,
+      ring: equipment.ring.itemId,
       arrows: equipment.arrows.itemId,
     };
   }
@@ -413,6 +433,11 @@ describe("Equipment Persistence (Issue #273)", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
@@ -444,6 +469,11 @@ describe("Equipment Persistence (Issue #273)", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
@@ -465,6 +495,11 @@ describe("Equipment Persistence (Issue #273)", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 
@@ -604,6 +639,11 @@ describe("Equipment Persistence (Issue #273)", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
       await database.saveEquipment("player-2", {
@@ -612,6 +652,11 @@ describe("Equipment Persistence (Issue #273)", () => {
         helmet: null,
         body: null,
         legs: null,
+        boots: null,
+        gloves: null,
+        cape: null,
+        amulet: null,
+        ring: null,
         arrows: null,
       });
 

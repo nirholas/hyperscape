@@ -1187,6 +1187,386 @@ function generateTrunkMesh(
 }
 
 // =============================================================================
+// STUMP MESH GENERATION
+// =============================================================================
+
+/**
+ * Default stump height in meters
+ */
+export const STUMP_HEIGHT = 1.0;
+
+/**
+ * Stump generation result containing mesh data
+ */
+export interface StumpGenerationResult {
+  /** The stump mesh data (vertices, triangles, etc.) */
+  meshData: MeshData;
+  /** The BufferGeometry ready for Three.js */
+  geometry: BufferGeometry;
+  /** The stump height used */
+  height: number;
+  /** The stump width at base */
+  width: number;
+}
+
+/**
+ * Generate a tree stump mesh by cutting the trunk at a specified height.
+ * Creates a cylindrical stump with a flat top cap.
+ *
+ * @param trunk - Trunk curve data (from generateTrunk)
+ * @param width - Base trunk width
+ * @param stumpHeight - Height to cut the trunk at (default 1.0m)
+ * @param segments - Number of radial segments (default 8 for performance)
+ * @param baseColor - Base bark color (HSL)
+ * @param topColor - Top bark color (HSL)
+ * @param browning - Browning adjustment for bark color
+ * @param lightness - Lightness adjustment for bark color
+ * @returns MeshData for the stump
+ */
+export function generateStumpMesh(
+  trunk: { curves: { p0: Point3D; h0: Point3D; h1: Point3D; p1: Point3D }[] },
+  width: number,
+  stumpHeight: number = STUMP_HEIGHT,
+  segments: number = 8,
+  baseColor?: HSLColor,
+  topColor?: HSLColor,
+  browning: number = 0.2,
+  lightness: number = 0.2,
+): MeshData {
+  const vertices: Point3D[] = [];
+  const triangles: number[] = [];
+  const uvs: { x: number; y: number }[] = [];
+  const normals: Point3D[] = [];
+  const colors: number[] = [];
+
+  // Default trunk colors - brown gradient
+  const defaultBaseColor: HSLColor = {
+    h: 0.33 - browning * 0.2,
+    s: 0.6 - browning * 0.2,
+    l: 0.12 + lightness * 0.1,
+  };
+  const defaultTopColor: HSLColor = {
+    h: 0.33,
+    s: 0.7,
+    l: 0.18 + lightness * 0.15,
+  };
+  const actualBaseColor = baseColor || defaultBaseColor;
+  const actualTopColor = topColor || defaultTopColor;
+
+  // Cut surface color - lighter, more yellowish (exposed wood)
+  const cutSurfaceColor: HSLColor = {
+    h: 0.12, // More yellow/tan
+    s: 0.4,
+    l: 0.35 + lightness * 0.1,
+  };
+
+  // Get trunk curve points up to stump height only
+  const baseLineSteps = 6; // Fewer steps since stump is short
+  const { points: allTrunkPoints, normals: allTrunkTangents } = getStemPoints(
+    trunk.curves,
+    baseLineSteps,
+  );
+
+  if (allTrunkPoints.length === 0) {
+    throw new Error(
+      "[PlantGenerator] generateStumpMesh: no trunk points from curves",
+    );
+  }
+
+  // Find the total trunk height to calculate percentages
+  const fullTrunkHeight = allTrunkPoints[allTrunkPoints.length - 1].y;
+
+  // Filter points that are at or below stump height, and add interpolated cut point
+  const trunkPoints: Point3D[] = [];
+  const trunkTangents: Point3D[] = [];
+
+  for (let i = 0; i < allTrunkPoints.length; i++) {
+    const point = allTrunkPoints[i];
+    const tangent = allTrunkTangents[i];
+
+    if (point.y <= stumpHeight) {
+      trunkPoints.push(point);
+      trunkTangents.push(tangent);
+    } else {
+      // This point is above stump height - interpolate the cut point
+      if (i > 0) {
+        const prevPoint = allTrunkPoints[i - 1];
+        const prevTangent = allTrunkTangents[i - 1];
+
+        // Interpolation factor
+        const t =
+          (stumpHeight - prevPoint.y) / Math.max(0.001, point.y - prevPoint.y);
+
+        // Interpolate position
+        const cutPoint: Point3D = {
+          x: prevPoint.x + (point.x - prevPoint.x) * t,
+          y: stumpHeight,
+          z: prevPoint.z + (point.z - prevPoint.z) * t,
+        };
+
+        // Interpolate tangent
+        const cutTangent: Point3D = {
+          x: prevTangent.x + (tangent.x - prevTangent.x) * t,
+          y: prevTangent.y + (tangent.y - prevTangent.y) * t,
+          z: prevTangent.z + (tangent.z - prevTangent.z) * t,
+        };
+
+        trunkPoints.push(cutPoint);
+        trunkTangents.push(cutTangent);
+      }
+      break;
+    }
+  }
+
+  // Ensure we have at least 2 points for the stump
+  if (trunkPoints.length < 2) {
+    // Add base point if missing
+    if (trunkPoints.length === 0) {
+      trunkPoints.push({ x: 0, y: 0, z: 0 });
+      trunkTangents.push({ x: 0, y: 1, z: 0 });
+    }
+    // Add top point at stump height
+    trunkPoints.push({ x: 0, y: stumpHeight, z: 0 });
+    trunkTangents.push({ x: 0, y: 1, z: 0 });
+  }
+
+  // Create circular cross-section shape
+  const shapePoints = createStemShape(width, segments);
+
+  // No taper for stump - full width all the way up (stumps don't taper visually)
+  const taperStartPerc = 1.0;
+
+  // Generate trunk cylinder vertices
+  for (let i = 0; i < trunkPoints.length; i++) {
+    const trunkPoint = trunkPoints[i];
+    const tangent = trunkTangents[i];
+    const perc = fullTrunkHeight > 0 ? trunkPoint.y / fullTrunkHeight : 0;
+
+    // Normalize the tangent
+    const tLen = Math.sqrt(
+      tangent.x * tangent.x + tangent.y * tangent.y + tangent.z * tangent.z,
+    );
+
+    let forward: Point3D;
+    if (tLen > 0.0001) {
+      forward = {
+        x: tangent.x / tLen,
+        y: tangent.y / tLen,
+        z: tangent.z / tLen,
+      };
+    } else {
+      forward = { x: 0, y: 1, z: 0 };
+    }
+
+    // Calculate perpendicular basis
+    let refVec: Point3D = { x: 1, y: 0, z: 0 };
+    const dotRef =
+      forward.x * refVec.x + forward.y * refVec.y + forward.z * refVec.z;
+    if (Math.abs(dotRef) > 0.95) {
+      refVec = { x: 0, y: 0, z: 1 };
+    }
+
+    // right = forward x refVec
+    const right: Point3D = {
+      x: forward.y * refVec.z - forward.z * refVec.y,
+      y: forward.z * refVec.x - forward.x * refVec.z,
+      z: forward.x * refVec.y - forward.y * refVec.x,
+    };
+    const rLen = Math.sqrt(
+      right.x * right.x + right.y * right.y + right.z * right.z,
+    );
+    if (rLen > 0.0001) {
+      right.x /= rLen;
+      right.y /= rLen;
+      right.z /= rLen;
+    }
+
+    // up = right x forward
+    const up: Point3D = {
+      x: right.y * forward.z - right.z * forward.y,
+      y: right.z * forward.x - right.x * forward.z,
+      z: right.x * forward.y - right.y * forward.x,
+    };
+
+    // Width modifier - no taper for stumps
+    const widthMod = trunkShapeScaleAtPercent(perc, taperStartPerc);
+
+    for (let j = 0; j < segments; j++) {
+      const shapePoint = shapePoints[j];
+      const scaledX = shapePoint.x * widthMod;
+      const scaledZ = shapePoint.z * widthMod;
+
+      const worldPoint: Point3D = {
+        x: trunkPoint.x + right.x * scaledX + up.x * scaledZ,
+        y: trunkPoint.y + right.y * scaledX + up.y * scaledZ,
+        z: trunkPoint.z + right.z * scaledX + up.z * scaledZ,
+      };
+
+      vertices.push(worldPoint);
+
+      uvs.push({
+        x: j / segments,
+        y: perc,
+      });
+
+      // Outward normal
+      const outward = {
+        x: worldPoint.x - trunkPoint.x,
+        y: worldPoint.y - trunkPoint.y,
+        z: worldPoint.z - trunkPoint.z,
+      };
+      const outLen = Math.sqrt(
+        outward.x * outward.x + outward.y * outward.y + outward.z * outward.z,
+      );
+      normals.push(
+        outLen > 0.0001
+          ? {
+              x: outward.x / outLen,
+              y: outward.y / outLen,
+              z: outward.z / outLen,
+            }
+          : { x: 1, y: 0, z: 0 },
+      );
+
+      // Bark color gradient
+      const vertexColor = lerpHsl(actualBaseColor, actualTopColor, perc);
+      const [r, g, b] = hslToRgb(vertexColor.h, vertexColor.s, vertexColor.l);
+      colors.push(r / 255, g / 255, b / 255, 1.0);
+    }
+  }
+
+  // Generate trunk cylinder triangles
+  for (let ring = 0; ring < trunkPoints.length - 1; ring++) {
+    const floor = ring * segments;
+    const ceil = floor + segments;
+
+    for (let vn = floor; vn < ceil; vn++) {
+      let lessOne = vn - 1;
+      if (lessOne < floor) lessOne += segments;
+
+      triangles.push(vn, vn + segments, lessOne);
+      triangles.push(vn + segments, lessOne + segments, lessOne);
+    }
+  }
+
+  // =========================================================================
+  // GENERATE FLAT TOP CAP (cut surface)
+  // =========================================================================
+
+  // Get the top ring of vertices (the cut edge)
+  const topRingStartIdx = (trunkPoints.length - 1) * segments;
+  const topTrunkPoint = trunkPoints[trunkPoints.length - 1];
+
+  // Add center vertex for the cap
+  const centerIdx = vertices.length;
+  vertices.push({
+    x: topTrunkPoint.x,
+    y: topTrunkPoint.y,
+    z: topTrunkPoint.z,
+  });
+  uvs.push({ x: 0.5, y: 0.5 });
+  normals.push({ x: 0, y: 1, z: 0 }); // Pointing up
+
+  // Cut surface color (exposed wood)
+  const [cr, cg, cb] = hslToRgb(
+    cutSurfaceColor.h,
+    cutSurfaceColor.s,
+    cutSurfaceColor.l,
+  );
+  colors.push(cr / 255, cg / 255, cb / 255, 1.0);
+
+  // Duplicate the top ring vertices for the cap (different normals needed)
+  const capRingStartIdx = vertices.length;
+  for (let j = 0; j < segments; j++) {
+    const originalIdx = topRingStartIdx + j;
+    const originalVert = vertices[originalIdx];
+
+    vertices.push({ ...originalVert });
+
+    // UV for cap - radial mapping
+    const angle = (j / segments) * Math.PI * 2;
+    uvs.push({
+      x: 0.5 + Math.cos(angle) * 0.5,
+      y: 0.5 + Math.sin(angle) * 0.5,
+    });
+
+    // Cap vertices point upward
+    normals.push({ x: 0, y: 1, z: 0 });
+
+    // Cut surface color
+    colors.push(cr / 255, cg / 255, cb / 255, 1.0);
+  }
+
+  // Generate cap triangles (fan from center)
+  for (let j = 0; j < segments; j++) {
+    const curr = capRingStartIdx + j;
+    const next = capRingStartIdx + ((j + 1) % segments);
+
+    // Triangle from center to edge (winding order for upward facing)
+    triangles.push(centerIdx, next, curr);
+  }
+
+  return {
+    vertices,
+    triangles,
+    uvs,
+    normals,
+    colors,
+    orderedEdgeVerts: [],
+  };
+}
+
+/**
+ * Generate a complete stump from plant parameters.
+ * Convenience function that handles trunk generation and stump mesh creation.
+ *
+ * @param params - Plant parameters (from preset)
+ * @param stumpHeight - Height to cut at (default STUMP_HEIGHT)
+ * @param seed - Random seed for trunk generation
+ * @param segments - Radial segments (default 8)
+ * @returns StumpGenerationResult with mesh data and geometry
+ */
+export function generateStumpFromParams(
+  params: LeafParamDict,
+  stumpHeight: number = STUMP_HEIGHT,
+  seed: number = 12345,
+  segments: number = 8,
+): StumpGenerationResult {
+  // Generate trunk data (we only need curves and width)
+  // Use a minimal trunk height that's at least stumpHeight
+  const trunk = generateTrunk(params, Math.max(stumpHeight * 1.5, 2.0), seed);
+
+  // Get trunk width from params
+  const trunkWidth = Math.max(0.15, trunk.width * 0.8);
+
+  // Get color parameters
+  const trunkBrowning = getParamValue(params, LPK.TrunkBrowning);
+  const trunkLightness = getParamValue(params, LPK.TrunkLightness);
+
+  // Generate stump mesh
+  const meshData = generateStumpMesh(
+    { curves: trunk.curves },
+    trunkWidth,
+    stumpHeight,
+    segments,
+    undefined,
+    undefined,
+    trunkBrowning,
+    trunkLightness,
+  );
+
+  // Convert to BufferGeometry
+  const geometry = meshDataToBufferGeometry(meshData);
+
+  return {
+    meshData,
+    geometry,
+    height: stumpHeight,
+    width: trunkWidth,
+  };
+}
+
+// =============================================================================
 // PLANT GENERATOR CLASS
 // =============================================================================
 

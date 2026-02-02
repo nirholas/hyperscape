@@ -128,6 +128,7 @@ import {
   getCameraPosition,
 } from "../../utils/rendering/AnimationLOD";
 import { RAYCAST_PROXY } from "../../systems/client/interaction/constants";
+import type { AggroSystem } from "../../systems/shared/combat/AggroSystem";
 
 // Polyfill ProgressEvent for Node.js server environment
 
@@ -152,6 +153,14 @@ if (typeof ProgressEvent === "undefined") {
     globalThis as unknown as { ProgressEvent?: typeof ProgressEventPolyfill }
   ).ProgressEvent = ProgressEventPolyfill;
 }
+
+/** Valid melee attack styles for XP validation (avoids granting wrong XP type) */
+const MELEE_STYLES = new Set([
+  "accurate",
+  "aggressive",
+  "defensive",
+  "controlled",
+]);
 
 export class MobEntity extends CombatantEntity {
   protected config: MobEntityConfig;
@@ -1381,6 +1390,9 @@ export class MobEntity extends CombatantEntity {
       performAttack: (targetId, currentTick) => {
         this.combatManager.performAttack(targetId, currentTick);
       },
+      onEnterCombatRange: (currentTick) => {
+        this.combatManager.onEnterCombatRange(currentTick);
+      },
       isInCombat: () => this.combatManager.isInCombat(),
       exitCombat: () => this.combatManager.exitCombat(),
 
@@ -1390,7 +1402,8 @@ export class MobEntity extends CombatantEntity {
       getSpawnPoint: () => this._currentSpawnPoint,
       getDistanceFromSpawn: () => this.getSpawnDistanceTiles(), // OSRS Chebyshev tiles
       getWanderRadius: () => this.respawnManager.getSpawnAreaRadius(),
-      getLeashRange: () => this.config.leashRange ?? 7, // OSRS-accurate: 7 tiles max range from spawn
+      getLeashRange: () =>
+        this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE,
       getCombatRange: () => this.config.combatRange,
 
       // Wander
@@ -2277,7 +2290,7 @@ export class MobEntity extends CombatantEntity {
    * @see https://oldschool.runescape.wiki/w/Aggressiveness
    */
   getLeashRange(): number {
-    return this.config.leashRange ?? 7;
+    return this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
   }
 
   takeDamage(damage: number, attackerId?: string): boolean {
@@ -2401,9 +2414,75 @@ export class MobEntity extends CombatantEntity {
       const playerSystem = this.world.getSystem("player") as {
         getPlayerAttackStyle?: (playerId: string) => { id: string } | null;
       } | null;
-      const attackStyleData =
-        playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
-      const attackStyle = attackStyleData?.id || "aggressive"; // Default to aggressive if not found
+
+      // Check equipped weapon type to determine if using ranged/magic
+      const equipmentSystem = this.world.getSystem("equipment") as {
+        getPlayerEquipment?: (playerId: string) => {
+          weapon?: {
+            item: { attackType?: string; weaponType?: string };
+          };
+        } | null;
+      } | null;
+      const equipment = equipmentSystem?.getPlayerEquipment?.(lastAttackerId);
+      const weapon = equipment?.weapon?.item;
+      let attackStyle = "aggressive"; // Default
+
+      // Check if player has a spell selected (needed for magic detection)
+      const playerEntity = this.world.getPlayer?.(lastAttackerId);
+      const selectedSpell = (playerEntity?.data as { selectedSpell?: string })
+        ?.selectedSpell;
+
+      if (weapon) {
+        // Check attackType first (preferred), then weaponType (legacy)
+        // Values may be uppercase (from JSON) or lowercase (from enum)
+        const attackType = weapon.attackType?.toLowerCase();
+        const weaponType = weapon.weaponType?.toLowerCase();
+
+        if (
+          attackType === "ranged" ||
+          weaponType === "bow" ||
+          weaponType === "crossbow"
+        ) {
+          // Ranged weapon - use "ranged" style for Ranged XP
+          attackStyle = "ranged";
+        } else if (
+          (attackType === "magic" ||
+            weaponType === "staff" ||
+            weaponType === "wand") &&
+          selectedSpell
+        ) {
+          // Magic weapon WITH active spell - use "magic" style for Magic XP
+          // OSRS-accurate: staffs used for melee (no spell) grant melee XP
+          attackStyle = "magic";
+        } else {
+          // Melee attack (or staff/wand without a spell) - use player's selected attack style
+          // but only if it's a valid melee style; non-melee styles (longrange, autocast, rapid)
+          // would grant wrong XP type
+          const attackStyleData =
+            playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
+          const playerStyle = attackStyleData?.id;
+          attackStyle =
+            playerStyle && MELEE_STYLES.has(playerStyle)
+              ? playerStyle
+              : "aggressive";
+        }
+      } else {
+        // No weapon (unarmed) - check if player has a spell selected
+        // OSRS-accurate: You can cast spells without a staff
+        if (selectedSpell) {
+          // Player has a spell selected - use "magic" for Magic XP
+          attackStyle = "magic";
+        } else {
+          // No spell, no weapon - use player's melee attack style
+          const attackStyleData =
+            playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
+          const playerStyle = attackStyleData?.id;
+          attackStyle =
+            playerStyle && MELEE_STYLES.has(playerStyle)
+              ? playerStyle
+              : "aggressive";
+        }
+      }
 
       this.world.emit(EventType.COMBAT_KILL, {
         attackerId: lastAttackerId,
@@ -2547,14 +2626,24 @@ export class MobEntity extends CombatantEntity {
     }
 
     const currentPos = this.getPosition();
-    const players = this.world.getPlayers();
+
+    // Use spatial player index for O(k) lookup instead of O(P) iteration
+    // AggroSystem maintains a playersByRegion index using 21x21 tile regions
+    // This queries a 3x3 grid of regions (63x63 tiles) which covers any aggro range
+    const aggroSystem = this.world.getSystem("aggro") as
+      | AggroSystem
+      | undefined;
+    const players = aggroSystem
+      ? aggroSystem.getPlayersInNearbyRegions(currentPos)
+      : this.world.getPlayers(); // Fallback if AggroSystem not available
 
     // OSRS-Accurate Aggression Range:
     // The aggression range origin is the static spawn point of the NPC.
     // Aggression range = max range (leash) + attack range (combat range)
     // Players must be within this distance of SPAWN to be attacked.
     // @see https://oldschool.runescape.wiki/w/Aggressiveness
-    const leashRange = this.config.leashRange ?? 7;
+    const leashRange =
+      this.config.leashRange ?? COMBAT_CONSTANTS.DEFAULTS.NPC.LEASH_RANGE;
     const attackRange = Math.max(1, this.config.combatRange);
     const aggressionRange = leashRange + attackRange;
 
@@ -2839,6 +2928,13 @@ export class MobEntity extends CombatantEntity {
             this.deathManager.reset();
             // Reset death terrain snap flag for next death (Issue #244)
             this._deathPositionTerrainSnapped = false;
+
+            // CRITICAL: Clear stale 'death' emote — without this,
+            // onEntityModified thinks mob is still dead on subsequent packets
+            // (it checks entity.data.e for 'death' in isDeadMob calculation)
+            // (also cleared in ClientNetwork.onEntityModified respawn path as defense in depth)
+            (this.data as Record<string, unknown>).e = undefined;
+            (this.data as Record<string, unknown>).emote = undefined;
 
             // CRITICAL: Snap position immediately to server's new spawn point
             // This prevents interpolation from starting at death location

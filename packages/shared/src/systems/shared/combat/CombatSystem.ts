@@ -4,7 +4,11 @@
 
 import { EventType } from "../../../types/events";
 import type { World } from "../../../core/World";
-import { COMBAT_CONSTANTS } from "../../../constants/CombatConstants";
+import {
+  COMBAT_CONSTANTS,
+  WEAPON_DEFAULT_ATTACK_STYLE,
+  type MeleeAttackStyle,
+} from "../../../constants/CombatConstants";
 import { AttackType } from "../../../types/core/core";
 import { EntityID } from "../../../types/core/identifiers";
 import { MobEntity } from "../../../entities/npc/MobEntity";
@@ -159,6 +163,15 @@ export class CombatSystem extends SystemBase {
       rangedStrength: number;
       magicAttack: number;
       magicDefense: number;
+      // Per-style melee defence bonuses (OSRS combat triangle)
+      defenseStab: number;
+      defenseSlash: number;
+      defenseCrush: number;
+      defenseRanged: number;
+      // Per-style melee attack bonuses
+      attackStab: number;
+      attackSlash: number;
+      attackCrush: number;
     }
   >();
 
@@ -170,6 +183,11 @@ export class CombatSystem extends SystemBase {
   // Pre-allocated pooled tiles for hot path calculations (zero GC)
   private readonly _attackerTile: PooledTile = tilePool.acquire();
   private readonly _targetTile: PooledTile = tilePool.acquire();
+
+  // OSRS-accurate: Track last known target tile per attacker for persistent combat follow.
+  // In OSRS, the player continuously follows the target while in combat — not just when
+  // out of range. This map lets us detect when the target has moved and re-path accordingly.
+  private lastCombatTargetTile = new Map<string, { x: number; z: number }>();
 
   // Auto-retaliate disabled after 20 minutes of no input (OSRS behavior)
   private lastInputTick = new Map<string, number>();
@@ -389,6 +407,14 @@ export class CombatSystem extends SystemBase {
           rangedStrength?: number;
           magicAttack?: number;
           magicDefense?: number;
+          // Optional per-style bonuses (OSRS combat triangle)
+          defenseStab?: number;
+          defenseSlash?: number;
+          defenseCrush?: number;
+          defenseRanged?: number;
+          attackStab?: number;
+          attackSlash?: number;
+          attackCrush?: number;
         };
       }) => {
         this.playerEquipmentStats.set(data.playerId, {
@@ -400,6 +426,13 @@ export class CombatSystem extends SystemBase {
           rangedStrength: data.equipmentStats.rangedStrength ?? 0,
           magicAttack: data.equipmentStats.magicAttack ?? 0,
           magicDefense: data.equipmentStats.magicDefense ?? 0,
+          defenseStab: data.equipmentStats.defenseStab ?? 0,
+          defenseSlash: data.equipmentStats.defenseSlash ?? 0,
+          defenseCrush: data.equipmentStats.defenseCrush ?? 0,
+          defenseRanged: data.equipmentStats.defenseRanged ?? 0,
+          attackStab: data.equipmentStats.attackStab ?? 0,
+          attackSlash: data.equipmentStats.attackSlash ?? 0,
+          attackCrush: data.equipmentStats.attackCrush ?? 0,
         });
       },
     );
@@ -430,22 +463,18 @@ export class CombatSystem extends SystemBase {
     const attackType = weapon.attackType?.toLowerCase();
     const weaponType = weapon.weaponType?.toLowerCase();
 
-    // Check weapon's attackType property
+    // Check weapon's attackType property for ranged
+    // Note: Magic only activates via autocast (checked above) - staffs melee by default
     if (attackType === "ranged") {
       return AttackType.RANGED;
     }
-    if (attackType === "magic") {
-      return AttackType.MAGIC;
-    }
 
-    // Fall back to weaponType for legacy compatibility
+    // Fall back to weaponType for legacy compatibility (ranged only)
     if (weaponType === "bow" || weaponType === "crossbow") {
       return AttackType.RANGED;
     }
-    if (weaponType === "staff" || weaponType === "wand") {
-      return AttackType.MAGIC;
-    }
 
+    // Default to melee (includes staffs/wands without autocast - OSRS accurate)
     return AttackType.MELEE;
   }
 
@@ -1262,10 +1291,13 @@ export class CombatSystem extends SystemBase {
         ? target.getMobData().defense
         : this.getPlayerSkillLevel(String(target.id), "defense");
 
+    // Use per-style defenseRanged from equipment (OSRS combat triangle).
+    // Falls back to generic ranged bonus for backward compatibility.
+    const targetEquipStats = this.playerEquipmentStats.get(String(target.id));
     const targetRangedDefense =
       targetType === "mob" && isMobEntity(target)
         ? target.getMobData().defense
-        : (this.playerEquipmentStats.get(String(target.id))?.ranged ?? 0);
+        : (targetEquipStats?.defenseRanged ?? targetEquipStats?.ranged ?? 0);
 
     // Get prayer bonuses
     const prayerSystem = this.world.getSystem("prayer") as PrayerSystem | null;
@@ -1472,6 +1504,9 @@ export class CombatSystem extends SystemBase {
     // Remove ONLY this player's combat state - NOT the target's!
     this.stateService.removeCombatState(typedPlayerId);
 
+    // Clean up combat follow tracking for disengaging player
+    this.lastCombatTargetTile.delete(playerId);
+
     // Mark player as "in combat without target" - the attacker is still chasing them
     // This keeps the combat timer active but player won't auto-attack
     // If auto-retaliate is ON and attacker catches up and hits, player will start fighting again
@@ -1533,12 +1568,21 @@ export class CombatSystem extends SystemBase {
       }
     }
 
+    // Determine melee attack style from weapon type (OSRS combat triangle)
+    let meleeAttackStyle: MeleeAttackStyle | undefined;
+    if (!(attacker instanceof MobEntity)) {
+      const weapon = this.getEquippedWeapon(attacker.id);
+      const weaponType = weapon?.weaponType?.toLowerCase() ?? "none";
+      meleeAttackStyle = WEAPON_DEFAULT_ATTACK_STYLE[weaponType] ?? "crush";
+    }
+
     return this.damageCalculator.calculateMeleeDamage(
       attacker,
       target,
       style,
       attackerPrayerBonuses,
       defenderPrayerBonuses,
+      meleeAttackStyle,
     );
   }
 
@@ -1724,6 +1768,16 @@ export class CombatSystem extends SystemBase {
       attackerType,
       targetType,
     );
+
+    // Emit COMBAT_FACE_TARGET for the attacker so the local player client
+    // rotates toward the target. This is essential for magic/ranged attacks
+    // where the player is stationary (no movement to naturally rotate them).
+    if (attackerType === "player") {
+      this.emitTypedEvent(EventType.COMBAT_FACE_TARGET, {
+        playerId: String(attackerId),
+        targetId: String(targetId),
+      });
+    }
 
     // Auto-retaliate only triggers when player has no current target
     let targetHasValidTarget = false;
@@ -1939,6 +1993,10 @@ export class CombatSystem extends SystemBase {
     // Remove combat states via StateService
     this.stateService.removeCombatState(typedEntityId);
     this.stateService.removeCombatState(combatState.targetId);
+
+    // Clean up combat follow tracking
+    this.lastCombatTargetTile.delete(data.entityId);
+    this.lastCombatTargetTile.delete(String(combatState.targetId));
 
     // Emit combat ended event
     this.emitTypedEvent(EventType.COMBAT_ENDED, {
@@ -2629,15 +2687,47 @@ export class CombatSystem extends SystemBase {
             combatRangeTiles,
           );
 
+    // OSRS-accurate: Continuously follow the target while in combat.
+    // In OSRS, the player follows the target every tick — not just when out of range.
+    // movePlayerToward() already returns early if already in range, so this is safe.
+    // This prevents the stutter pattern where the player stands still until the target
+    // leaves range, then chases, then stops again.
+    const lastKnown = this.lastCombatTargetTile.get(attackerId);
+    const targetMoved =
+      !lastKnown ||
+      lastKnown.x !== this._targetTile.x ||
+      lastKnown.z !== this._targetTile.z;
+
+    if (targetMoved) {
+      // Update last known target tile (reuse object to avoid allocation)
+      if (lastKnown) {
+        lastKnown.x = this._targetTile.x;
+        lastKnown.z = this._targetTile.z;
+      } else {
+        this.lastCombatTargetTile.set(attackerId, {
+          x: this._targetTile.x,
+          z: this._targetTile.z,
+        });
+      }
+    }
+
     if (!inRange) {
-      // Out of range - follow the target
-      // Note: If player clicked away, their combat would already be ended by
-      // COMBAT_PLAYER_DISENGAGE event (OSRS-accurate: clicking cancels action)
-      // So if we reach here, combat is still active and player should follow
-      // Extend combat timeout while pursuing
+      // Out of range - follow the target and extend combat timeout while pursuing
       combatState.combatEndTick =
         tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
 
+      this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
+        playerId: attackerId,
+        targetId: targetId,
+        targetPosition: { x: targetPos.x, y: targetPos.y, z: targetPos.z },
+        attackRange: combatRangeTiles,
+        attackType: attackType,
+      });
+    } else if (targetMoved) {
+      // In range but target moved — pre-compute the follow path now.
+      // movePlayerToward() updates the player's path destination even when
+      // currently in range, so if the target steps out of range next tick
+      // the player is already pathing toward them with zero delay.
       this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
         playerId: attackerId,
         targetId: targetId,
@@ -3018,8 +3108,11 @@ export class CombatSystem extends SystemBase {
           attackerType: "player",
           targetType: combatState.targetType,
         });
-        // Update next attack tick
-        combatState.nextAttackTick = tickNumber + combatState.attackSpeedTicks;
+        // Update combat tick state (same as melee path) to prevent timeout.
+        // OSRS: player stays in combat even if attack fails (no runes, etc.)
+        // If handleAttack succeeded, enterCombat() already created a fresh state
+        // that supersedes this one. If it failed, these extensions keep combat alive.
+        this.updateCombatTickState(combatState, typedAttackerId, tickNumber);
         return;
       }
     }

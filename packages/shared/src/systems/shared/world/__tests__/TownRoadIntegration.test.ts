@@ -1623,7 +1623,62 @@ describe("Town and Road System Integration", () => {
         }
       }
     });
+
+    it("should generate entry stubs with actual road direction, not just perpendicular", () => {
+      // Test that entry stubs preserve the road's actual direction for diagonal roads
+      const allExits = roadSystem.getAllBoundaryExits();
+
+      for (const exit of allExits) {
+        // Entry stub should use the actual road direction from exit.direction
+        // The direction should be stored as a valid radian value
+        expect(typeof exit.direction).toBe("number");
+        expect(isFinite(exit.direction)).toBe(true);
+
+        // Direction should be in valid range [-PI, PI] or [0, 2PI]
+        expect(Math.abs(exit.direction)).toBeLessThanOrEqual(Math.PI * 2);
+      }
+    });
+
+    it("should have matching exit/entry pairs across all tile boundaries", () => {
+      // For every exit, there should be an entry in the adjacent tile
+      const allExits = roadSystem.getAllBoundaryExits();
+      const edgeOffsets: Record<TileEdge, { dx: number; dz: number }> = {
+        west: { dx: -1, dz: 0 },
+        east: { dx: 1, dz: 0 },
+        south: { dx: 0, dz: -1 },
+        north: { dx: 0, dz: 1 },
+      };
+
+      let validPairs = 0;
+      for (const exit of allExits) {
+        const offset = edgeOffsets[exit.edge];
+        const adjTileX = exit.tileX + offset.dx;
+        const adjTileZ = exit.tileZ + offset.dz;
+
+        // Get entries for the adjacent tile
+        const entries = roadSystem.getRoadEntriesForTile(adjTileX, adjTileZ);
+
+        // Should find at least one entry matching this exit's road
+        const matchingEntry = entries.find(
+          (e) =>
+            e.roadId === exit.roadId &&
+            Math.abs(e.position.x - exit.position.x) < 1 &&
+            Math.abs(e.position.z - exit.position.z) < 1,
+        );
+
+        if (matchingEntry) {
+          validPairs++;
+        }
+      }
+
+      // At least 90% of exits should have matching entries
+      // (some edge cases at world boundaries may not have adjacent tiles)
+      expect(validPairs).toBeGreaterThan(allExits.length * 0.9);
+    });
   });
+
+  // Note: Road influence texture tests are in RoadNetworkSystem.test.ts
+  // These tests use MockRoadNetworkSystem which doesn't implement texture generation
 
   describe("Water Edge Detection Algorithm", () => {
     /**

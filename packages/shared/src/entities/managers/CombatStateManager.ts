@@ -55,7 +55,14 @@ export class CombatStateManager {
     }
   }
 
-  /** First attack happens next tick, not immediately */
+  /**
+   * First attack happens next tick, not immediately (OSRS-accurate)
+   *
+   * Guard: Only sets up timing if NOT already in combat. This is intentional:
+   * - Prevents resetting timing on rapid CHASE→ATTACK→CHASE→ATTACK transitions
+   * - First-attack delay only applies to fresh combat entries
+   * - Re-entry after exitCombat() correctly resets timing
+   */
   onEnterCombatRange(currentTick: number): void {
     if (!this.inCombat) {
       this.inCombat = true;

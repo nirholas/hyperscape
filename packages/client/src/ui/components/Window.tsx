@@ -383,6 +383,27 @@ export const Window = memo(function Window({
     setActiveGuides,
   ]);
 
+  // Check if we're actively resizing (using resize handle) - must be before conditional returns
+  const isResizing = useEditStore((s) => s.isResizing);
+  const resizingWindowId = useEditStore((s) => s.resizingWindowId);
+
+  // Check if window is resizable (minSize !== maxSize) - must be before conditional returns
+  const isResizable = useMemo(() => {
+    if (!windowState.maxSize) return true; // No maxSize = resizable
+    return (
+      windowState.minSize.width !== windowState.maxSize.width ||
+      windowState.minSize.height !== windowState.maxSize.height
+    );
+  }, [windowState.minSize, windowState.maxSize]);
+
+  // Error handler wrapper for the error boundary - must be before conditional returns
+  const handleWindowError = useCallback(
+    (error: Error) => {
+      onError?.(error, windowId);
+    },
+    [onError, windowId],
+  );
+
   if (!windowState.visible) {
     return null;
   }
@@ -398,9 +419,6 @@ export const Window = memo(function Window({
     isDragging ? "dragging" : "normal",
   );
 
-  // Check if we're actively resizing (using resize handle)
-  const isResizing = useEditStore((s) => s.isResizing);
-  const resizingWindowId = useEditStore((s) => s.resizingWindowId);
   const isThisWindowResizing = isResizing && resizingWindowId === windowId;
 
   // Smooth transitions for size changes, disabled during active drag/resize
@@ -460,15 +478,6 @@ export const Window = memo(function Window({
     overflow: "hidden", // Clip overflow, panels handle their own scroll
     position: "relative", // Allow absolute positioning of children
   };
-
-  // Check if window is resizable (minSize !== maxSize)
-  const isResizable = useMemo(() => {
-    if (!windowState.maxSize) return true; // No maxSize = resizable
-    return (
-      windowState.minSize.width !== windowState.maxSize.width ||
-      windowState.minSize.height !== windowState.maxSize.height
-    );
-  }, [windowState.minSize, windowState.maxSize]);
 
   // Resize handles (only in edit mode and only if resizable)
   const renderResizeHandles = () => {
@@ -572,14 +581,6 @@ export const Window = memo(function Window({
     }
     return child;
   });
-
-  // Error handler wrapper for the error boundary
-  const handleWindowError = React.useCallback(
-    (error: Error) => {
-      onError?.(error, windowId);
-    },
-    [onError, windowId],
-  );
 
   return (
     <div
