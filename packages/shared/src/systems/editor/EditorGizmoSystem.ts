@@ -87,6 +87,10 @@ const DEFAULT_CONFIG: EditorGizmoConfig = {
  * EditorGizmoSystem - Transform gizmos for world editing
  *
  * Provides visual handles for moving, rotating, and scaling objects.
+ *
+ * Note: This system requires a graphics renderer with a DOM element.
+ * If not available, the system will be partially initialized (isReady = false).
+ * Check `isReady` before relying on transform controls.
  */
 export class EditorGizmoSystem extends System {
   private config: EditorGizmoConfig;
@@ -95,6 +99,12 @@ export class EditorGizmoSystem extends System {
   private space: TransformSpace = "world";
   private domElement: HTMLElement | null = null;
   private selectionSystem: EditorSelectionSystem | null = null;
+
+  /**
+   * Whether the system is fully initialized with working transform controls.
+   * False if graphics/renderer was not available during init.
+   */
+  public isReady = false;
 
   // Group for multi-selection transforms
   private transformGroup: THREE.Group;
@@ -136,7 +146,11 @@ export class EditorGizmoSystem extends System {
     // Get DOM element from graphics system
     const graphics = this.world.graphics;
     if (!graphics?.renderer?.domElement) {
-      console.warn("[EditorGizmoSystem] No renderer DOM element available");
+      console.warn(
+        "[EditorGizmoSystem] No renderer DOM element available - transform controls disabled. " +
+          "Check isReady property before using gizmos.",
+      );
+      this.isReady = false;
       return;
     }
 
@@ -152,6 +166,8 @@ export class EditorGizmoSystem extends System {
     if (this.selectionSystem) {
       this.selectionSystem.on("selection-changed", this.onSelectionChanged);
     }
+
+    this.isReady = true;
   }
 
   private setupTransformControls(): void {

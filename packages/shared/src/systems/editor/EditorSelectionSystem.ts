@@ -88,6 +88,10 @@ const DEFAULT_CONFIG: EditorSelectionConfig = {
  * EditorSelectionSystem - Object selection for world editing
  *
  * Handles all selection interactions including click, multi-select, and marquee.
+ *
+ * Note: This system requires a graphics renderer with a DOM element.
+ * If not available, the system will be partially initialized (isReady = false).
+ * Manual selection via setSelection/addToSelection still works.
  */
 export class EditorSelectionSystem extends System {
   private config: EditorSelectionConfig;
@@ -96,6 +100,12 @@ export class EditorSelectionSystem extends System {
   private objectToSelectable: WeakMap<THREE.Object3D, Selectable> =
     new WeakMap();
   private domElement: HTMLElement | null = null;
+
+  /**
+   * Whether the system is fully initialized with mouse/keyboard controls.
+   * False if graphics/renderer was not available during init.
+   */
+  public isReady = false;
 
   // Raycasting
   private raycaster: THREE.Raycaster;
@@ -148,13 +158,18 @@ export class EditorSelectionSystem extends System {
     // Get DOM element from graphics system
     const graphics = this.world.graphics;
     if (!graphics?.renderer?.domElement) {
-      console.warn("[EditorSelectionSystem] No renderer DOM element available");
+      console.warn(
+        "[EditorSelectionSystem] No renderer DOM element available - mouse/keyboard controls disabled. " +
+          "Check isReady property. Manual selection via API still works.",
+      );
+      this.isReady = false;
       return;
     }
 
     this.domElement = graphics.renderer.domElement;
     this.setupEventListeners();
     this.createMarqueeElement();
+    this.isReady = true;
   }
 
   private setupEventListeners(): void {

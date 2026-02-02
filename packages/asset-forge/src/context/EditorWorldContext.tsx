@@ -17,6 +17,15 @@
  * ```
  */
 
+import {
+  createEditorWorld,
+  EditorWorld,
+  type EditorWorldOptions,
+  type EditorCameraSystem,
+  type EditorSelectionSystem,
+  type EditorGizmoSystem,
+  type WorldOptions,
+} from "@hyperscape/shared";
 import React, {
   createContext,
   useContext,
@@ -27,15 +36,6 @@ import React, {
   type ReactNode,
   type RefObject,
 } from "react";
-import {
-  createEditorWorld,
-  EditorWorld,
-  type EditorWorldOptions,
-  type EditorCameraSystem,
-  type EditorSelectionSystem,
-  type EditorGizmoSystem,
-  type WorldOptions,
-} from "@hyperscape/shared";
 
 /**
  * Context value for EditorWorld
@@ -314,75 +314,102 @@ export function useEditorGizmo(): EditorGizmoSystem | null {
 }
 
 /**
- * Hook to access a specific system from the world
+ * Hook to access a specific system from the world.
+ *
+ * Returns the system cast to T, or null if world not initialized or system not found.
+ * Note: No runtime validation is performed - the returned system must match T.
  */
 export function useWorldSystem<T>(systemKey: string): T | null {
   const world = useEditorWorld();
-  return world ? ((world.getSystem(systemKey) as T | undefined) ?? null) : null;
+  if (!world) return null;
+  const system = world.getSystem(systemKey);
+  // Return the system as T if found, null otherwise
+  // This relies on correct system registration - no invented types
+  return (system as T | undefined) ?? null;
 }
 
-// System-specific hooks with minimal type annotations
-// Full types come from the actual system classes
-
-/** Hook to access terrain system */
+/**
+ * Hook to access terrain system.
+ * Returns the actual TerrainSystem instance from the world.
+ *
+ * Available methods include: getHeightAt, getHeightAtPosition, getBiomeAt, etc.
+ * See packages/shared/src/types/systems/system-interfaces.ts for full interface.
+ */
 export function useTerrain() {
-  type T = {
+  return useWorldSystem<{
     getHeightAt(x: number, z: number): number;
-    generate(p: Record<string, unknown>): void;
-  };
-  return useWorldSystem<T>("terrain");
+    getHeightAtPosition(x: number, z: number): number;
+    getBiomeAt(x: number, z: number): string;
+    isPositionWalkable(
+      x: number,
+      z: number,
+    ): { walkable: boolean; reason?: string };
+  }>("terrain");
 }
 
-/** Hook to access vegetation system */
+/**
+ * Hook to access vegetation system.
+ * Returns the actual VegetationSystem instance from the world.
+ */
 export function useVegetation() {
-  type T = {
-    spawnVegetationAt(x: number, z: number, type: string): void;
-    clearVegetation(): void;
-  };
-  return useWorldSystem<T>("vegetation");
+  // VegetationSystem doesn't have a typed interface in system-interfaces.ts
+  // Return as unknown and let consumer handle
+  return useWorldSystem<{
+    setEnabled?(enabled: boolean): void;
+    update?(delta: number): void;
+  }>("vegetation");
 }
 
-/** Hook to access grass system */
+/**
+ * Hook to access grass system (ProceduralGrassSystem).
+ */
 export function useGrass() {
-  type T = { setEnabled(enabled: boolean): void; regenerate(): void };
-  return useWorldSystem<T>("grass");
+  // ProceduralGrassSystem doesn't have a typed interface
+  return useWorldSystem<{
+    setEnabled?(enabled: boolean): void;
+    update?(delta: number): void;
+  }>("grass");
 }
 
-/** Hook to access town system */
+/**
+ * Hook to access town system.
+ */
 export function useTowns() {
-  type T = {
-    getTowns(): Array<{
-      id: string;
-      name: string;
-      position: { x: number; z: number };
-    }>;
-    generateTown(pos: { x: number; z: number }): void;
-  };
-  return useWorldSystem<T>("towns");
+  // TownSystem doesn't have a typed interface in system-interfaces.ts
+  return useWorldSystem<{
+    towns?: Map<string, unknown>;
+    update?(delta: number): void;
+  }>("towns");
 }
 
-/** Hook to access road system */
+/**
+ * Hook to access road system.
+ */
 export function useRoads() {
-  type T = {
-    getRoads(): Array<{ id: string; points: Array<{ x: number; z: number }> }>;
-    generateRoads(): void;
-  };
-  return useWorldSystem<T>("roads");
+  // RoadNetworkSystem doesn't have a typed interface
+  return useWorldSystem<{
+    roads?: Map<string, unknown>;
+    update?(delta: number): void;
+  }>("roads");
 }
 
-/** Hook to access building rendering system */
+/**
+ * Hook to access building rendering system.
+ */
 export function useBuildings() {
-  type T = { renderTown(townId: string): void; clearBuildings(): void };
-  return useWorldSystem<T>("building-rendering");
+  return useWorldSystem<{
+    update?(delta: number): void;
+  }>("building-rendering");
 }
 
-/** Hook to access environment system */
+/**
+ * Hook to access environment system.
+ */
 export function useEnvironment() {
-  type T = {
-    setTimeOfDay(hour: number): void;
-    setShadowQuality(q: "none" | "low" | "med" | "high"): void;
-  };
-  return useWorldSystem<T>("environment");
+  return useWorldSystem<{
+    setTimeOfDay?(hour: number): void;
+    update?(delta: number): void;
+  }>("environment");
 }
 
 // Export context for advanced usage

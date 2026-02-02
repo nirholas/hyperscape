@@ -547,7 +547,7 @@ describe("EditorSelectionSystem", () => {
   // EDGE CASES AND ERROR HANDLING
   // ============================================================================
   describe("edge cases", () => {
-    it("should handle initialization without graphics", async () => {
+    it("should handle initialization without graphics (isReady = false)", async () => {
       const world = {
         camera: new THREE.PerspectiveCamera(),
         graphics: null,
@@ -557,6 +557,15 @@ describe("EditorSelectionSystem", () => {
 
       const system = new EditorSelectionSystem(world as never);
       await expect(system.init({})).resolves.not.toThrow();
+      // isReady should be false when no graphics
+      expect(system.isReady).toBe(false);
+    });
+
+    it("should set isReady = true when graphics available", async () => {
+      const world = createMockWorld();
+      const system = new EditorSelectionSystem(world as never);
+      await system.init({});
+      expect(system.isReady).toBe(true);
     });
 
     it("should handle empty setSelection", async () => {
@@ -645,6 +654,459 @@ describe("EditorSelectionSystem", () => {
       }
 
       // Should complete without errors
+    });
+  });
+
+  // ============================================================================
+  // RAYCASTING TESTS
+  // ============================================================================
+  describe("raycasting", () => {
+    let world: ReturnType<typeof createMockWorld>;
+    let system: EditorSelectionSystem;
+
+    beforeEach(async () => {
+      world = createMockWorld();
+      // Set up camera to look at origin from (0, 50, 100)
+      world.camera.position.set(0, 50, 100);
+      world.camera.lookAt(0, 0, 0);
+      world.camera.updateProjectionMatrix();
+
+      system = new EditorSelectionSystem(world as never);
+      await system.init({});
+    });
+
+    it("should clear selection when clicking empty space (no hit)", async () => {
+      // Place a selectable at the origin
+      const selectable = createSelectable(
+        "center-obj",
+        new THREE.Vector3(0, 0, 0),
+      );
+      system.registerSelectable(selectable);
+      system.setSelection([selectable]); // Start with something selected
+
+      expect(system.getSelectionCount()).toBe(1);
+
+      const listener = vi.fn();
+      system.on("selection-changed", listener);
+
+      const canvas = world.graphics.renderer.domElement;
+      canvas.getBoundingClientRect = vi.fn(() => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }));
+
+      // Click far from object (edge of screen, no selectable there)
+      // In jsdom, raycasting won't hit anything, so this tests the "no hit" path
+      const pointerDown = new PointerEvent("pointerdown", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerDown);
+
+      const pointerUp = new PointerEvent("pointerup", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerUp);
+
+      // Selection should have been cleared (pointer down on empty space triggers marquee,
+      // small marquee with no shift clears selection)
+      expect(system.getSelectionCount()).toBe(0);
+    });
+
+    it("should clear selection when clicking empty space", async () => {
+      const selectable = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      system.registerSelectable(selectable);
+      system.setSelection([selectable]);
+
+      expect(system.getSelectionCount()).toBe(1);
+
+      const canvas = world.graphics.renderer.domElement;
+      canvas.getBoundingClientRect = vi.fn(() => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }));
+
+      // Click far away from the object (edge of screen)
+      const pointerDown = new PointerEvent("pointerdown", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerDown);
+
+      const pointerUp = new PointerEvent("pointerup", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerUp);
+
+      // Selection should be cleared (no hit, marquee too small)
+      expect(system.getSelectionCount()).toBe(0);
+    });
+
+    it("should preserve selection with shift-click on empty (no hit)", async () => {
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      system.registerSelectable(obj1);
+      world.stage.scene.add(obj1.object3D);
+
+      // First select obj1
+      system.setSelection([obj1]);
+      expect(system.getSelectionCount()).toBe(1);
+
+      const canvas = world.graphics.renderer.domElement;
+      canvas.getBoundingClientRect = vi.fn(() => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }));
+
+      // Shift-click at position where nothing is (no raycast hit in jsdom)
+      // With shift held, clicking nothing should NOT clear selection
+      const pointerDown = new PointerEvent("pointerdown", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        shiftKey: true,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerDown);
+
+      const pointerUp = new PointerEvent("pointerup", {
+        button: 0,
+        clientX: 10,
+        clientY: 10,
+        shiftKey: true,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerUp);
+
+      // Selection should still have obj1 (shift+click on empty = start marquee, small marquee with shift = no clear)
+      // The actual behavior: shift+click starts marquee, small marquee doesn't clear with shift
+      expect(system.getSelectionCount()).toBe(1);
+    });
+
+    it("should ignore right-click", async () => {
+      const selectable = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      system.registerSelectable(selectable);
+      system.setSelection([selectable]);
+
+      const listener = vi.fn();
+      system.on("selection-changed", listener);
+
+      const canvas = world.graphics.renderer.domElement;
+
+      // Right-click should be ignored
+      const pointerDown = new PointerEvent("pointerdown", {
+        button: 2, // Right button
+        clientX: 400,
+        clientY: 300,
+        bubbles: true,
+      });
+      canvas.dispatchEvent(pointerDown);
+
+      expect(listener).not.toHaveBeenCalled();
+      expect(system.getSelectionCount()).toBe(1);
+    });
+  });
+
+  // ============================================================================
+  // MARQUEE SELECTION TESTS
+  // ============================================================================
+  describe("marquee selection", () => {
+    let world: ReturnType<typeof createMockWorld>;
+    let system: EditorSelectionSystem;
+
+    beforeEach(async () => {
+      world = createMockWorld();
+      // Camera looking at origin from front
+      world.camera.position.set(0, 0, 100);
+      world.camera.lookAt(0, 0, 0);
+      world.camera.updateProjectionMatrix();
+
+      // Need to set up parent element for marquee div
+      const container = document.createElement("div");
+      container.appendChild(world.graphics.renderer.domElement);
+      document.body.appendChild(container);
+
+      system = new EditorSelectionSystem(world as never);
+      await system.init({});
+    });
+
+    function mockBoundingRect(canvas: HTMLElement) {
+      canvas.getBoundingClientRect = vi.fn(() => ({
+        left: 0,
+        top: 0,
+        width: 800,
+        height: 600,
+        right: 800,
+        bottom: 600,
+        x: 0,
+        y: 0,
+        toJSON: () => {},
+      }));
+    }
+
+    it("should select objects within marquee bounds", async () => {
+      // Create objects at known positions
+      // At z=0, looking from z=100, objects at x=0 should project to center
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(5, 5, 0));
+      const obj3 = createSelectable("obj-3", new THREE.Vector3(-50, -50, 0)); // Outside marquee
+
+      system.registerSelectable(obj1);
+      system.registerSelectable(obj2);
+      system.registerSelectable(obj3);
+
+      world.stage.scene.add(obj1.object3D);
+      world.stage.scene.add(obj2.object3D);
+      world.stage.scene.add(obj3.object3D);
+
+      const canvas = world.graphics.renderer.domElement;
+      mockBoundingRect(canvas);
+
+      // Start marquee from top-left of a box containing obj1 and obj2
+      // NDC: center is (400, 300), we want to capture around the center
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          clientX: 350,
+          clientY: 250,
+          bubbles: true,
+        }),
+      );
+
+      // Drag to bottom-right
+      canvas.dispatchEvent(
+        new PointerEvent("pointermove", {
+          button: 0,
+          clientX: 450,
+          clientY: 350,
+          bubbles: true,
+        }),
+      );
+
+      // Release
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          button: 0,
+          clientX: 450,
+          clientY: 350,
+          bubbles: true,
+        }),
+      );
+
+      // Objects within the marquee should be selected
+      // The exact selection depends on projection math
+      expect(system.getSelectionCount()).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should treat small marquee as click (clear selection)", async () => {
+      const obj = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      system.registerSelectable(obj);
+      system.setSelection([obj]);
+
+      expect(system.getSelectionCount()).toBe(1);
+
+      const canvas = world.graphics.renderer.domElement;
+      mockBoundingRect(canvas);
+
+      // Small drag (< 5px) should be treated as click
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          clientX: 100,
+          clientY: 100,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointermove", {
+          button: 0,
+          clientX: 102, // Only 2px movement
+          clientY: 102,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          button: 0,
+          clientX: 102,
+          clientY: 102,
+          bubbles: true,
+        }),
+      );
+
+      // Should have cleared selection (click on empty space)
+      expect(system.getSelectionCount()).toBe(0);
+    });
+
+    it("should add to selection with shift+marquee", async () => {
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(10, 0, 0));
+
+      system.registerSelectable(obj1);
+      system.registerSelectable(obj2);
+      world.stage.scene.add(obj1.object3D);
+      world.stage.scene.add(obj2.object3D);
+
+      // Start with obj1 selected
+      system.setSelection([obj1]);
+      expect(system.getSelectionCount()).toBe(1);
+
+      const canvas = world.graphics.renderer.domElement;
+      mockBoundingRect(canvas);
+
+      // Shift+marquee to add
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          clientX: 300,
+          clientY: 200,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointermove", {
+          button: 0,
+          clientX: 500,
+          clientY: 400,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          button: 0,
+          clientX: 500,
+          clientY: 400,
+          shiftKey: true,
+          bubbles: true,
+        }),
+      );
+
+      // Should still have at least the original selection
+      expect(system.getSelectionCount()).toBeGreaterThanOrEqual(1);
+    });
+
+    it("should project object positions correctly in getObjectsInMarquee", async () => {
+      // Test the actual projection math by placing objects at known screen positions
+      // Camera at z=100, looking at origin, 75 degree FOV
+      // An object at (0,0,0) should project to screen center
+
+      const centerObj = createSelectable("center", new THREE.Vector3(0, 0, 0));
+      system.registerSelectable(centerObj);
+      world.stage.scene.add(centerObj.object3D);
+
+      const canvas = world.graphics.renderer.domElement;
+      mockBoundingRect(canvas);
+
+      // Marquee that covers the entire screen center area
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          clientX: 200,
+          clientY: 100,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointermove", {
+          button: 0,
+          clientX: 600,
+          clientY: 500,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          button: 0,
+          clientX: 600,
+          clientY: 500,
+          bubbles: true,
+        }),
+      );
+
+      // Center object should definitely be selected
+      expect(system.isSelected("center")).toBe(true);
+    });
+
+    it("should not select objects behind the camera", async () => {
+      // Object at z=200 is behind camera at z=100 looking at origin
+      const behindObj = createSelectable(
+        "behind",
+        new THREE.Vector3(0, 0, 200),
+      );
+      system.registerSelectable(behindObj);
+      world.stage.scene.add(behindObj.object3D);
+
+      const canvas = world.graphics.renderer.domElement;
+      mockBoundingRect(canvas);
+
+      // Full screen marquee
+      canvas.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          button: 0,
+          clientX: 0,
+          clientY: 0,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointermove", {
+          button: 0,
+          clientX: 800,
+          clientY: 600,
+          bubbles: true,
+        }),
+      );
+
+      canvas.dispatchEvent(
+        new PointerEvent("pointerup", {
+          button: 0,
+          clientX: 800,
+          clientY: 600,
+          bubbles: true,
+        }),
+      );
+
+      // Object behind camera should NOT be selected
+      expect(system.isSelected("behind")).toBe(false);
     });
   });
 });

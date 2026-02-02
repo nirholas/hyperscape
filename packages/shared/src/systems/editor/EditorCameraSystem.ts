@@ -90,6 +90,10 @@ const DEFAULT_CONFIG: EditorCameraConfig = {
  * EditorCameraSystem - Camera controls for world editing
  *
  * Provides multiple camera modes and smooth controls for editing workflows.
+ *
+ * Note: This system requires a graphics renderer with a DOM element.
+ * If not available, the system will be partially initialized (isReady = false).
+ * Check `isReady` before relying on camera controls.
  */
 export class EditorCameraSystem extends System {
   private config: EditorCameraConfig;
@@ -97,6 +101,12 @@ export class EditorCameraSystem extends System {
   private mode: EditorCameraMode = "orbit";
   private bookmarks: Map<string, CameraBookmark> = new Map();
   private domElement: HTMLElement | null = null;
+
+  /**
+   * Whether the system is fully initialized with working controls.
+   * False if graphics/renderer was not available during init.
+   */
+  public isReady = false;
 
   // Fly mode state
   private flyKeys = {
@@ -133,13 +143,18 @@ export class EditorCameraSystem extends System {
     // Get DOM element from graphics system
     const graphics = this.world.graphics;
     if (!graphics?.renderer?.domElement) {
-      console.warn("[EditorCameraSystem] No renderer DOM element available");
+      console.warn(
+        "[EditorCameraSystem] No renderer DOM element available - camera controls disabled. " +
+          "Check isReady property before using controls.",
+      );
+      this.isReady = false;
       return;
     }
 
     this.domElement = graphics.renderer.domElement;
     this.setupOrbitControls();
     this.setupKeyboardListeners();
+    this.isReady = true;
   }
 
   private setupOrbitControls(): void {

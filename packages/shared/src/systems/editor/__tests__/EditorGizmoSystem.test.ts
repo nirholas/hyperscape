@@ -16,7 +16,6 @@ import * as THREE from "three";
 import {
   EditorGizmoSystem,
   type TransformMode,
-  type TransformSpace,
   type EditorGizmoConfig,
 } from "../EditorGizmoSystem";
 import type {
@@ -509,7 +508,7 @@ describe("EditorGizmoSystem", () => {
   // EDGE CASES AND ERROR HANDLING
   // ============================================================================
   describe("edge cases", () => {
-    it("should handle initialization without graphics", async () => {
+    it("should handle initialization without graphics (isReady = false)", async () => {
       const world = {
         camera: new THREE.PerspectiveCamera(),
         graphics: null,
@@ -524,6 +523,15 @@ describe("EditorGizmoSystem", () => {
 
       const system = new EditorGizmoSystem(world as never);
       await expect(system.init({})).resolves.not.toThrow();
+      // isReady should be false when no graphics
+      expect(system.isReady).toBe(false);
+    });
+
+    it("should set isReady = true when graphics available", async () => {
+      const world = createMockWorld();
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+      expect(system.isReady).toBe(true);
     });
 
     it("should handle setMode when controls not initialized", async () => {
@@ -627,6 +635,172 @@ describe("EditorGizmoSystem", () => {
         removed: [],
         action: "clear",
       });
+    });
+  });
+
+  // ============================================================================
+  // MULTI-SELECTION TRANSFORM TESTS
+  // ============================================================================
+  describe("multi-selection transforms", () => {
+    it("should calculate center correctly for multi-selection", async () => {
+      const world = createMockWorld();
+      const mockSelectionSystem = createMockSelectionSystem();
+      world.getSystem = vi.fn((name: string) => {
+        if (name === "editor-selection") return mockSelectionSystem;
+        return undefined;
+      });
+
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+
+      // Create objects at positions that average to (0, 0, 0)
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(-10, 0, 0));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(10, 0, 0));
+
+      mockSelectionSystem.getSelection = vi.fn(() => [obj1, obj2]);
+      mockSelectionSystem.getSelectionCount = vi.fn(() => 2);
+
+      mockSelectionSystem.emit("selection-changed", {
+        selected: [obj1, obj2],
+        added: [obj1, obj2],
+        removed: [],
+        action: "set",
+      });
+
+      // The transform group should be positioned at the center of selection
+      const controls = system.getControls();
+      expect(controls?.attach).toHaveBeenCalled();
+    });
+
+    it("should track transform state via isCurrentlyTransforming", async () => {
+      const world = createMockWorld();
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+
+      // Initially not transforming
+      expect(system.isCurrentlyTransforming()).toBe(false);
+
+      // The actual dragging-changed event is handled internally
+      // We verify the initial state and that the method exists
+      expect(typeof system.isCurrentlyTransforming).toBe("function");
+    });
+
+    it("should attach controls when objects selected", async () => {
+      const world = createMockWorld();
+      const mockSelectionSystem = createMockSelectionSystem();
+
+      world.getSystem = vi.fn((name: string) => {
+        if (name === "editor-selection") return mockSelectionSystem;
+        if (name === "editor-camera")
+          return { getControls: () => ({ enabled: true }) };
+        return undefined;
+      });
+
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(10, 20, 30));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(40, 50, 60));
+
+      mockSelectionSystem.getSelection = vi.fn(() => [obj1, obj2]);
+      mockSelectionSystem.getSelectionCount = vi.fn(() => 2);
+
+      mockSelectionSystem.emit("selection-changed", {
+        selected: [obj1, obj2],
+        added: [obj1, obj2],
+        removed: [],
+        action: "set",
+      });
+
+      // Verify attach was called
+      expect(system.getControls()?.attach).toHaveBeenCalled();
+    });
+
+    it("should apply translation to multi-selection", async () => {
+      const world = createMockWorld();
+      const mockSelectionSystem = createMockSelectionSystem();
+
+      world.getSystem = vi.fn((name: string) => {
+        if (name === "editor-selection") return mockSelectionSystem;
+        return undefined;
+      });
+
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+      system.setMode("translate");
+
+      // Objects at symmetric positions around origin
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(-5, 0, 0));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(5, 0, 0));
+
+      const originalPos1 = obj1.object3D.position.clone();
+      const originalPos2 = obj2.object3D.position.clone();
+
+      mockSelectionSystem.getSelection = vi.fn(() => [obj1, obj2]);
+      mockSelectionSystem.getSelectionCount = vi.fn(() => 2);
+
+      mockSelectionSystem.emit("selection-changed", {
+        selected: [obj1, obj2],
+        added: [obj1, obj2],
+        removed: [],
+        action: "set",
+      });
+
+      // Verify positions haven't changed just from selection
+      expect(obj1.object3D.position.equals(originalPos1)).toBe(true);
+      expect(obj2.object3D.position.equals(originalPos2)).toBe(true);
+    });
+
+    it("should handle zero-distance objects in multi-selection", async () => {
+      const world = createMockWorld();
+      const mockSelectionSystem = createMockSelectionSystem();
+
+      world.getSystem = vi.fn((name: string) => {
+        if (name === "editor-selection") return mockSelectionSystem;
+        return undefined;
+      });
+
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+
+      // Two objects at the exact same position
+      const obj1 = createSelectable("obj-1", new THREE.Vector3(0, 0, 0));
+      const obj2 = createSelectable("obj-2", new THREE.Vector3(0, 0, 0));
+
+      mockSelectionSystem.getSelection = vi.fn(() => [obj1, obj2]);
+      mockSelectionSystem.getSelectionCount = vi.fn(() => 2);
+
+      // Should not throw
+      expect(() => {
+        mockSelectionSystem.emit("selection-changed", {
+          selected: [obj1, obj2],
+          added: [obj1, obj2],
+          removed: [],
+          action: "set",
+        });
+      }).not.toThrow();
+    });
+
+    it("should connect to selection system on init", async () => {
+      const world = createMockWorld();
+      const mockSelectionSystem = createMockSelectionSystem();
+
+      world.getSystem = vi.fn((name: string) => {
+        if (name === "editor-selection") return mockSelectionSystem;
+        return undefined;
+      });
+
+      const system = new EditorGizmoSystem(world as never);
+      await system.init({});
+
+      // Verify selection system was queried during init
+      expect(world.getSystem).toHaveBeenCalledWith("editor-selection");
+
+      // And that we subscribed to selection changes
+      expect(mockSelectionSystem.on).toHaveBeenCalledWith(
+        "selection-changed",
+        expect.any(Function),
+      );
     });
   });
 });

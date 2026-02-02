@@ -11,7 +11,7 @@
  * @vitest-environment jsdom
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as THREE from "three";
 import {
   createEditorWorld,
@@ -475,9 +475,8 @@ describe("createEditorWorld", () => {
 });
 
 describe("initEditorWorld", () => {
-  // Note: Full integration tests for initEditorWorld would require
-  // mocking the entire system initialization chain, which is complex.
-  // These tests focus on the function's basic behavior.
+  // Note: Full integration tests require WebGPU which isn't available in jsdom.
+  // These tests mock World.init to test the initEditorWorld function logic.
 
   it("should be a function", () => {
     expect(typeof initEditorWorld).toBe("function");
@@ -485,9 +484,166 @@ describe("initEditorWorld", () => {
 
   it("should return a Promise", () => {
     const viewport = document.createElement("div");
+
+    // Mock init to resolve immediately (avoids WebGPU requirement)
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockReturnValue(undefined);
+
     const result = initEditorWorld({ viewport });
     expect(result).toBeInstanceOf(Promise);
-    // Clean up - destroy world to avoid hanging promises
+
+    // Clean up
     result.then((world) => world.destroy()).catch(() => {});
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+  });
+
+  it("should call world.init with merged options", async () => {
+    const viewport = document.createElement("div");
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockReturnValue(undefined);
+
+    const world = await initEditorWorld(
+      { viewport, cameraPosition: { x: 50, y: 50, z: 50 } },
+      { assetsUrl: "/custom-assets/" },
+    );
+
+    expect(initSpy).toHaveBeenCalled();
+    const initCall = initSpy.mock.calls[0][0];
+    expect(initCall.viewport).toBe(viewport);
+    expect(initCall.assetsUrl).toBe("/custom-assets/");
+
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+    world.destroy();
+  });
+
+  it("should query editor systems after init", async () => {
+    const viewport = document.createElement("div");
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockReturnValue(undefined);
+
+    const world = await initEditorWorld({ viewport });
+
+    // Should have queried for editor systems
+    expect(getSystemSpy).toHaveBeenCalledWith("editor-camera");
+    expect(getSystemSpy).toHaveBeenCalledWith("editor-selection");
+    expect(getSystemSpy).toHaveBeenCalledWith("editor-gizmo");
+
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+    world.destroy();
+  });
+
+  it("should apply initial camera target if editorCamera available", async () => {
+    const viewport = document.createElement("div");
+
+    const mockCameraSystem = {
+      setTarget: vi.fn(),
+    };
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockImplementation((key: string) => {
+        if (key === "editor-camera") return mockCameraSystem;
+        return undefined;
+      });
+
+    const world = await initEditorWorld({
+      viewport,
+      cameraTarget: { x: 25, y: 10, z: 25 },
+    });
+
+    // setTarget should have been called with the target
+    expect(mockCameraSystem.setTarget).toHaveBeenCalled();
+    const targetArg = mockCameraSystem.setTarget.mock.calls[0][0];
+    expect(targetArg.x).toBe(25);
+    expect(targetArg.y).toBe(10);
+    expect(targetArg.z).toBe(25);
+
+    // Target should be cleared after application
+    expect(world._initialCameraTarget).toBeUndefined();
+
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+    world.destroy();
+  });
+
+  it("should use provided assetsUrl from initOptions", async () => {
+    const viewport = document.createElement("div");
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockReturnValue(undefined);
+
+    await initEditorWorld({ viewport }, { assetsUrl: "/test-assets/" });
+
+    const initCall = initSpy.mock.calls[0][0];
+    expect(initCall.assetsUrl).toBe("/test-assets/");
+
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+  });
+
+  it("should propagate errors from world.init", async () => {
+    const viewport = document.createElement("div");
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockRejectedValue(new Error("Init failed"));
+
+    await expect(initEditorWorld({ viewport })).rejects.toThrow("Init failed");
+
+    initSpy.mockRestore();
+  });
+
+  it("should store editor system references on world object", async () => {
+    const viewport = document.createElement("div");
+
+    const mockCameraSystem = { isReady: true };
+    const mockSelectionSystem = { isReady: true };
+    const mockGizmoSystem = { isReady: true };
+
+    const initSpy = vi
+      .spyOn(EditorWorld.prototype, "init")
+      .mockResolvedValue(undefined);
+    const getSystemSpy = vi
+      .spyOn(EditorWorld.prototype, "getSystem")
+      .mockImplementation((key: string) => {
+        if (key === "editor-camera") return mockCameraSystem;
+        if (key === "editor-selection") return mockSelectionSystem;
+        if (key === "editor-gizmo") return mockGizmoSystem;
+        return undefined;
+      });
+
+    const world = await initEditorWorld({ viewport });
+
+    expect(world.editorCamera).toBe(mockCameraSystem);
+    expect(world.editorSelection).toBe(mockSelectionSystem);
+    expect(world.editorGizmo).toBe(mockGizmoSystem);
+
+    initSpy.mockRestore();
+    getSystemSpy.mockRestore();
+    world.destroy();
   });
 });

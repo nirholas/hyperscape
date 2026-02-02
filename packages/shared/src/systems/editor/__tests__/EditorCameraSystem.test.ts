@@ -17,7 +17,6 @@ import {
   EditorCameraSystem,
   type EditorCameraMode,
   type EditorCameraConfig,
-  type CameraBookmark,
 } from "../EditorCameraSystem";
 
 // Mock OrbitControls
@@ -348,13 +347,145 @@ describe("EditorCameraSystem", () => {
       const controls = system.getControls();
       expect(controls?.update).toHaveBeenCalled();
     });
+
+    it("should move forward when W key pressed", () => {
+      // Set camera to look along -Z axis (default forward)
+      world.camera.position.set(0, 0, 100);
+      world.camera.lookAt(0, 0, 0);
+
+      const startZ = world.camera.position.z;
+
+      // Simulate W key press via direct flyKeys manipulation
+      // We access private state through the update mechanism
+      const keyEvent = new KeyboardEvent("keydown", { code: "KeyW" });
+      world.graphics.renderer.domElement.dispatchEvent(keyEvent);
+
+      // Update for 1 second at flySpeed=50
+      system.update(1.0);
+
+      // Camera should have moved forward (negative Z direction)
+      const endZ = world.camera.position.z;
+      expect(endZ).toBeLessThan(startZ);
+      expect(startZ - endZ).toBeCloseTo(50, 0); // ~50 units per second
+    });
+
+    it("should move backward when S key pressed", () => {
+      world.camera.position.set(0, 0, 0);
+      world.camera.lookAt(0, 0, -1);
+
+      const startZ = world.camera.position.z;
+
+      const keyEvent = new KeyboardEvent("keydown", { code: "KeyS" });
+      world.graphics.renderer.domElement.dispatchEvent(keyEvent);
+
+      system.update(1.0);
+
+      const endZ = world.camera.position.z;
+      expect(endZ).toBeGreaterThan(startZ);
+    });
+
+    it("should move up when Space/Q key pressed", () => {
+      world.camera.position.set(0, 0, 0);
+
+      const startY = world.camera.position.y;
+
+      const keyEvent = new KeyboardEvent("keydown", { code: "Space" });
+      world.graphics.renderer.domElement.dispatchEvent(keyEvent);
+
+      system.update(1.0);
+
+      const endY = world.camera.position.y;
+      expect(endY).toBeGreaterThan(startY);
+      expect(endY - startY).toBeCloseTo(50, 0); // ~50 units per second
+    });
+
+    it("should move faster when Shift held", () => {
+      world.camera.position.set(0, 0, 0);
+      world.camera.lookAt(0, 0, -1);
+
+      const startZ = world.camera.position.z;
+
+      // Press Shift first, then W
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "ShiftLeft" }),
+      );
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "KeyW" }),
+      );
+
+      system.update(1.0);
+
+      const endZ = world.camera.position.z;
+      // Default fast multiplier is 3, so 50 * 3 = 150 units/sec
+      expect(startZ - endZ).toBeCloseTo(150, 0);
+    });
+
+    it("should stop moving when key released", () => {
+      world.camera.position.set(0, 0, 100);
+      world.camera.lookAt(0, 0, 0);
+
+      // Press W
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "KeyW" }),
+      );
+      system.update(0.5); // Move for half second
+
+      const midPos = world.camera.position.clone();
+
+      // Release W
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keyup", { code: "KeyW" }),
+      );
+      system.update(0.5); // Try to move more
+
+      const endPos = world.camera.position.clone();
+
+      // Should have stopped moving after key release
+      expect(endPos.distanceTo(midPos)).toBeLessThan(0.001);
+    });
+
+    it("should normalize diagonal movement", () => {
+      world.camera.position.set(0, 0, 0);
+      world.camera.lookAt(0, 0, -1);
+
+      // Press both W and D (forward + right)
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "KeyW" }),
+      );
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "KeyD" }),
+      );
+
+      system.update(1.0);
+
+      // Diagonal movement should be normalized - total distance should be ~50, not ~70
+      const distance = world.camera.position.length();
+      expect(distance).toBeCloseTo(50, 5); // Within 5 units of expected
+    });
+
+    it("should move target along with camera in fly mode", () => {
+      world.camera.position.set(0, 0, 100);
+      world.camera.lookAt(0, 0, 0);
+
+      const controls = system.getControls();
+      const startTarget = controls?.target.clone() ?? new THREE.Vector3();
+
+      world.graphics.renderer.domElement.dispatchEvent(
+        new KeyboardEvent("keydown", { code: "KeyW" }),
+      );
+      system.update(1.0);
+
+      const endTarget = controls?.target ?? new THREE.Vector3();
+      // Target should have moved along with camera
+      expect(endTarget.z).toBeLessThan(startTarget.z);
+    });
   });
 
   // ============================================================================
   // EDGE CASES AND ERROR HANDLING
   // ============================================================================
   describe("edge cases", () => {
-    it("should handle initialization without graphics", async () => {
+    it("should handle initialization without graphics (isReady = false)", async () => {
       const world = {
         camera: new THREE.PerspectiveCamera(),
         graphics: null,
@@ -365,6 +496,15 @@ describe("EditorCameraSystem", () => {
       const system = new EditorCameraSystem(world as never);
       // Should not throw
       await expect(system.init({})).resolves.not.toThrow();
+      // But isReady should be false
+      expect(system.isReady).toBe(false);
+    });
+
+    it("should set isReady = true when graphics available", async () => {
+      const world = createMockWorld();
+      const system = new EditorCameraSystem(world as never);
+      await system.init({});
+      expect(system.isReady).toBe(true);
     });
 
     it("should handle focus when controls not initialized", async () => {
