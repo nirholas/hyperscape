@@ -2704,10 +2704,10 @@ export class CombatSystem extends SystemBase {
         attackType: attackType,
       });
     } else if (targetMoved) {
-      // In range but target moved — re-path to maintain follow.
-      // movePlayerToward() will no-op since already in range, but this keeps
-      // the path updated so the player transitions smoothly to chasing if
-      // the target moves out of range next tick.
+      // In range but target moved — pre-compute the follow path now.
+      // movePlayerToward() updates the player's path destination even when
+      // currently in range, so if the target steps out of range next tick
+      // the player is already pathing toward them with zero delay.
       this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
         playerId: attackerId,
         targetId: targetId,
