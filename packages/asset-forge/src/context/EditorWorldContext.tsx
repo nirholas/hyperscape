@@ -202,13 +202,8 @@ export function EditorWorldProvider({
     [resolveViewport, options, initOptions, onInitialized],
   );
 
-  // Reinitialize function exposed to context
-  const reinitialize = useCallback(
-    async (overrideOptions?: Partial<EditorWorldOptions>) => {
-      await initialize(overrideOptions);
-    },
-    [initialize],
-  );
+  // Reinitialize is just initialize with optional overrides
+  const reinitialize = initialize;
 
   // Initialize on mount when viewport is available
   useEffect(() => {
@@ -320,92 +315,74 @@ export function useEditorGizmo(): EditorGizmoSystem | null {
 
 /**
  * Hook to access a specific system from the world
- *
- * @param systemKey - The key used to register the system
  */
 export function useWorldSystem<T>(systemKey: string): T | null {
   const world = useEditorWorld();
-  if (!world) return null;
-  return (world.getSystem(systemKey) as T | undefined) ?? null;
+  return world ? ((world.getSystem(systemKey) as T | undefined) ?? null) : null;
 }
 
-/**
- * Hook to access the terrain system
- */
+// System-specific hooks with minimal type annotations
+// Full types come from the actual system classes
+
+/** Hook to access terrain system */
 export function useTerrain() {
-  return useWorldSystem<{
-    getHeightAt: (x: number, z: number) => number;
-    generate: (params: Record<string, unknown>) => void;
-    regenerateTile: (tileX: number, tileZ: number) => void;
-    CONFIG: Record<string, unknown>;
-  }>("terrain");
+  type T = {
+    getHeightAt(x: number, z: number): number;
+    generate(p: Record<string, unknown>): void;
+  };
+  return useWorldSystem<T>("terrain");
 }
 
-/**
- * Hook to access the vegetation system
- */
+/** Hook to access vegetation system */
 export function useVegetation() {
-  return useWorldSystem<{
-    spawnVegetationAt: (x: number, z: number, type: string) => void;
-    clearVegetation: () => void;
-  }>("vegetation");
+  type T = {
+    spawnVegetationAt(x: number, z: number, type: string): void;
+    clearVegetation(): void;
+  };
+  return useWorldSystem<T>("vegetation");
 }
 
-/**
- * Hook to access the grass system
- */
+/** Hook to access grass system */
 export function useGrass() {
-  return useWorldSystem<{
-    setEnabled: (enabled: boolean) => void;
-    regenerate: () => void;
-  }>("grass");
+  type T = { setEnabled(enabled: boolean): void; regenerate(): void };
+  return useWorldSystem<T>("grass");
 }
 
-/**
- * Hook to access the town system
- */
+/** Hook to access town system */
 export function useTowns() {
-  return useWorldSystem<{
-    getTowns: () => Array<{
+  type T = {
+    getTowns(): Array<{
       id: string;
       name: string;
       position: { x: number; z: number };
     }>;
-    generateTown: (position: { x: number; z: number }) => void;
-  }>("towns");
+    generateTown(pos: { x: number; z: number }): void;
+  };
+  return useWorldSystem<T>("towns");
 }
 
-/**
- * Hook to access the road system
- */
+/** Hook to access road system */
 export function useRoads() {
-  return useWorldSystem<{
-    getRoads: () => Array<{
-      id: string;
-      points: Array<{ x: number; z: number }>;
-    }>;
-    generateRoads: () => void;
-  }>("roads");
+  type T = {
+    getRoads(): Array<{ id: string; points: Array<{ x: number; z: number }> }>;
+    generateRoads(): void;
+  };
+  return useWorldSystem<T>("roads");
 }
 
-/**
- * Hook to access the building rendering system
- */
+/** Hook to access building rendering system */
 export function useBuildings() {
-  return useWorldSystem<{
-    renderTown: (townId: string) => void;
-    clearBuildings: () => void;
-  }>("building-rendering");
+  type T = { renderTown(townId: string): void; clearBuildings(): void };
+  return useWorldSystem<T>("building-rendering");
 }
 
-/**
- * Hook to access the environment system
- */
+/** Hook to access environment system */
 export function useEnvironment() {
-  return useWorldSystem<{
-    setTimeOfDay: (hour: number) => void;
-    setShadowQuality: (quality: "none" | "low" | "med" | "high") => void;
-  }>("environment");
+  type T = {
+    setTimeOfDay(hour: number): void;
+    setShadowQuality(q: "none" | "low" | "med" | "high"): void;
+  };
+  return useWorldSystem<T>("environment");
 }
 
 // Export context for advanced usage

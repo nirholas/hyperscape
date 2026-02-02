@@ -108,9 +108,7 @@ export class EditorCameraSystem extends System {
     down: false,
     fast: false,
   };
-  private flyVelocity = new THREE.Vector3();
   private flyDirection = new THREE.Vector3();
-  private flyEnabled = false;
 
   // Reusable vectors for calculations
   private _tempVec3 = new THREE.Vector3();
@@ -274,13 +272,9 @@ export class EditorCameraSystem extends System {
 
   private onBlur = (): void => {
     // Reset all fly keys when focus is lost
-    this.flyKeys.forward = false;
-    this.flyKeys.backward = false;
-    this.flyKeys.left = false;
-    this.flyKeys.right = false;
-    this.flyKeys.up = false;
-    this.flyKeys.down = false;
-    this.flyKeys.fast = false;
+    const keys = this.flyKeys;
+    keys.forward = keys.backward = keys.left = keys.right = false;
+    keys.up = keys.down = keys.fast = false;
   };
 
   /**
@@ -288,7 +282,6 @@ export class EditorCameraSystem extends System {
    */
   setMode(mode: EditorCameraMode): void {
     this.mode = mode;
-    this.flyEnabled = mode === "fly";
 
     if (this.controls) {
       switch (mode) {
@@ -463,7 +456,7 @@ export class EditorCameraSystem extends System {
     if (!this.controls) return;
 
     // Handle fly mode movement
-    if (this.flyEnabled && this.mode === "fly") {
+    if (this.mode === "fly") {
       this.updateFlyMode(delta);
     }
 

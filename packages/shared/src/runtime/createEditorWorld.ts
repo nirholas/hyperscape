@@ -50,6 +50,7 @@
  * Used by: Asset Forge (packages/asset-forge)
  */
 
+import * as THREE from "three";
 import { World } from "../core/World";
 import type { WorldOptions } from "../types";
 
@@ -138,9 +139,8 @@ export class EditorWorld extends World {
   /** Options used to create this world */
   editorOptions: EditorWorldOptions | null = null;
 
-  constructor() {
-    super();
-  }
+  /** Internal: initial camera target (set during init) */
+  _initialCameraTarget?: { x: number; y: number; z: number };
 }
 
 /**
@@ -266,13 +266,8 @@ export function createEditorWorld(options: EditorWorldOptions): EditorWorld {
   }
 
   // Camera target will be set by EditorCameraSystem after init
-  // Store target for later use
   if (options.cameraTarget) {
-    (
-      world as EditorWorld & {
-        _initialCameraTarget?: { x: number; y: number; z: number };
-      }
-    )._initialCameraTarget = options.cameraTarget;
+    world._initialCameraTarget = options.cameraTarget;
   }
 
   return world;
@@ -293,38 +288,21 @@ export async function initEditorWorld(
 ): Promise<EditorWorld> {
   const world = createEditorWorld(options);
 
-  // Merge viewport into init options
-  const fullInitOptions: WorldOptions = {
-    ...initOptions,
-    viewport: options.viewport,
-  };
-
-  await world.init(fullInitOptions);
+  await world.init({ ...initOptions, viewport: options.viewport });
 
   // Store references to editor systems for easy access
   world.editorCamera =
-    (world.getSystem("editor-camera") as EditorCameraSystem | undefined) ??
-    null;
+    (world.getSystem("editor-camera") as EditorCameraSystem) ?? null;
   world.editorSelection =
-    (world.getSystem("editor-selection") as
-      | EditorSelectionSystem
-      | undefined) ?? null;
+    (world.getSystem("editor-selection") as EditorSelectionSystem) ?? null;
   world.editorGizmo =
-    (world.getSystem("editor-gizmo") as EditorGizmoSystem | undefined) ?? null;
+    (world.getSystem("editor-gizmo") as EditorGizmoSystem) ?? null;
 
   // Apply initial camera target if set
-  const worldWithTarget = world as EditorWorld & {
-    _initialCameraTarget?: { x: number; y: number; z: number };
-  };
-  if (worldWithTarget._initialCameraTarget && world.editorCamera) {
-    world.editorCamera.setTarget(
-      new (await import("three")).Vector3(
-        worldWithTarget._initialCameraTarget.x,
-        worldWithTarget._initialCameraTarget.y,
-        worldWithTarget._initialCameraTarget.z,
-      ),
-    );
-    delete worldWithTarget._initialCameraTarget;
+  if (world._initialCameraTarget && world.editorCamera) {
+    const t = world._initialCameraTarget;
+    world.editorCamera.setTarget(new THREE.Vector3(t.x, t.y, t.z));
+    world._initialCameraTarget = undefined;
   }
 
   return world;

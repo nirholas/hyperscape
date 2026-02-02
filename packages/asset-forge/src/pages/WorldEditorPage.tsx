@@ -525,15 +525,11 @@ export function WorldEditorPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerReady, setContainerReady] = useState(false);
 
-  // Wait for container to be mounted
+  // Mark ready after first render when ref is attached
   useEffect(() => {
-    // Use a small delay to ensure the DOM is ready
-    const timer = setTimeout(() => {
-      if (containerRef.current) {
-        setContainerReady(true);
-      }
-    }, 50);
-    return () => clearTimeout(timer);
+    if (containerRef.current) {
+      setContainerReady(true);
+    }
   }, []);
 
   return (

@@ -170,9 +170,7 @@ export class EditorGizmoSystem extends System {
     // Add to scene
     this.world.stage.scene.add(this.transformControls);
 
-    // Set up event listeners
-    this.transformControls.addEventListener("change", this.onTransformChange);
-    // Cast to handle the event type mismatch in three.js types
+    // Set up event listeners (cast to handle three.js type mismatch)
     this.transformControls.addEventListener(
       "dragging-changed",
       this.onDraggingChanged as unknown as (event: THREE.Event) => void,
@@ -238,23 +236,14 @@ export class EditorGizmoSystem extends System {
   };
 
   private onSelectionChanged = (event: SelectionChangeEvent): void => {
-    const selection = event.selected;
-
-    if (selection.length === 0) {
-      // No selection - hide gizmo
+    const { selected } = event;
+    if (selected.length === 0) {
       this.detachGizmo();
-    } else if (selection.length === 1) {
-      // Single selection - attach directly to object
-      this.attachToObject(selection[0]);
+    } else if (selected.length === 1) {
+      this.attachToObject(selected[0]);
     } else {
-      // Multi-selection - attach to center point
-      this.attachToMultiSelection(selection);
+      this.attachToMultiSelection(selected);
     }
-  };
-
-  private onTransformChange = (): void => {
-    // Request a render on transform change
-    // The graphics system will handle this in commit()
   };
 
   private onDraggingChanged = (event: { value: boolean }): void => {
@@ -604,10 +593,6 @@ export class EditorGizmoSystem extends System {
 
     // Dispose transform controls
     if (this.transformControls) {
-      this.transformControls.removeEventListener(
-        "change",
-        this.onTransformChange,
-      );
       this.transformControls.removeEventListener(
         "dragging-changed",
         this.onDraggingChanged as unknown as (event: THREE.Event) => void,

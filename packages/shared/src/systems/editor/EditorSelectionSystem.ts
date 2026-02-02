@@ -100,7 +100,7 @@ export class EditorSelectionSystem extends System {
   // Raycasting
   private raycaster: THREE.Raycaster;
   private mouse: THREE.Vector2 = new THREE.Vector2();
-  private selectableObjects: THREE.Object3D[] = [];
+  private _tempVec3 = new THREE.Vector3(); // Reusable for marquee calculations
 
   // Marquee selection state
   private isMarqueeActive = false;
@@ -257,24 +257,25 @@ export class EditorSelectionSystem extends System {
   };
 
   private raycastSelectables(): Selectable | null {
-    if (this.selectableObjects.length === 0) return null;
+    if (this.selectables.size === 0) return null;
 
-    this.raycaster.setFromCamera(this.mouse, this.world.camera);
-    const intersects = this.raycaster.intersectObjects(
-      this.selectableObjects,
-      true,
+    const objects = Array.from(this.selectables.values()).map(
+      (s) => s.object3D,
     );
+    this.raycaster.setFromCamera(this.mouse, this.world.camera);
+    const intersects = this.raycaster.intersectObjects(objects, true);
 
     if (intersects.length === 0) return null;
 
-    // Find the selectable for the hit object
-    let obj: THREE.Object3D | null = intersects[0].object;
-    while (obj) {
+    // Find the selectable for the hit object (traverse up parent chain)
+    for (
+      let obj: THREE.Object3D | null = intersects[0].object;
+      obj;
+      obj = obj.parent
+    ) {
       const selectable = this.objectToSelectable.get(obj);
       if (selectable) return selectable;
-      obj = obj.parent;
     }
-
     return null;
   }
 
@@ -343,9 +344,9 @@ export class EditorSelectionSystem extends System {
 
   private getObjectsInMarquee(): Selectable[] {
     const result: Selectable[] = [];
+    const rect = this.domElement!.getBoundingClientRect();
 
     // Convert marquee bounds to normalized device coordinates
-    const rect = this.domElement!.getBoundingClientRect();
     const minX =
       (Math.min(this.marqueeStart.x, this.marqueeEnd.x) / rect.width) * 2 - 1;
     const maxX =
@@ -356,26 +357,23 @@ export class EditorSelectionSystem extends System {
       -(Math.min(this.marqueeStart.y, this.marqueeEnd.y) / rect.height) * 2 + 1;
 
     // Check each selectable object
-    const tempVec = new THREE.Vector3();
     for (const selectable of this.selectables.values()) {
-      // Get object center in screen space
-      selectable.object3D.getWorldPosition(tempVec);
-      tempVec.project(this.world.camera);
+      selectable.object3D.getWorldPosition(this._tempVec3);
+      this._tempVec3.project(this.world.camera);
 
-      // Check if within marquee bounds
+      const { x, y, z } = this._tempVec3;
+      // Check if within marquee bounds and in front of camera
       if (
-        tempVec.x >= minX &&
-        tempVec.x <= maxX &&
-        tempVec.y >= minY &&
-        tempVec.y <= maxY
+        x >= minX &&
+        x <= maxX &&
+        y >= minY &&
+        y <= maxY &&
+        z >= -1 &&
+        z <= 1
       ) {
-        // Also check if in front of camera
-        if (tempVec.z >= -1 && tempVec.z <= 1) {
-          result.push(selectable);
-        }
+        result.push(selectable);
       }
     }
-
     return result;
   }
 
@@ -389,9 +387,6 @@ export class EditorSelectionSystem extends System {
   registerSelectable(selectable: Selectable): void {
     this.selectables.set(selectable.id, selectable);
     this.objectToSelectable.set(selectable.object3D, selectable);
-    this.selectableObjects.push(selectable.object3D);
-
-    // Enable selection layer on the object
     selectable.object3D.layers.enable(this.config.selectableLayers);
   }
 
@@ -402,18 +397,11 @@ export class EditorSelectionSystem extends System {
     const selectable = this.selectables.get(id);
     if (!selectable) return;
 
-    // Remove from selection if selected
     if (this.selection.has(id)) {
       this.removeFromSelection(selectable);
     }
-
-    // Clean up
     this.selectables.delete(id);
     this.objectToSelectable.delete(selectable.object3D);
-    const idx = this.selectableObjects.indexOf(selectable.object3D);
-    if (idx !== -1) {
-      this.selectableObjects.splice(idx, 1);
-    }
   }
 
   /**
@@ -752,7 +740,6 @@ export class EditorSelectionSystem extends System {
     // Clear data structures
     this.selection.clear();
     this.selectables.clear();
-    this.selectableObjects.length = 0;
     this.selectionHistory.length = 0;
 
     super.destroy();
