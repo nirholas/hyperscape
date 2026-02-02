@@ -2015,6 +2015,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get mob entity directly from world entities
       const mobEntity = this.world.entities.get(targetId) as {
@@ -2076,6 +2077,7 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
       this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get target player entity
       const targetPlayer = this.world.entities?.players?.get(
