@@ -183,6 +183,11 @@ export class CombatSystem extends SystemBase {
   private readonly _attackerTile: PooledTile = tilePool.acquire();
   private readonly _targetTile: PooledTile = tilePool.acquire();
 
+  // OSRS-accurate: Track last known target tile per attacker for persistent combat follow.
+  // In OSRS, the player continuously follows the target while in combat — not just when
+  // out of range. This map lets us detect when the target has moved and re-path accordingly.
+  private lastCombatTargetTile = new Map<string, { x: number; z: number }>();
+
   // Auto-retaliate disabled after 20 minutes of no input (OSRS behavior)
   private lastInputTick = new Map<string, number>();
 
@@ -1494,6 +1499,9 @@ export class CombatSystem extends SystemBase {
     // Remove ONLY this player's combat state - NOT the target's!
     this.stateService.removeCombatState(typedPlayerId);
 
+    // Clean up combat follow tracking for disengaging player
+    this.lastCombatTargetTile.delete(playerId);
+
     // Mark player as "in combat without target" - the attacker is still chasing them
     // This keeps the combat timer active but player won't auto-attack
     // If auto-retaliate is ON and attacker catches up and hits, player will start fighting again
@@ -1984,6 +1992,10 @@ export class CombatSystem extends SystemBase {
     // Remove combat states via StateService
     this.stateService.removeCombatState(typedEntityId);
     this.stateService.removeCombatState(combatState.targetId);
+
+    // Clean up combat follow tracking
+    this.lastCombatTargetTile.delete(data.entityId);
+    this.lastCombatTargetTile.delete(String(combatState.targetId));
 
     // Emit combat ended event
     this.emitTypedEvent(EventType.COMBAT_ENDED, {
@@ -2655,15 +2667,47 @@ export class CombatSystem extends SystemBase {
             combatRangeTiles,
           );
 
+    // OSRS-accurate: Continuously follow the target while in combat.
+    // In OSRS, the player follows the target every tick — not just when out of range.
+    // movePlayerToward() already returns early if already in range, so this is safe.
+    // This prevents the stutter pattern where the player stands still until the target
+    // leaves range, then chases, then stops again.
+    const lastKnown = this.lastCombatTargetTile.get(attackerId);
+    const targetMoved =
+      !lastKnown ||
+      lastKnown.x !== this._targetTile.x ||
+      lastKnown.z !== this._targetTile.z;
+
+    if (targetMoved) {
+      // Update last known target tile (reuse object to avoid allocation)
+      if (lastKnown) {
+        lastKnown.x = this._targetTile.x;
+        lastKnown.z = this._targetTile.z;
+      } else {
+        this.lastCombatTargetTile.set(attackerId, {
+          x: this._targetTile.x,
+          z: this._targetTile.z,
+        });
+      }
+    }
+
     if (!inRange) {
-      // Out of range - follow the target
-      // Note: If player clicked away, their combat would already be ended by
-      // COMBAT_PLAYER_DISENGAGE event (OSRS-accurate: clicking cancels action)
-      // So if we reach here, combat is still active and player should follow
-      // Extend combat timeout while pursuing
+      // Out of range - follow the target and extend combat timeout while pursuing
       combatState.combatEndTick =
         tickNumber + COMBAT_CONSTANTS.COMBAT_TIMEOUT_TICKS;
 
+      this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
+        playerId: attackerId,
+        targetId: targetId,
+        targetPosition: { x: targetPos.x, y: targetPos.y, z: targetPos.z },
+        attackRange: combatRangeTiles,
+        attackType: attackType,
+      });
+    } else if (targetMoved) {
+      // In range but target moved — re-path to maintain follow.
+      // movePlayerToward() will no-op since already in range, but this keeps
+      // the path updated so the player transitions smoothly to chasing if
+      // the target moves out of range next tick.
       this.emitTypedEvent(EventType.COMBAT_FOLLOW_TARGET, {
         playerId: attackerId,
         targetId: targetId,
