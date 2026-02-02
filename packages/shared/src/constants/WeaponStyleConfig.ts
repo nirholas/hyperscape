@@ -47,11 +47,12 @@ export const WEAPON_STYLE_CONFIG: Record<WeaponType, CombatStyleExtended[]> = {
   [WeaponType.CROSSBOW]: ["accurate", "rapid", "longrange"],
 
   // Magic weapons - OSRS-accurate styles
-  // Accurate: +3 magic level
-  // Longrange: +2 attack range, XP split to magic/defence
-  // Autocast: can set a spell to auto-cast
-  [WeaponType.STAFF]: ["accurate", "longrange", "autocast"],
-  [WeaponType.WAND]: ["accurate", "longrange", "autocast"],
+  // Staves/wands have both melee and magic styles:
+  //   Melee (crush): Bash=accurate, Pound=aggressive, Focus=defensive
+  //   Magic: Spell=autocast (defensive autocast is a toggle, not a separate style)
+  // @see https://oldschool.runescape.wiki/w/Staff
+  [WeaponType.STAFF]: ["accurate", "aggressive", "defensive", "autocast"],
+  [WeaponType.WAND]: ["accurate", "aggressive", "defensive", "autocast"],
 
   // Shield - not a weapon, but if somehow selected, default to defensive
   [WeaponType.SHIELD]: ["defensive"],
