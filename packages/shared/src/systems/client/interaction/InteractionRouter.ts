@@ -507,10 +507,19 @@ export class InteractionRouter extends System {
     // Get collision service for building walls
     const collisionService = this.getBuildingCollisionService();
 
-    // Determine player's current floor for multi-story building support
-    // Query the collision service to find what floor the player is on
+    // Determine player's current floor and building ID for layer separation
+    // This must match the server's logic exactly via checkBuildingMovement
     let playerFloor = 0;
+    let playerBuildingId: string | null = null;
+
     if (collisionService) {
+      // Check if player's tile is in a building footprint
+      playerBuildingId = collisionService.isTileInBuildingFootprint(
+        playerTile.x,
+        playerTile.z,
+      );
+
+      // Get floor from collision query
       const playerCollision = collisionService.queryCollision(
         playerTile.x,
         playerTile.z,
@@ -536,43 +545,62 @@ export class InteractionRouter extends System {
         collision: hasCollisionMatrix,
         buildings: hasBuildingCollision,
         playerFloor,
+        playerBuildingId,
       });
     }
 
-    // Create walkability checker that considers all available collision systems
-    // NOTE: If a system is unavailable, we assume walkable (optimistic) but log warning
+    // Create walkability checker that MATCHES the server's isTileWalkable logic EXACTLY
+    // Uses BuildingCollisionService.checkBuildingMovement for consistent behavior
     const isWalkable = (tile: TileCoord, fromTile?: TileCoord): boolean => {
+      // =========================================================================
+      // BUILDING CHECKS: Layer separation, walls, steps, floor walkability
+      // Uses checkBuildingMovement - SAME as server's tile-movement.ts
+      // =========================================================================
+      if (hasBuildingCollision) {
+        const buildingCheck = collisionService!.checkBuildingMovement(
+          fromTile ?? null,
+          tile,
+          playerFloor,
+          playerBuildingId,
+        );
+
+        // BuildingCollisionService handles all building-related blocking
+        if (!buildingCheck.buildingAllowsMovement) {
+          return false;
+        }
+
+        // If target is inside a building footprint, skip terrain checks
+        // (building floor is walkable, handled by checkBuildingMovement)
+        if (buildingCheck.targetInBuildingFootprint) {
+          return true;
+        }
+      }
+
+      // =========================================================================
+      // COLLISION MATRIX: Non-building directional walls
+      // =========================================================================
+      if (
+        hasCollisionMatrix &&
+        fromTile &&
+        collision!.isBlocked &&
+        collision!.isBlocked(fromTile.x, fromTile.z, tile.x, tile.z)
+      ) {
+        return false;
+      }
+
+      // =========================================================================
+      // GROUND LAYER CHECKS (static objects, terrain)
+      // =========================================================================
+
+      // Check CollisionMatrix for static objects (rocks, trees, etc.)
+      if (hasCollisionMatrix && collision!.hasFlags!(tile.x, tile.z, 1)) {
+        return false;
+      }
+
       // Check terrain walkability (slope, water, etc.)
       if (hasTerrainWalkability) {
         const result = terrain!.isPositionWalkable!(tile.x + 0.5, tile.z + 0.5);
         if (!result.walkable) return false;
-      }
-
-      // Check static collision matrix (rocks, trees, static objects)
-      if (hasCollisionMatrix) {
-        if (collision!.hasFlags!(tile.x, tile.z, 1)) {
-          return false;
-        }
-      }
-
-      // Check CollisionMatrix directional walls (including diagonal clipping)
-      // This catches building walls registered in CollisionMatrix
-      if (hasCollisionMatrix && fromTile && collision!.isBlocked) {
-        if (collision!.isBlocked(fromTile.x, fromTile.z, tile.x, tile.z)) {
-          return false;
-        }
-      }
-
-      // Check building walls (floor-specific, handles upper floors not in CollisionMatrix)
-      if (hasBuildingCollision && fromTile) {
-        const isBlocked = collisionService!.isWallBlocked(
-          fromTile.x,
-          fromTile.z,
-          tile.x,
-          tile.z,
-          playerFloor, // Use player's current floor, not hardcoded 0
-        );
-        if (isBlocked) return false;
       }
 
       return true;

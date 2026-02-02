@@ -9,6 +9,7 @@ import type {
   TownSize,
   BuildingConfig,
   TownBuildingType,
+  LandmarkConfig,
 } from "./types";
 
 // ============================================================
@@ -177,8 +178,26 @@ export function createDefaultConfig(): TownGeneratorConfig {
     townSizes: { ...DEFAULT_TOWN_SIZES },
     biomeSuitability: { ...DEFAULT_BIOME_SUITABILITY },
     buildingTypes: { ...DEFAULT_BUILDING_CONFIGS },
+    landmarks: { ...DEFAULT_LANDMARK_CONFIG },
   };
 }
+
+// ============================================================
+// LANDMARK CONFIGURATION
+// ============================================================
+
+/**
+ * Default landmark generation configuration
+ */
+export const DEFAULT_LANDMARK_CONFIG: LandmarkConfig = {
+  fencesEnabled: true,
+  fenceDensity: 0.7, // 70% of valid corners get fence posts
+  fencePostHeight: 1.2, // 1.2m tall fence posts
+  lamppostsInVillages: true,
+  lamppostSpacing: 15, // 15m between lampposts
+  marketStallsEnabled: true,
+  decorationsEnabled: true,
+};
 
 // ============================================================
 // GRID CONFIGURATION

@@ -280,7 +280,49 @@ fn spawnPosition(seed: u32) -> vec3<f32> {
       pos.z += (hashU32(seed + 12u) - 0.5) * extents.z;
     }
     default: {
-      // Cone emitter (TODO)
+      // Cone emitter (shape=3)
+      // Spawns particles within a cone volume pointing along directionBase
+      // shapeParam1.x = cone base radius
+      // shapeParam2 = cone height
+      // directionBase = cone axis direction (normalized)
+      
+      let baseRadius = emitter.shapeParam1.x;
+      let height = emitter.shapeParam2;
+      
+      // Random position along cone height (0 = apex, 1 = base)
+      // Use cubic distribution for uniform volume density
+      let heightT = pow(hashU32(seed + 10u), 0.333333);
+      
+      // Radius at this height (linear interpolation from apex to base)
+      let radiusAtHeight = baseRadius * heightT;
+      
+      // Random angle around cone axis
+      let angle = hashU32(seed + 11u) * TWO_PI;
+      
+      // Random radial distance within this slice (square root for uniform area)
+      let radialT = sqrt(hashU32(seed + 12u));
+      let r = radiusAtHeight * radialT;
+      
+      // Calculate position offset in cone's local space
+      // Cone axis points along directionBase
+      let coneAxis = normalize(emitter.directionBase);
+      
+      // Create orthonormal basis for the cone
+      // Find a vector not parallel to coneAxis
+      var up = vec3<f32>(0.0, 1.0, 0.0);
+      if (abs(dot(coneAxis, up)) > 0.99) {
+        up = vec3<f32>(1.0, 0.0, 0.0);
+      }
+      let tangent = normalize(cross(coneAxis, up));
+      let bitangent = cross(coneAxis, tangent);
+      
+      // Offset along cone axis
+      let axialOffset = coneAxis * height * heightT;
+      
+      // Radial offset perpendicular to cone axis
+      let radialOffset = (tangent * cos(angle) + bitangent * sin(angle)) * r;
+      
+      pos += axialOffset + radialOffset;
     }
   }
   

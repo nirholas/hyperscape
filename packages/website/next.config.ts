@@ -17,10 +17,6 @@ const config: NextConfig = {
     // The code works at runtime, but tsc has issues with JSX.IntrinsicElements
     ignoreBuildErrors: true,
   },
-  eslint: {
-    // Warnings are acceptable for initial build
-    ignoreDuringBuilds: true,
-  },
 };
 
 export default config;

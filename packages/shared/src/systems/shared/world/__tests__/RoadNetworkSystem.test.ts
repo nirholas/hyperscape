@@ -18,7 +18,7 @@ interface RoadBoundaryExit {
 }
 
 // ============== Constants (must match RoadNetworkSystem.ts) ==============
-const ROAD_WIDTH = 4;
+const ROAD_WIDTH = 6; // Updated to match RoadNetworkSystem default
 const PATH_STEP_SIZE = 20;
 const _MAX_PATH_ITERATIONS = 10000;
 const EXTRA_CONNECTIONS_RATIO = 0.25;
@@ -1095,11 +1095,11 @@ describe("RoadNetworkSystem Algorithms", () => {
             { x: 0, z: 50, y: 0 },
             { x: 100, z: 50, y: 0 },
           ],
-          width: ROAD_WIDTH, // 4m wide, halfWidth = 2m
+          width: ROAD_WIDTH, // 6m wide, halfWidth = 3m
         },
       ];
       const samples = [
-        { x: 50, z: 52 }, // 2m from center = at edge
+        { x: 50, z: 53 }, // 3m from center = at edge (halfWidth = 3m for 6m road)
       ];
       const result = simulateGrassHeightmapGeneration(roads, samples, 2);
       expect(result[0].grassiness).toBe(0);
@@ -1116,7 +1116,7 @@ describe("RoadNetworkSystem Algorithms", () => {
         },
       ];
       const samples = [
-        { x: 50, z: 53 }, // 3m from center = 1m into fade zone
+        { x: 50, z: 54 }, // 4m from center = 1m into fade zone (3m halfWidth + 1m into 2m fade)
       ];
       const result = simulateGrassHeightmapGeneration(roads, samples, 2);
       expect(result[0].grassiness).toBeGreaterThan(0);
@@ -1134,7 +1134,7 @@ describe("RoadNetworkSystem Algorithms", () => {
         },
       ];
       const samples = [
-        { x: 50, z: 55 }, // 5m from center = beyond fade
+        { x: 50, z: 56 }, // 6m from center = beyond fade (3m halfWidth + 2m fade + 1m extra)
         { x: 50, z: 60 }, // 10m from center = well beyond
       ];
       const result = simulateGrassHeightmapGeneration(roads, samples, 2);

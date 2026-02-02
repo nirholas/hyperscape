@@ -22,11 +22,9 @@ const LIGHT_RADIUS_MULTIPLIER = 1.5;
 const MIN_DIFFUSE_CONTRIBUTION = 0.15;
 
 /** Margin for interior bounds checking (prevents edge artifacts) - used in bakeVertexLighting */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const INTERIOR_BOUNDS_MARGIN = 0.1;
 
 /** Threshold for interior-facing normal detection (dot product with center direction) - used in bakeVertexLighting */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 const INTERIOR_NORMAL_THRESHOLD = -0.1;
 
 /** Maximum overbright value for lit areas */

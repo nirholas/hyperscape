@@ -133,6 +133,15 @@ function computeFlatNormalsForGeometry(geo: THREE.BufferGeometry): void {
     return;
   }
 
+  // Compute bounding box center to verify normal direction
+  geo.computeBoundingBox();
+  const boundingBox = geo.boundingBox;
+  const center = boundingBox
+    ? new THREE.Vector3()
+        .addVectors(boundingBox.min, boundingBox.max)
+        .multiplyScalar(0.5)
+    : new THREE.Vector3(0, 0, 0);
+
   const normalArray = new Float32Array(vertexCount * 3);
   const positions = posAttr.array as Float32Array;
 
@@ -166,7 +175,21 @@ function computeFlatNormalsForGeometry(geo: THREE.BufferGeometry): void {
     // Handle degenerate triangles
     const lengthSq = faceNormal.lengthSq();
     if (lengthSq > 1e-12) {
-      faceNormal.divideScalar(Math.sqrt(lengthSq));
+      faceNormal.normalize();
+
+      // CRITICAL: Verify normal points outward by checking if it points away from center
+      // For a triangle on the surface of a solid, the normal should point away from the center
+      const triangleCenter = new THREE.Vector3()
+        .addVectors(p0, p1)
+        .add(p2)
+        .divideScalar(3);
+      const toCenter = new THREE.Vector3().subVectors(center, triangleCenter);
+
+      // If normal points toward center (positive dot product), flip it
+      // This handles cases where winding order might be reversed
+      if (faceNormal.dot(toCenter) > 0) {
+        faceNormal.negate();
+      }
     } else {
       // Degenerate triangle - use default up normal
       faceNormal.set(0, 1, 0);
@@ -452,9 +475,10 @@ const aaStepLt = Fn(
  * lodFade indicates how much to blend toward average color (0=full detail, 1=solid)
  */
 const brickPattern = Fn(([uvIn]: [ReturnType<typeof vec2>]) => {
-  const brickWidth = float(0.25);
-  const brickHeight = float(0.065);
-  const mortarWidth = float(0.01);
+  // Larger bricks for more visible pattern (was 0.25 x 0.065)
+  const brickWidth = float(0.4);
+  const brickHeight = float(0.1);
+  const mortarWidth = float(0.015);
 
   // Calculate LOD fade factor - at distance, fade to average brick color
   const lodFade = calcProceduralLOD(uvIn.div(vec2(brickWidth, brickHeight)));
@@ -498,9 +522,10 @@ const brickPattern = Fn(([uvIn]: [ReturnType<typeof vec2>]) => {
  * bevelAndLod encodes both bevel (lower bits) and lodFade (combined with isStone)
  */
 const ashlarPattern = Fn(([uvIn]: [ReturnType<typeof vec2>]) => {
-  const blockWidth = float(0.6);
-  const blockHeight = float(0.3);
-  const mortarWidth = float(0.015);
+  // Larger stone blocks for more visible pattern (was 0.6 x 0.3)
+  const blockWidth = float(0.9);
+  const blockHeight = float(0.45);
+  const mortarWidth = float(0.02);
 
   // Calculate LOD fade factor
   const lodFade = calcProceduralLOD(uvIn.div(vec2(blockWidth, blockHeight)));
@@ -759,10 +784,11 @@ const _brickNormalPerturbation = Fn(
     ReturnType<typeof float>,
   ]) => {
     const scaledUV = uvIn.div(textureScale);
-    const brickWidth = float(0.25);
-    const brickHeight = float(0.065);
-    const mortarWidth = float(0.01);
-    const bevelWidth = float(0.015); // Width of the beveled edge
+    // Match the larger brick pattern size
+    const brickWidth = float(0.4);
+    const brickHeight = float(0.1);
+    const mortarWidth = float(0.015);
+    const bevelWidth = float(0.02); // Width of the beveled edge (scaled up)
     const bevelDepth = float(0.4); // Strength of the bevel normal
 
     const scaled = scaledUV.div(vec2(brickWidth, brickHeight));
@@ -983,10 +1009,10 @@ const _woodNormalPerturbation = Fn(
   },
 );
 
-// Procedural building colors (classic red brick)
-const BUILDING_BASE_COLOR = new THREE.Color("#C45C45"); // Bright terracotta red
-const BUILDING_SECONDARY_COLOR = new THREE.Color("#A84832"); // Darker red-brown
-const BUILDING_MORTAR_COLOR = new THREE.Color("#E8DDD0"); // Light cream mortar
+// Procedural building colors (bright, vibrant brick)
+const BUILDING_BASE_COLOR = new THREE.Color("#D87860"); // Bright warm terracotta
+const BUILDING_SECONDARY_COLOR = new THREE.Color("#C06850"); // Warm red-brown
+const BUILDING_MORTAR_COLOR = new THREE.Color("#F0E8E0"); // Bright cream mortar
 
 // ============================================================================
 // BUILDING OCCLUSION MATERIAL
@@ -1201,29 +1227,29 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
   const uBrickSecondary = uniform(BUILDING_SECONDARY_COLOR);
   const uBrickMortar = uniform(BUILDING_MORTAR_COLOR);
 
-  // Stone colors (gray ashlar blocks)
-  const uStoneBase = uniform(new THREE.Color("#9B9B9B")); // Light gray stone
-  const uStoneSecondary = uniform(new THREE.Color("#787878")); // Darker gray
-  const uStoneMortar = uniform(new THREE.Color("#C8C8C8")); // Light mortar
+  // Stone colors (bright warm gray ashlar blocks)
+  const uStoneBase = uniform(new THREE.Color("#B8B0A8")); // Warm light gray stone
+  const uStoneSecondary = uniform(new THREE.Color("#9A9088")); // Medium warm gray
+  const uStoneMortar = uniform(new THREE.Color("#E0D8D0")); // Bright warm mortar
 
   // Timber frame colors
-  const uTimberBeam = uniform(new THREE.Color("#4A3728")); // Dark brown timber
-  const uTimberStucco = uniform(new THREE.Color("#F5E6D3")); // Cream stucco infill
-  const uTimberStuccoSecondary = uniform(new THREE.Color("#E8D9C4")); // Slightly darker
+  const uTimberBeam = uniform(new THREE.Color("#6B5040")); // Warm brown timber (brighter)
+  const uTimberStucco = uniform(new THREE.Color("#FFF5E8")); // Bright cream stucco infill
+  const uTimberStuccoSecondary = uniform(new THREE.Color("#F5EBD8")); // Slightly darker
 
   // Plain stucco colors (cottage style)
-  const uStuccoBase = uniform(new THREE.Color("#F0E6DC")); // Warm cream
-  const uStuccoSecondary = uniform(new THREE.Color("#E5D9CC")); // Slightly darker
+  const uStuccoBase = uniform(new THREE.Color("#FFF8F0")); // Bright warm cream
+  const uStuccoSecondary = uniform(new THREE.Color("#F5EEE5")); // Slightly darker
 
   // Wood siding colors (rustic buildings)
-  const uWoodBase = uniform(new THREE.Color("#8B6914")); // Golden brown wood
-  const uWoodSecondary = uniform(new THREE.Color("#6B4423")); // Darker brown
+  const uWoodBase = uniform(new THREE.Color("#A88030")); // Bright golden brown wood
+  const uWoodSecondary = uniform(new THREE.Color("#8B6028")); // Warm brown
 
   // Roof and floor colors (shared across all materials)
-  const uRoofColor = uniform(new THREE.Color("#4A3728")); // Dark wood for roofs
-  const uRoofSecondary = uniform(new THREE.Color("#3C2A1E"));
-  const uFloorColor = uniform(new THREE.Color("#8B7355")); // Wood for floors
-  const uFloorSecondary = uniform(new THREE.Color("#6B4423"));
+  const uRoofColor = uniform(new THREE.Color("#6B5040")); // Warm brown for roofs (brighter)
+  const uRoofSecondary = uniform(new THREE.Color("#5A4030"));
+  const uFloorColor = uniform(new THREE.Color("#A89070")); // Bright wood for floors
+  const uFloorSecondary = uniform(new THREE.Color("#8B7050"));
 
   const uVariation = uniform(0.15);
   const uTextureScale = uniform(1.0);
@@ -1233,21 +1259,24 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     const meshUV = uv();
     const scaledUV = meshUV.div(uTextureScale);
 
-    // Get material ID from UV2 (if available, default to brick=0)
-    // Material IDs: 0.0=brick, 0.2=stone, 0.4=timber, 0.6=stucco, 0.8=wood
+    // Get material ID and surface type from UV2
+    // UV2.x = material ID (0.0=brick, 0.2=stone, 0.4=timber, 0.6=stucco, 0.8=wood)
+    // UV2.y = surface type (0.0=wall, 0.33=floor, 0.67=roof, 1.0=ceiling)
     const uv2Attr = attribute("uv2", "vec2");
     const materialId = uv2Attr.x;
+    const surfaceType = uv2Attr.y;
 
-    // Get world normal for surface type detection
-    const worldNormal = normalWorld;
-    const normalY = worldNormal.y;
-
-    // Surface type detection based on normal:
-    // - Roof surfaces: normal.y > 0.3 and < 0.95 (angled up but not floor)
-    // - Floor surfaces: normal.y > 0.95 (mostly flat horizontal)
-    // - Wall surfaces: everything else
-    const isRoof = step(float(0.3), normalY).mul(step(normalY, float(0.95)));
-    const isFloor = step(float(0.95), normalY);
+    // Surface type detection from UV2.y (NOT from normals!)
+    // This is critical because flat roofs have normalY=1.0 (same as floors),
+    // so we can't reliably distinguish them by normal direction alone.
+    // Surface type IDs: 0.0=wall, 0.33=floor, 0.67=roof, 1.0=ceiling
+    const isFloor = step(float(0.2), surfaceType).mul(
+      step(surfaceType, float(0.5)),
+    ); // 0.33 ± 0.13
+    const isRoof = step(float(0.5), surfaceType).mul(
+      step(surfaceType, float(0.85)),
+    ); // 0.67 ± 0.18
+    const isCeiling = step(float(0.85), surfaceType); // 1.0 (ceiling uses floor pattern but interior)
 
     // === BRICK PATTERN (materialId ~= 0.0) ===
     const brickResult = brickPattern(scaledUV);
@@ -1281,7 +1310,7 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
     const stoneId = stoneResult.yz;
     const stoneBevel = stoneResult.w;
     // Compute stone LOD from derivatives
-    const stoneLodFade = calcProceduralLOD(scaledUV.mul(1.67)); // ~1/0.6 blockWidth
+    const stoneLodFade = calcProceduralLOD(scaledUV.mul(1.11)); // ~1/0.9 blockWidth
     const stoneNoise = tslHash(stoneId);
     const stoneVarFaded = mix(
       stoneNoise.mul(uVariation),
@@ -1526,6 +1555,7 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
 
     // Apply vertex color tint for interior lighting
     // Exterior surfaces should have white vertex colors, so they're unaffected
+    // Interior surfaces have baked lighting in vertex colors (darker where less light reaches)
     const finalColor = surfaceColor.mul(vertexColor);
 
     return finalColor;
@@ -1537,22 +1567,24 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
   // material.normalNode = normalWorld; // REMOVED - was interfering with lighting
 
   // ========== PROCEDURAL ROUGHNESS NODE ==========
-  // Varies roughness based on wall material type (from UV2) and surface normal
+  // Varies roughness based on wall material type (from UV2) and surface type
   material.roughnessNode = Fn(() => {
     const meshUV = uv();
     const scaledUV = meshUV.div(uTextureScale);
 
-    // Get material ID from UV2
+    // Get material ID and surface type from UV2
     const uv2Attr = attribute("uv2", "vec2");
     const materialId = uv2Attr.x;
+    const surfaceType = uv2Attr.y;
 
-    // Get world normal for surface type detection
-    const worldNormal = normalWorld;
-    const normalY = worldNormal.y;
-
-    // Surface type detection (same as colorNode)
-    const isRoof = step(float(0.3), normalY).mul(step(normalY, float(0.95)));
-    const isFloor = step(float(0.95), normalY);
+    // Surface type detection from UV2.y (same as colorNode)
+    // Surface type IDs: 0.0=wall, 0.33=floor, 0.67=roof, 1.0=ceiling
+    const isFloor = step(float(0.2), surfaceType).mul(
+      step(surfaceType, float(0.5)),
+    );
+    const isRoof = step(float(0.5), surfaceType).mul(
+      step(surfaceType, float(0.85)),
+    );
 
     // === BRICK ROUGHNESS (materialId ~= 0.0) ===
     const brickResult = brickPattern(scaledUV);
@@ -1717,6 +1749,380 @@ function createBuildingOcclusionMaterial(): BuildingOcclusionMaterial {
   };
 
   return occlusionMaterial;
+}
+
+// ============================================================================
+// ROOF MATERIAL WITH PER-BUILDING VISIBILITY
+// ============================================================================
+
+/**
+ * Maximum number of buildings that can have hidden roofs simultaneously.
+ * Uses a fixed-size uniform array for GPU compatibility.
+ */
+const MAX_HIDDEN_ROOF_BUILDINGS = 16;
+
+/**
+ * Uniforms for roof material with per-building visibility.
+ */
+export type RoofOcclusionUniforms = BuildingOcclusionUniforms & {
+  /** Array of hidden building centers (x, z in .x and .y components) */
+  hiddenBuildingCenters: { value: THREE.Vector2[] };
+  /** Array of hidden building radii (for proximity check) */
+  hiddenBuildingRadii: { value: number[] };
+  /** Number of currently hidden buildings (0 to MAX_HIDDEN_ROOF_BUILDINGS) */
+  hiddenBuildingCount: { value: number };
+};
+
+/**
+ * Roof material with per-building visibility support.
+ */
+export type RoofOcclusionMaterial = MeshStandardNodeMaterial & {
+  occlusionUniforms: RoofOcclusionUniforms;
+};
+
+/**
+ * Creates a roof material with per-building visibility and dithered occlusion.
+ * Uses TSL (Three Shading Language) for GPU-accelerated per-building roof hiding.
+ *
+ * The shader uses a buildingCenter vertex attribute to determine which building
+ * each roof vertex belongs to. When the player/camera is inside a building's bounds,
+ * that building's roof is hidden using a dithered dissolve effect.
+ *
+ * Vertex Attributes Required:
+ * - buildingCenter (vec2): XZ center of the building this vertex belongs to
+ * - buildingRadius (float): Radius of the building footprint
+ *
+ * @returns Material with per-building roof visibility
+ */
+function createBuildingRoofMaterial(): RoofOcclusionMaterial {
+  const material = new MeshStandardNodeMaterial();
+
+  // Create uniforms - Occlusion
+  const uPlayerPos = uniform(new THREE.Vector3(0, 0, 0));
+  const uCameraPos = uniform(new THREE.Vector3(0, 0, 0));
+
+  // Create uniforms - Lighting (for explicit sun/ambient calculation)
+  const uSunDirection = uniform(new THREE.Vector3(0.5, 0.8, 0.3));
+  const uSunColor = uniform(new THREE.Color(1.0, 0.98, 0.92));
+  const uSunIntensity = uniform(1.5);
+  const uAmbientColor = uniform(new THREE.Color(0.4, 0.45, 0.5));
+  const uAmbientIntensity = uniform(0.4);
+
+  // Create uniforms - Per-building roof visibility
+  // Initialize arrays with default values
+  const defaultCenters: THREE.Vector2[] = [];
+  const defaultRadii: number[] = [];
+  for (let i = 0; i < MAX_HIDDEN_ROOF_BUILDINGS; i++) {
+    defaultCenters.push(new THREE.Vector2(-99999, -99999)); // Far away = not hidden
+    defaultRadii.push(0);
+  }
+  const uHiddenBuildingCenters = uniform(defaultCenters);
+  const uHiddenBuildingRadii = uniform(defaultRadii);
+  const uHiddenBuildingCount = uniform(0);
+
+  // Config as shader constants - Player occlusion cone
+  const occlusionCameraRadius = float(BUILDING_OCCLUSION_CONFIG.CAMERA_RADIUS);
+  const occlusionPlayerRadius = float(BUILDING_OCCLUSION_CONFIG.PLAYER_RADIUS);
+  const occlusionDistanceScale = float(
+    BUILDING_OCCLUSION_CONFIG.DISTANCE_SCALE,
+  );
+  const occlusionNearMargin = float(BUILDING_OCCLUSION_CONFIG.NEAR_MARGIN);
+  const occlusionFarMargin = float(BUILDING_OCCLUSION_CONFIG.FAR_MARGIN);
+  const occlusionEdgeSharpness = float(
+    BUILDING_OCCLUSION_CONFIG.EDGE_SHARPNESS,
+  );
+  const occlusionStrength = float(BUILDING_OCCLUSION_CONFIG.STRENGTH);
+
+  // Config as shader constants - Near-camera dissolve
+  const nearFadeStart = float(BUILDING_OCCLUSION_CONFIG.NEAR_FADE_START);
+  const nearFadeEnd = float(BUILDING_OCCLUSION_CONFIG.NEAR_FADE_END);
+
+  // Config as shader constants - Distance dissolve
+  const distFadeStart = float(BUILDING_OCCLUSION_CONFIG.DISTANCE_FADE_START);
+  const distFadeEnd = float(BUILDING_OCCLUSION_CONFIG.DISTANCE_FADE_END);
+
+  // Roof hiding config - uses dithered fade instead of instant pop
+  // Fade starts at roofFadeStart from building edge, fully hidden at roofFadeEnd
+  const roofFadeStart = float(12.0); // Distance where roof starts fading (from building edge)
+  const roofFadeEnd = float(2.0); // Distance where roof is fully hidden (10m fade range)
+
+  // Create alphaTest node for per-building roof hiding + dithered occlusion
+  material.alphaTestNode = Fn(() => {
+    const worldPos = positionWorld;
+
+    // ========== READ BUILDING CENTER FROM VERTEX ATTRIBUTE ==========
+    // Each roof vertex has the XZ center of its building baked in
+    const buildingCenter = attribute("buildingCenter", "vec2");
+    const buildingRadius = attribute("buildingRadius", "float");
+
+    // ========== PER-BUILDING ROOF HIDING (DITHERED FADE) ==========
+    // Check distance of player AND camera to this building on XZ plane
+    // Use the building's own center and radius from vertex attributes
+    // Fade smoothly over 10m range instead of instant pop
+
+    // Player distance to building center (XZ only)
+    const playerDx = sub(uPlayerPos.x, buildingCenter.x);
+    const playerDz = sub(uPlayerPos.z, buildingCenter.y); // .y is Z in vec2
+    const playerDistSq = add(mul(playerDx, playerDx), mul(playerDz, playerDz));
+    const playerDist = sqrt(playerDistSq);
+
+    // Camera distance to building center (XZ only)
+    const cameraDx = sub(uCameraPos.x, buildingCenter.x);
+    const cameraDz = sub(uCameraPos.z, buildingCenter.y);
+    const cameraDistSq = add(mul(cameraDx, cameraDx), mul(cameraDz, cameraDz));
+    const cameraDist = sqrt(cameraDistSq);
+
+    // Use the closer of player or camera distance
+    const closerDist = min(playerDist, cameraDist);
+
+    // Calculate fade thresholds based on building radius
+    // fadeStartDist: roof starts fading when closer than this
+    // fadeEndDist: roof fully hidden when closer than this
+    const fadeStartDist = add(buildingRadius, roofFadeStart); // e.g., radius + 12m
+    const fadeEndDist = add(buildingRadius, roofFadeEnd); // e.g., radius + 2m
+
+    // Smooth dithered fade from fadeStartDist (visible) to fadeEndDist (hidden)
+    // smoothstep(edge0, edge1, x) returns 0 when x < edge0, 1 when x > edge1
+    // We want: visible (0) when far, hidden (1) when close
+    // So: smoothstep(fadeEndDist, fadeStartDist, closerDist) gives us:
+    //   - 0 when closerDist < fadeEndDist (closer than 2m → fully hidden via 1-0=1 after invert)
+    //   - 1 when closerDist > fadeStartDist (farther than 12m → visible via 1-1=0 after invert)
+    // Invert to get: 1 = hide, 0 = show
+    const roofFade = sub(
+      float(1.0),
+      smoothstep(fadeEndDist, fadeStartDist, closerDist),
+    );
+
+    // ========== CAMERA-TO-FRAGMENT DISTANCE ==========
+    const cfX = sub(worldPos.x, uCameraPos.x);
+    const cfY = sub(worldPos.y, uCameraPos.y);
+    const cfZ = sub(worldPos.z, uCameraPos.z);
+    const camDistSq = add(add(mul(cfX, cfX), mul(cfY, cfY)), mul(cfZ, cfZ));
+    const camDist = sqrt(camDistSq);
+
+    // ========== NEAR-CAMERA DISSOLVE ==========
+    const nearCameraFade = sub(
+      float(1.0),
+      smoothstep(nearFadeEnd, nearFadeStart, camDist),
+    );
+
+    // ========== DISTANCE DISSOLVE ==========
+    const distanceFade = smoothstep(distFadeStart, distFadeEnd, camDist);
+
+    // ========== PLAYER OCCLUSION CONE ==========
+    const ctX = sub(uPlayerPos.x, uCameraPos.x);
+    const ctY = sub(uPlayerPos.y, uCameraPos.y);
+    const ctZ = sub(uPlayerPos.z, uCameraPos.z);
+    const ctLengthSq = add(add(mul(ctX, ctX), mul(ctY, ctY)), mul(ctZ, ctZ));
+    const ctLength = sqrt(ctLengthSq);
+
+    const dotCfCt = add(add(mul(cfX, ctX), mul(cfY, ctY)), mul(cfZ, ctZ));
+    const projDist = div(dotCfCt, max(ctLength, float(0.001)));
+
+    const minDist = occlusionNearMargin;
+    const maxDist = sub(ctLength, occlusionFarMargin);
+    const afterNear = step(minDist, projDist);
+    const beforeFar = step(projDist, maxDist);
+    const inRange = mul(afterNear, beforeFar);
+
+    const projT = div(projDist, max(ctLength, float(0.001)));
+    const projX = add(uCameraPos.x, mul(ctX, projT));
+    const projY = add(uCameraPos.y, mul(ctY, projT));
+    const projZ = add(uCameraPos.z, mul(ctZ, projT));
+
+    const perpX = sub(worldPos.x, projX);
+    const perpY = sub(worldPos.y, projY);
+    const perpZ = sub(worldPos.z, projZ);
+    const perpDistSq = add(
+      add(mul(perpX, perpX), mul(perpY, perpY)),
+      mul(perpZ, perpZ),
+    );
+    const perpDist = sqrt(perpDistSq);
+
+    const t = clamp(
+      div(projDist, max(ctLength, float(0.001))),
+      float(0.0),
+      float(1.0),
+    );
+    const coneRadius = add(
+      add(
+        occlusionCameraRadius,
+        mul(t, sub(occlusionPlayerRadius, occlusionCameraRadius)),
+      ),
+      mul(ctLength, occlusionDistanceScale),
+    );
+
+    const edgeStart = mul(coneRadius, sub(float(1.0), occlusionEdgeSharpness));
+    const rawOcclusionFade = sub(
+      float(1.0),
+      smoothstep(edgeStart, coneRadius, perpDist),
+    );
+
+    const occlusionFade = mul(
+      mul(rawOcclusionFade, occlusionStrength),
+      inRange,
+    );
+
+    // ========== COMBINE FADE EFFECTS ==========
+    // Take maximum of all fade effects for dithered dissolve:
+    // - nearCameraFade: dissolve when camera clips through geometry
+    // - distanceFade: dissolve buildings at distance (retro Bayer dither)
+    // - occlusionFade: dissolve when player is behind walls
+    // - roofFade: dissolve roof when player/camera approaches building (10m fade range)
+    const combinedFade = max(
+      max(max(nearCameraFade, distanceFade), occlusionFade),
+      roofFade,
+    );
+
+    // ========== SCREEN-SPACE 4x4 BAYER DITHERING ==========
+    const ix = mod(floor(viewportCoordinate.x), float(4.0));
+    const iy = mod(floor(viewportCoordinate.y), float(4.0));
+
+    const bit0_x = mod(ix, float(2.0));
+    const bit1_x = floor(mul(ix, float(0.5)));
+    const bit0_y = mod(iy, float(2.0));
+    const bit1_y = floor(mul(iy, float(0.5)));
+
+    const xor0 = abs(sub(bit0_x, bit0_y));
+    const xor1 = abs(sub(bit1_x, bit1_y));
+
+    const bayerInt = add(
+      add(
+        add(mul(xor0, float(8.0)), mul(bit0_y, float(4.0))),
+        mul(xor1, float(2.0)),
+      ),
+      bit1_y,
+    );
+    const ditherValue = mul(bayerInt, float(0.0625));
+
+    const hasAnyFade = step(float(0.001), combinedFade);
+    const rawThreshold = step(ditherValue, combinedFade);
+    const threshold = mul(mul(rawThreshold, hasAnyFade), float(2.0));
+
+    return threshold;
+  })();
+
+  // ========== PROCEDURAL COLOR NODE ==========
+  // Reuse the same procedural texturing as the wall material
+
+  // Brick colors
+  const uBrickBase = uniform(BUILDING_BASE_COLOR);
+  const uBrickSecondary = uniform(BUILDING_SECONDARY_COLOR);
+  const uBrickMortar = uniform(BUILDING_MORTAR_COLOR);
+
+  // Stone colors
+  const uStoneBase = uniform(new THREE.Color("#9B9B9B"));
+  const uStoneSecondary = uniform(new THREE.Color("#787878"));
+  const uStoneMortar = uniform(new THREE.Color("#C8C8C8"));
+
+  // Timber colors (brighter)
+  const uTimberBeam = uniform(new THREE.Color("#6B5040"));
+  const uTimberStucco = uniform(new THREE.Color("#FFF5E8"));
+  const uTimberStuccoSecondary = uniform(new THREE.Color("#F5EBD8"));
+
+  // Stucco colors (brighter)
+  const uStuccoBase = uniform(new THREE.Color("#FFF8F0"));
+  const uStuccoSecondary = uniform(new THREE.Color("#F5EEE5"));
+
+  // Wood colors (brighter)
+  const uWoodBase = uniform(new THREE.Color("#A88030"));
+  const uWoodSecondary = uniform(new THREE.Color("#8B6028"));
+  const uWoodGrain = uniform(new THREE.Color("#705020"));
+
+  // Roof colors (brighter warm brown)
+  const uRoofBase = uniform(new THREE.Color("#A06048")); // Warm terracotta
+  const uRoofSecondary = uniform(new THREE.Color("#B07050")); // Lighter brown
+
+  material.colorNode = Fn(() => {
+    // Read vertex color for tinting
+    const vertexColor = attribute("color", "vec3");
+
+    // Use UV2 for material ID (x=material type, y reserved)
+    const materialUV = uv(1);
+    const materialId = materialUV.x;
+
+    // World position for texture coordinates
+    const worldPos = positionWorld;
+    const worldNormal = normalWorld;
+
+    // Triplanar scale
+    const textureScale = float(0.5);
+    const scaledPos = mul(worldPos, textureScale);
+
+    // Blending weights from normal (triplanar)
+    const blendWeights = abs(worldNormal);
+    const blendSum = add(add(blendWeights.x, blendWeights.y), blendWeights.z);
+    const normalizedBlend = div(blendWeights, max(blendSum, float(0.001)));
+
+    // Simple procedural pattern for roofs - tile pattern
+    const tileScaleX = float(2.0);
+    const tileScaleZ = float(4.0);
+    const tileX = mul(fract(mul(scaledPos.x, tileScaleX)), float(2.0));
+    const tileZ = mul(fract(mul(scaledPos.z, tileScaleZ)), float(2.0));
+
+    // Create tile variation
+    const tileNoise = sin(
+      add(
+        mul(floor(mul(scaledPos.x, tileScaleX)), float(12.9898)),
+        mul(floor(mul(scaledPos.z, tileScaleZ)), float(78.233)),
+      ),
+    );
+    const tileVariation = mul(
+      add(
+        float(0.5),
+        mul(fract(mul(tileNoise, float(43758.5453))), float(0.5)),
+      ),
+      float(0.3),
+    );
+
+    // Mix roof colors based on tile variation
+    const roofColor = mix(uRoofBase, uRoofSecondary, tileVariation);
+
+    // Apply vertex color tinting (roofs should have white vertex colors = exterior)
+    const finalColor = mul(roofColor, vertexColor);
+
+    return finalColor;
+  })();
+
+  // Roughness variation for roof tiles
+  material.roughnessNode = Fn(() => {
+    const worldPos = positionWorld;
+    const tileNoise = sin(
+      add(mul(worldPos.x, float(3.1)), mul(worldPos.z, float(2.7))),
+    );
+    return add(float(0.7), mul(tileNoise, float(0.15)));
+  })();
+
+  // NOTE: We don't use outputNode here - let Three.js's standard material
+  // lighting handle the rendering. The colorNode provides the base color,
+  // and the standard MeshStandardNodeMaterial will apply proper PBR lighting.
+
+  // Material settings
+  material.vertexColors = false;
+  material.roughness = 0.75;
+  material.metalness = 0.05;
+  material.transparent = false;
+  material.opacity = 1.0;
+  material.alphaTest = 0.5;
+  material.side = THREE.FrontSide;
+  material.depthWrite = true;
+
+  // Attach uniforms for external updates
+  const roofMaterial = material as RoofOcclusionMaterial;
+  roofMaterial.occlusionUniforms = {
+    playerPos: uPlayerPos,
+    cameraPos: uCameraPos,
+    sunDirection: uSunDirection,
+    sunColor: uSunColor,
+    sunIntensity: uSunIntensity,
+    ambientColor: uAmbientColor,
+    ambientIntensity: uAmbientIntensity,
+    hiddenBuildingCenters: uHiddenBuildingCenters,
+    hiddenBuildingRadii: uHiddenBuildingRadii,
+    hiddenBuildingCount: uHiddenBuildingCount,
+  };
+
+  return roofMaterial;
 }
 
 /**
@@ -1952,6 +2358,9 @@ export class BuildingRenderingSystem extends SystemBase {
   /** Shared uber-material for all batched buildings (with occlusion shader) */
   private batchedMaterial: BuildingOcclusionMaterial;
 
+  /** Shared roof material with per-building visibility (RuneScape-style roof hiding) */
+  private roofMaterial: RoofOcclusionMaterial;
+
   /** Temporary matrix for impostor transforms */
   private _tempMatrix = new THREE.Matrix4();
   private _tempQuat = new THREE.Quaternion();
@@ -2013,6 +2422,9 @@ export class BuildingRenderingSystem extends SystemBase {
 
     // Create shared material for batched buildings (with occlusion shader)
     this.batchedMaterial = createBuildingOcclusionMaterial();
+
+    // Create shared roof material with per-building visibility (RuneScape-style)
+    this.roofMaterial = createBuildingRoofMaterial();
   }
 
   async init(): Promise<void> {
@@ -2111,7 +2523,8 @@ export class BuildingRenderingSystem extends SystemBase {
 
   /**
    * Update occlusion shader uniforms with player and camera positions.
-   * This enables the dithered see-through effect when character is behind walls.
+   * This enables the dithered see-through effect when character is behind walls,
+   * and per-building roof hiding when player/camera is near a building.
    */
   private updateOcclusionUniforms(cameraPos: THREE.Vector3): void {
     // Get actual player position (not camera position for third-person)
@@ -2127,9 +2540,13 @@ export class BuildingRenderingSystem extends SystemBase {
       playerPos = cameraPos;
     }
 
-    // Update material uniforms
+    // Update wall/floor material uniforms
     this.batchedMaterial.occlusionUniforms.playerPos.value.copy(playerPos);
     this.batchedMaterial.occlusionUniforms.cameraPos.value.copy(cameraPos);
+
+    // Update roof material uniforms (for per-building roof hiding)
+    this.roofMaterial.occlusionUniforms.playerPos.value.copy(playerPos);
+    this.roofMaterial.occlusionUniforms.cameraPos.value.copy(cameraPos);
 
     // Sync lighting from Environment system
     this.syncBuildingLighting();
@@ -2137,7 +2554,7 @@ export class BuildingRenderingSystem extends SystemBase {
 
   /**
    * Sync building material lighting with the Environment system's sun light.
-   * Updates sun direction, color, and intensity uniforms.
+   * Updates sun direction, color, and intensity uniforms for both wall and roof materials.
    */
   private syncBuildingLighting(): void {
     // Get environment system
@@ -2150,44 +2567,61 @@ export class BuildingRenderingSystem extends SystemBase {
 
     if (!env) return;
 
-    const uniforms = this.batchedMaterial.occlusionUniforms;
+    // Update wall/floor material
+    const wallUniforms = this.batchedMaterial.occlusionUniforms;
+    // Update roof material
+    const roofUniforms = this.roofMaterial.occlusionUniforms;
 
     // Update sun direction (negate because lightDirection points FROM light TO target)
     if (env.lightDirection) {
-      uniforms.sunDirection.value.copy(env.lightDirection).negate();
+      wallUniforms.sunDirection.value.copy(env.lightDirection).negate();
+      roofUniforms.sunDirection.value.copy(env.lightDirection).negate();
     }
 
     // Update sun color and intensity
     if (env.sunLight) {
-      uniforms.sunColor.value.copy(env.sunLight.color);
-      uniforms.sunIntensity.value = env.sunLight.intensity;
+      wallUniforms.sunColor.value.copy(env.sunLight.color);
+      wallUniforms.sunIntensity.value = env.sunLight.intensity;
+      roofUniforms.sunColor.value.copy(env.sunLight.color);
+      roofUniforms.sunIntensity.value = env.sunLight.intensity;
     }
 
     // Update ambient from hemisphere light or ambient light
     if (env.hemisphereLight) {
-      uniforms.ambientColor.value.copy(env.hemisphereLight.color);
-      uniforms.ambientIntensity.value = env.hemisphereLight.intensity;
+      wallUniforms.ambientColor.value.copy(env.hemisphereLight.color);
+      wallUniforms.ambientIntensity.value = env.hemisphereLight.intensity;
+      roofUniforms.ambientColor.value.copy(env.hemisphereLight.color);
+      roofUniforms.ambientIntensity.value = env.hemisphereLight.intensity;
     } else if (env.ambientLight) {
-      uniforms.ambientColor.value.copy(env.ambientLight.color);
-      uniforms.ambientIntensity.value = env.ambientLight.intensity;
+      wallUniforms.ambientColor.value.copy(env.ambientLight.color);
+      wallUniforms.ambientIntensity.value = env.ambientLight.intensity;
+      roofUniforms.ambientColor.value.copy(env.ambientLight.color);
+      roofUniforms.ambientIntensity.value = env.ambientLight.intensity;
     }
   }
 
   /**
-   * Update roof visibility based on player position inside buildings
-   * OR camera proximity to buildings.
+   * Update roof visibility state.
    *
-   * Roofs are hidden when:
-   * 1. Player character is inside a building (standing on building floor tiles)
-   * 2. Camera is close to a building (within proximity distance)
+   * **RuneScape-Style Per-Building Roof Hiding:**
+   * Individual building roofs are now hidden via the roof material's shader,
+   * which reads buildingCenter and buildingRadius vertex attributes to determine
+   * if the player or camera is close to each specific building. This enables
+   * true per-building roof hiding without affecting other buildings.
    *
-   * This provides good visibility when entering buildings or when
-   * the camera is positioned near building geometry.
+   * The shader automatically:
+   * - Hides a building's roof when player is within the building's footprint + margin
+   * - Hides a building's roof when camera is within the building's footprint + margin
+   * - Uses dithered dissolve effect for smooth transitions (RS3 style)
    *
-   * Called from update() when auto-hide is enabled.
+   * This method now only handles:
+   * - The "always hidden" override (for debugging/special modes)
+   * - Ensuring roof meshes are visible so the shader can do its work
+   *
+   * Called from update().
    */
-  private updateRoofVisibility(cameraPos: THREE.Vector3): void {
-    // If roofs are always hidden, keep them hidden
+  private updateRoofVisibility(_cameraPos: THREE.Vector3): void {
+    // If roofs are always hidden (debug/override mode), hide via mesh visibility
     if (this._roofsAlwaysHidden) {
       for (const [, town] of this.townData) {
         if (town.batchedMesh?.roofMesh) {
@@ -2197,47 +2631,18 @@ export class BuildingRenderingSystem extends SystemBase {
       return;
     }
 
-    if (!this._autoHideRoofsEnabled) return;
-
-    // Get the local player's actual position
-    const player = this.world.getPlayer?.();
-    const playerX = player?.position?.x ?? cameraPos.x;
-    const playerZ = player?.position?.z ?? cameraPos.z;
-
-    // Distance threshold for hiding roofs when camera/player is near (in world units)
-    const proximityThreshold = 15; // Hide roof when within 15 meters of building center
-    const proximityThresholdSq = proximityThreshold * proximityThreshold;
-
-    // Update roof visibility for each town
-    for (const [, town] of this.townData) {
-      if (!town.batchedMesh?.roofMesh) continue;
-
-      // Check if camera or player is close to any building in this town
-      let shouldHideRoof = false;
-
-      for (const building of town.buildings) {
-        // Calculate distance from camera to building position
-        const dx = cameraPos.x - building.position.x;
-        const dz = cameraPos.z - building.position.z;
-        const cameraDist = dx * dx + dz * dz;
-
-        // Calculate distance from player to building position
-        const pdx = playerX - building.position.x;
-        const pdz = playerZ - building.position.z;
-        const playerDist = pdx * pdx + pdz * pdz;
-
-        // Hide roof if camera OR player is close to this building
-        if (
-          cameraDist < proximityThresholdSq ||
-          playerDist < proximityThresholdSq
-        ) {
-          shouldHideRoof = true;
-          break;
+    // Per-building roof hiding is handled by the shader automatically.
+    // The shader reads player/camera position from uniforms (updated in updateOcclusionUniforms)
+    // and building center/radius from vertex attributes (baked during geometry extraction).
+    //
+    // Just ensure roof meshes are visible so the shader can render them
+    // (with per-building discard for buildings the player/camera is near).
+    if (this._autoHideRoofsEnabled) {
+      for (const [, town] of this.townData) {
+        if (town.batchedMesh?.roofMesh) {
+          town.batchedMesh.roofMesh.visible = true;
         }
       }
-
-      // Update roof visibility
-      town.batchedMesh.roofMesh.visible = !shouldHideRoof;
     }
   }
 
@@ -2599,7 +3004,7 @@ export class BuildingRenderingSystem extends SystemBase {
           // Extract geometries for static batching
           if (BUILDING_PERF_CONFIG.enableStaticBatching) {
             const { floorGeo, wallGeo, roofGeo, glassGeo } =
-              this.extractBuildingGeometries(mesh);
+              this.extractBuildingGeometries(mesh, buildingPos, dimensions);
 
             // Floor geometry (walkable surfaces)
             if (floorGeo) {
@@ -2965,8 +3370,20 @@ export class BuildingRenderingSystem extends SystemBase {
    * - "roof" → roof pieces (can be hidden when inside building)
    * - "windowFrames", "doorFrames", "shutters" → merged with walls
    * - "windowGlass" → separate transparent geometry
+   *
+   * For roof geometry, adds vertex attributes for per-building visibility:
+   * - buildingCenter (vec2): XZ center of the building
+   * - buildingRadius (float): Radius of the building footprint for proximity check
+   *
+   * @param mesh The building mesh to extract geometries from
+   * @param buildingPosition World position of the building (used for roof hiding)
+   * @param buildingDimensions Dimensions of the building bounding box
    */
-  private extractBuildingGeometries(mesh: THREE.Mesh | THREE.Group): {
+  private extractBuildingGeometries(
+    mesh: THREE.Mesh | THREE.Group,
+    buildingPosition: THREE.Vector3,
+    buildingDimensions: THREE.Vector3,
+  ): {
     floorGeo: THREE.BufferGeometry | null;
     wallGeo: THREE.BufferGeometry | null;
     roofGeo: THREE.BufferGeometry | null;
@@ -2978,6 +3395,14 @@ export class BuildingRenderingSystem extends SystemBase {
     const roofGeometries: THREE.BufferGeometry[] = [];
     const glassGeometries: THREE.BufferGeometry[] = [];
     let triangleCount = 0;
+
+    // Calculate building center and radius for roof hiding shader
+    // Use XZ footprint for the center, radius is half the diagonal of the XZ footprint
+    const buildingCenterX = buildingPosition.x;
+    const buildingCenterZ = buildingPosition.z;
+    const buildingRadius = Math.sqrt(
+      (buildingDimensions.x * 0.5) ** 2 + (buildingDimensions.z * 0.5) ** 2,
+    );
 
     mesh.traverse((child) => {
       if (child instanceof THREE.Mesh && child.geometry) {
@@ -3015,6 +3440,34 @@ export class BuildingRenderingSystem extends SystemBase {
       }
     });
 
+    // Add building center and radius attributes to roof geometries
+    // This enables per-building roof hiding in the shader
+    for (const roofGeo of roofGeometries) {
+      const vertexCount = roofGeo.getAttribute("position")?.count ?? 0;
+      if (vertexCount > 0) {
+        // Create buildingCenter attribute (vec2: x, z)
+        const centerArray = new Float32Array(vertexCount * 2);
+        for (let i = 0; i < vertexCount; i++) {
+          centerArray[i * 2] = buildingCenterX;
+          centerArray[i * 2 + 1] = buildingCenterZ;
+        }
+        roofGeo.setAttribute(
+          "buildingCenter",
+          new THREE.BufferAttribute(centerArray, 2),
+        );
+
+        // Create buildingRadius attribute (float)
+        const radiusArray = new Float32Array(vertexCount);
+        for (let i = 0; i < vertexCount; i++) {
+          radiusArray[i] = buildingRadius;
+        }
+        roofGeo.setAttribute(
+          "buildingRadius",
+          new THREE.BufferAttribute(radiusArray, 1),
+        );
+      }
+    }
+
     // Merge floor geometries (walkable)
     // Convert to non-indexed for consistent merging
     let floorGeo: THREE.BufferGeometry | null = null;
@@ -3046,7 +3499,7 @@ export class BuildingRenderingSystem extends SystemBase {
       }
     }
 
-    // Merge roof geometries
+    // Merge roof geometries (with building center/radius attributes preserved)
     let roofGeo: THREE.BufferGeometry | null = null;
     if (roofGeometries.length > 0) {
       if (roofGeometries.length === 1) {
@@ -3205,7 +3658,10 @@ export class BuildingRenderingSystem extends SystemBase {
       );
     }
 
-    // === ROOF MESH (can be hidden when inside building) ===
+    // === ROOF MESH (RuneScape-style per-building roof hiding) ===
+    // Uses roofMaterial which has per-building visibility based on vertex attributes
+    // buildingCenter and buildingRadius attributes enable the shader to hide roofs
+    // when player/camera is close to that specific building
     let roofMesh: THREE.Mesh;
     if (roofGeometries.length > 0) {
       // Convert to non-indexed for consistent merging
@@ -3220,8 +3676,10 @@ export class BuildingRenderingSystem extends SystemBase {
         // Compute tangents from UVs for proper normal mapping
         mergedRoofGeo = computeTangentsForNonIndexed(mergedRoofGeo);
 
-        // Roofs use the occlusion material too
-        roofMesh = new THREE.Mesh(mergedRoofGeo, this.batchedMaterial);
+        // Roofs use the special roof material with per-building visibility
+        // The shader reads buildingCenter/buildingRadius vertex attributes to
+        // determine if player/camera is close to this building and should hide its roof
+        roofMesh = new THREE.Mesh(mergedRoofGeo, this.roofMaterial);
         roofMesh.name = "BatchedBuildingRoof";
         roofMesh.castShadow = true;
         roofMesh.receiveShadow = true;
@@ -3235,14 +3693,11 @@ export class BuildingRenderingSystem extends SystemBase {
       } else {
         roofMesh = new THREE.Mesh(
           new THREE.BufferGeometry(),
-          this.batchedMaterial,
+          this.roofMaterial,
         );
       }
     } else {
-      roofMesh = new THREE.Mesh(
-        new THREE.BufferGeometry(),
-        this.batchedMaterial,
-      );
+      roofMesh = new THREE.Mesh(new THREE.BufferGeometry(), this.roofMaterial);
     }
 
     // === GLASS MESH (window panes - transparent) ===
@@ -4462,8 +4917,9 @@ export class BuildingRenderingSystem extends SystemBase {
       }
     }
 
-    // Dispose shared batched material
+    // Dispose shared materials
     this.batchedMaterial.dispose();
+    this.roofMaterial.dispose();
 
     // Dispose dynamic impostor atlas
     if (this.dynamicAtlas) {

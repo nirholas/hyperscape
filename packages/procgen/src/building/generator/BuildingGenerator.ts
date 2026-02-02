@@ -71,8 +71,6 @@ import {
   COUNTER_HEIGHT,
   COUNTER_DEPTH,
   COUNTER_LENGTH,
-  NPC_HEIGHT,
-  NPC_WIDTH,
   FORGE_SIZE,
   ANVIL_SIZE,
   palette,
@@ -3191,11 +3189,23 @@ export class BuildingGenerator {
               ? offset
               : (-halfCell + halfThick) * (side === "north" ? 1 : -1);
 
-            const geometry = new THREE.BoxGeometry(
-              isVertical ? WALL_THICKNESS : length,
-              FLOOR_THICKNESS * 2,
-              isVertical ? length : WALL_THICKNESS,
-            );
+            // Use PlaneGeometry instead of BoxGeometry to avoid side faces
+            // that would be visible from outside and get darkened by interior lighting
+            const skirtHeight = FLOOR_THICKNESS * 2;
+            const geometry = new THREE.PlaneGeometry(length, skirtHeight);
+
+            // Rotate plane to face outward based on side
+            // PlaneGeometry faces +Z by default (normal points toward +Z)
+            // For Y rotation: +Z rotates toward -X (counterclockwise from above)
+            if (side === "west") {
+              geometry.rotateY(Math.PI / 2); // +Z → -X, face outward (west)
+            } else if (side === "east") {
+              geometry.rotateY(-Math.PI / 2); // +Z → +X, face outward (east)
+            } else if (side === "north") {
+              geometry.rotateY(Math.PI); // +Z → -Z, face outward (north)
+            }
+            // south: no rotation needed, +Z faces outward (south)
+
             geometry.translate(x + ox, y - FLOOR_THICKNESS, z + oz);
             // Skirts use trim color with wood UV scale
             applyGeometryAttributes(geometry, palette.trim, "generic", {
@@ -4594,15 +4604,17 @@ export class BuildingGenerator {
    */
   private reserveForgePlacement(
     layout: BuildingLayout,
-    rng: RNG,
+    _rng: RNG,
   ): { col: number; row: number } | null {
     const groundFloor = layout.floorPlans[0];
     if (!groundFloor || groundFloor.rooms.length === 0) return null;
 
+    // Pick the first room's first cell for forge placement
+    // (deterministic, could use rng for variety if needed)
     const room = groundFloor.rooms[0];
-    const cell = rng.pick(room.cells);
-    if (!cell) return null;
+    if (room.cells.length === 0) return null;
 
+    const cell = room.cells[0];
     return { col: cell.col, row: cell.row };
   }
 
@@ -4611,7 +4623,7 @@ export class BuildingGenerator {
     layout: BuildingLayout,
     _recipe: BuildingRecipe,
     typeKey: string,
-    rng: RNG,
+    _rng: RNG,
     stats: BuildingStats,
     propPlacements: PropPlacements,
   ): void {
@@ -4659,7 +4671,8 @@ export class BuildingGenerator {
   }
 
   /**
-   * Add a counter and NPC, supporting 1 or 2 tile placements.
+   * Add a counter (bar/service desk), supporting 1 or 2 tile placements.
+   * NPC placeholder cubes have been removed - actual NPCs are spawned by TownSystem.
    */
   private addCounterWithNpc(
     geometries: THREE.BufferGeometry[],
@@ -4669,7 +4682,7 @@ export class BuildingGenerator {
     side: string,
     secondCell: { col: number; row: number } | undefined,
     counterColor: THREE.Color,
-    npcColor: THREE.Color,
+    _npcColor: THREE.Color, // No longer used - NPCs spawned separately
     stats: BuildingStats,
   ): void {
     const { x: x1, z: z1 } = getCellCenter(
@@ -4703,17 +4716,7 @@ export class BuildingGenerator {
         stats,
         2,
       );
-
-      // NPC stands behind the center of the counter
-      this.addNpcCube(
-        geometries,
-        centerX,
-        FOUNDATION_HEIGHT,
-        centerZ,
-        side,
-        npcColor,
-        stats,
-      );
+      // NPC placeholder removed - actual NPCs spawned by TownSystem using propPlacements
     } else {
       // Single-tile counter
       this.addCounter(
@@ -4726,15 +4729,7 @@ export class BuildingGenerator {
         stats,
         1,
       );
-      this.addNpcCube(
-        geometries,
-        x1,
-        FOUNDATION_HEIGHT,
-        z1,
-        side,
-        npcColor,
-        stats,
-      );
+      // NPC placeholder removed - actual NPCs spawned by TownSystem using propPlacements
     }
   }
 
@@ -4771,30 +4766,8 @@ export class BuildingGenerator {
     stats.props += 1;
   }
 
-  private addNpcCube(
-    geometries: THREE.BufferGeometry[],
-    x: number,
-    y: number,
-    z: number,
-    side: string,
-    color: THREE.Color,
-    stats: BuildingStats,
-  ): void {
-    const vec = getSideVector(side);
-    const offsetX = vec.x * (CELL_SIZE / 4 + COUNTER_DEPTH + NPC_WIDTH / 2);
-    const offsetZ = vec.z * (CELL_SIZE / 4 + COUNTER_DEPTH + NPC_WIDTH / 2);
-
-    const geometry = new THREE.BoxGeometry(NPC_WIDTH, NPC_HEIGHT, NPC_WIDTH);
-    geometry.translate(x + offsetX, y + NPC_HEIGHT / 2, z + offsetZ);
-    // NPC placeholder cubes use flat color (no texture variation)
-    applyGeometryAttributes(geometry, color, "generic", {
-      uvScale: 1.0,
-      noiseAmp: 0,
-      minShade: 1,
-    });
-    geometries.push(geometry);
-    stats.props += 1;
-  }
+  // Note: addNpcCube removed - NPC placeholders are no longer generated.
+  // Actual NPCs are spawned by TownSystem using propPlacements data.
 
   private addForgeProps(
     geometries: THREE.BufferGeometry[],

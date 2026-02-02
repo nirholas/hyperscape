@@ -2255,25 +2255,30 @@ export class BuildingCollisionService {
     );
     if (boundingBoxBuildingId) {
       // Tile is INSIDE the shrunk building area but NOT a walkable floor tile
-      // HOWEVER: We must ALLOW door exterior approach tiles!
-      // Use helper methods for cleaner code
+      // HOWEVER: We must ALLOW entrance exterior approach tiles!
+      // Use getEntranceWallSegments to include BOTH doors AND arches
+      // This matches findClosestDoorTile which also uses entrance segments
       const groundFloor = this.getGroundFloor(boundingBoxBuildingId);
       if (groundFloor) {
-        // Check if this tile is adjacent to any door (exterior approach)
-        const doorWalls =
-          BuildingCollisionService.getDoorWallSegments(groundFloor);
-        for (const wall of doorWalls) {
-          const doorTiles = BuildingCollisionService.getDoorExteriorAndInterior(
-            wall.tileX,
-            wall.tileZ,
-            wall.side,
-          );
+        // Check if this tile is adjacent to any entrance (doors OR arches)
+        const entranceWalls =
+          BuildingCollisionService.getEntranceWallSegments(groundFloor);
+        for (const wall of entranceWalls) {
+          const entranceTiles =
+            BuildingCollisionService.getDoorExteriorAndInterior(
+              wall.tileX,
+              wall.tileZ,
+              wall.side,
+            );
 
-          if (doorTiles.exteriorX === tileX && doorTiles.exteriorZ === tileZ) {
-            // This IS a door exterior tile - ALLOW it!
+          if (
+            entranceTiles.exteriorX === tileX &&
+            entranceTiles.exteriorZ === tileZ
+          ) {
+            // This IS an entrance exterior tile - ALLOW it!
             if (this._debugLogging) {
               console.log(
-                `[isTileWalkableInBuilding] ALLOWED: tile (${tileX},${tileZ}) is door exterior for ${boundingBoxBuildingId}`,
+                `[isTileWalkableInBuilding] ALLOWED: tile (${tileX},${tileZ}) is entrance exterior for ${boundingBoxBuildingId}`,
               );
             }
             return true;
@@ -2838,16 +2843,21 @@ export class BuildingCollisionService {
   }
 
   /**
-   * Find the closest door tile to a given position.
-   * Used for door pathfinding when player clicks inside a building from outside.
+   * Find the closest entrance tile (door OR arch) to a given position.
+   * Used for entrance pathfinding when player clicks inside a building from outside.
    *
-   * Returns BOTH the exterior approach tile AND the interior door tile.
-   * This allows pathfinding to include stepping through the door in one stage.
+   * IMPORTANT: This method finds BOTH doors AND arches as valid entry points.
+   * Buildings may have arches as their primary entrance (e.g., open-air structures,
+   * covered markets), and pathfinding should prefer the closest entrance regardless
+   * of whether it's a door or an arch.
    *
-   * @param buildingId - Building ID to find door for
+   * Returns BOTH the exterior approach tile AND the interior entrance tile.
+   * This allows pathfinding to include stepping through the entrance in one stage.
+   *
+   * @param buildingId - Building ID to find entrance for
    * @param fromTileX - Player's current tile X
    * @param fromTileZ - Player's current tile Z
-   * @returns Closest door with entry (exterior) and interior tiles, or null if no doors found
+   * @returns Closest entrance with entry (exterior) and interior tiles, or null if no entrances found
    */
   findClosestDoorTile(
     buildingId: string,
@@ -2867,41 +2877,44 @@ export class BuildingCollisionService {
     const groundFloor = this.getGroundFloor(buildingId);
     if (!groundFloor) return null;
 
-    // Use helper method to get door wall segments and map to door data
-    const doorWalls = BuildingCollisionService.getDoorWallSegments(groundFloor);
-    if (doorWalls.length === 0) return null;
+    // Use getEntranceWallSegments to get BOTH doors AND arches as valid entry points
+    // This matches the behavior in asset-forge's NavigationVisualizer which correctly
+    // treats arches as valid entrances for pathfinding purposes
+    const entranceWalls =
+      BuildingCollisionService.getEntranceWallSegments(groundFloor);
+    if (entranceWalls.length === 0) return null;
 
-    const doorData = doorWalls.map((wall) => {
-      const doorCalc = BuildingCollisionService.getDoorExteriorAndInterior(
+    const entranceData = entranceWalls.map((wall) => {
+      const entranceCalc = BuildingCollisionService.getDoorExteriorAndInterior(
         wall.tileX,
         wall.tileZ,
         wall.side,
       );
       return {
-        entryX: doorCalc.exteriorX,
-        entryZ: doorCalc.exteriorZ,
-        interiorX: doorCalc.interiorX,
-        interiorZ: doorCalc.interiorZ,
+        entryX: entranceCalc.exteriorX,
+        entryZ: entranceCalc.exteriorZ,
+        interiorX: entranceCalc.interiorX,
+        interiorZ: entranceCalc.interiorZ,
         direction: wall.side,
       };
     });
 
     // Find closest entry tile
-    let closest = doorData[0];
+    let closest = entranceData[0];
     let closestDistSq =
       (closest.entryX - fromTileX) ** 2 + (closest.entryZ - fromTileZ) ** 2;
 
-    for (let i = 1; i < doorData.length; i++) {
-      const door = doorData[i];
+    for (let i = 1; i < entranceData.length; i++) {
+      const entrance = entranceData[i];
       const distSq =
-        (door.entryX - fromTileX) ** 2 + (door.entryZ - fromTileZ) ** 2;
+        (entrance.entryX - fromTileX) ** 2 + (entrance.entryZ - fromTileZ) ** 2;
       if (distSq < closestDistSq) {
-        closest = door;
+        closest = entrance;
         closestDistSq = distSq;
       }
     }
 
-    // Validate returned door coordinates are finite
+    // Validate returned entrance coordinates are finite
     if (
       !Number.isFinite(closest.entryX) ||
       !Number.isFinite(closest.entryZ) ||
@@ -2909,7 +2922,7 @@ export class BuildingCollisionService {
       !Number.isFinite(closest.interiorZ)
     ) {
       throw new Error(
-        `[BuildingCollision] findClosestDoorTile: door coordinates are non-finite for ${buildingId}: ` +
+        `[BuildingCollision] findClosestDoorTile: entrance coordinates are non-finite for ${buildingId}: ` +
           `entry=(${closest.entryX},${closest.entryZ}), interior=(${closest.interiorX},${closest.interiorZ})`,
       );
     }
@@ -3215,8 +3228,60 @@ export class BuildingCollisionService {
         if (targetDoorOpenings.length === 0) {
           buildingAllowsMovement = false;
           blockReason = `Ground player: cannot enter building tile (${toTile.x},${toTile.z}) - not a door`;
+        } else if (fromTile) {
+          // Door tile - but we MUST enter from the correct direction!
+          // Calculate entry direction (direction we're coming FROM)
+          const dx = toTile.x - fromTile.x;
+          const dz = toTile.z - fromTile.z;
+
+          // For diagonal movement, block unless walls allow it (handled by isWallBlocked)
+          // For cardinal movement, check if entry direction matches a door opening
+          if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1) {
+            let entryDirection: WallDirection | null = null;
+
+            // Cardinal movement: entry direction is opposite of movement
+            if (dx === 1 && dz === 0)
+              entryDirection = "west"; // Moving east, entering from west
+            else if (dx === -1 && dz === 0)
+              entryDirection = "east"; // Moving west, entering from east
+            else if (dz === 1 && dx === 0)
+              entryDirection = "north"; // Moving south, entering from north
+            else if (dz === -1 && dx === 0)
+              entryDirection = "south"; // Moving north, entering from south
+            // Diagonal: need to check both edges
+            else if (dx !== 0 && dz !== 0) {
+              // Diagonal entry to door tile
+              // Entry is valid ONLY if one of the two edges has a door
+              const horizEntry: WallDirection = dx > 0 ? "west" : "east";
+              const vertEntry: WallDirection = dz > 0 ? "north" : "south";
+
+              const horizDoor = targetDoorOpenings.includes(horizEntry);
+              const vertDoor = targetDoorOpenings.includes(vertEntry);
+
+              if (!horizDoor && !vertDoor) {
+                // Neither edge has a door - block diagonal entry
+                buildingAllowsMovement = false;
+                blockReason =
+                  `Ground player: diagonal entry to door (${toTile.x},${toTile.z}) blocked - ` +
+                  `doors=[${targetDoorOpenings.join(",")}] but entering from ${horizEntry}/${vertEntry}`;
+              }
+              // At least one edge is a door - allow (wall blocking will handle clipping)
+              entryDirection = null; // Skip cardinal check
+            }
+
+            // Cardinal movement must match door direction
+            if (
+              entryDirection &&
+              !targetDoorOpenings.includes(entryDirection)
+            ) {
+              buildingAllowsMovement = false;
+              blockReason =
+                `Ground player: cannot enter door (${toTile.x},${toTile.z}) from ${entryDirection} - ` +
+                `doors face [${targetDoorOpenings.join(",")}]`;
+            }
+          }
         }
-        // Door tile - allow as transition point
+        // Door tile from correct direction - allow as transition point
       }
     } else {
       // PLAYER IS IN BUILDING LAYER

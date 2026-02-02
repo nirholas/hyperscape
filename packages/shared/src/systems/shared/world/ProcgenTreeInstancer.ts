@@ -632,8 +632,8 @@ class GlobalLeafInstancer {
     material.emissiveNode = emissiveNode;
 
     material.side = THREE.DoubleSide;
-    material.transparent = false; // Use alpha test, not blending
-    material.alphaTest = 0.5; // Cutout threshold
+    material.transparent = true; // Required for opacity node to create leaf shape
+    material.alphaTest = 0.5; // Cutout threshold for crisp edges
     material.depthWrite = true;
     material.roughness = 0.75; // Matte leaf surface
     material.metalness = 0.0;

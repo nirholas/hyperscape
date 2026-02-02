@@ -89,6 +89,14 @@ export default defineConfig(({ mode }) => {
           __dirname,
           "../procgen/dist/plant/index.js",
         ),
+        "@hyperscape/procgen/items/dock": path.resolve(
+          __dirname,
+          "../procgen/dist/items/dock/index.js",
+        ),
+        "@hyperscape/procgen/items": path.resolve(
+          __dirname,
+          "../procgen/dist/items/index.js",
+        ),
         "@hyperscape/procgen": path.resolve(
           __dirname,
           "../procgen/dist/index.js",

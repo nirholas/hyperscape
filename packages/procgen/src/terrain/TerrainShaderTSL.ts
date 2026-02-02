@@ -469,13 +469,22 @@ export function createTerrainMaterial(
   );
 
   // === ROAD OVERLAY (optional) ===
+  // Roads are compacted dirt paths - use same dirt colors as terrain for consistency
   let colorWithRoads = variedColor;
   if (includeRoadOverlay) {
     const roadInfluence = attribute("roadInfluence", "float");
-    const roadColor = vec3(0.45, 0.35, 0.25);
-    const roadEdgeColor = vec3(0.5, 0.4, 0.3);
-    const roadTint = mix(roadEdgeColor, roadColor, roadInfluence);
-    colorWithRoads = mix(variedColor, roadTint, roadInfluence);
+
+    // Use same dirt colors as terrain dirt patches (dirtBrown, dirtDark defined above)
+    // Add noise variation for natural look - compacted dirt has less variation
+    const roadNoiseVar = mul(noiseValue2, float(0.5)); // Less variation than regular dirt
+    const roadDirtColor = mix(dirtBrown, dirtDark, roadNoiseVar);
+
+    // Road center is darker (compacted, worn surface)
+    const roadCenterDarken = mul(roadInfluence, float(0.15));
+    const compactedRoadColor = sub(roadDirtColor, vec3(roadCenterDarken));
+
+    // Blend road color with terrain based on influence
+    colorWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
   }
 
   // === DISTANCE FOG ===

@@ -69,6 +69,15 @@ export function computeFlatNormals(
   const edge2 = new THREE.Vector3();
   const faceNormal = new THREE.Vector3();
 
+  // Compute bounding box center to verify normal direction
+  geometry.computeBoundingBox();
+  const boundingBox = geometry.boundingBox;
+  const center = boundingBox
+    ? new THREE.Vector3()
+        .addVectors(boundingBox.min, boundingBox.max)
+        .multiplyScalar(0.5)
+    : new THREE.Vector3(0, 0, 0);
+
   // Process each triangle
   const triangleCount = vertexCount / 3;
   for (let t = 0; t < triangleCount; t++) {
@@ -85,13 +94,29 @@ export function computeFlatNormals(
     edge1.subVectors(p1, p0);
     edge2.subVectors(p2, p0);
 
-    // Compute face normal from cross product (CCW winding = outward normal)
+    // Compute face normal from cross product
+    // Three.js uses CCW winding for outward-facing normals
+    // cross(edge1, edge2) = cross(p1-p0, p2-p0) gives outward normal for CCW winding
     faceNormal.crossVectors(edge1, edge2);
 
     // Handle degenerate triangles (zero-area)
     const lengthSq = faceNormal.lengthSq();
     if (lengthSq > 1e-12) {
-      faceNormal.divideScalar(Math.sqrt(lengthSq));
+      faceNormal.normalize();
+
+      // CRITICAL: Verify normal points outward by checking if it points away from center
+      // For a triangle on the surface of a solid, the normal should point away from the center
+      const triangleCenter = new THREE.Vector3()
+        .addVectors(p0, p1)
+        .add(p2)
+        .divideScalar(3);
+      const toCenter = new THREE.Vector3().subVectors(center, triangleCenter);
+
+      // If normal points toward center (negative dot product), flip it
+      // This handles cases where winding order might be reversed
+      if (faceNormal.dot(toCenter) > 0) {
+        faceNormal.negate();
+      }
     } else {
       // Degenerate triangle - use default up normal
       faceNormal.set(0, 1, 0);
@@ -321,8 +346,24 @@ export interface GeometryAttributeConfig {
 }
 
 /**
- * Apply UV2 attribute for material ID encoding.
- * The material ID is stored in the U component for shader lookup.
+ * Surface type encoding for UV2.y
+ * These values are read by the shader to determine which pattern/texture to use.
+ *
+ * IMPORTANT: The shader can NOT reliably detect roofs vs floors by normal direction
+ * because flat roofs have normalY = 1.0 (same as floors). We must encode the
+ * surface type explicitly.
+ */
+export const SURFACE_TYPE_IDS: Record<string, number> = {
+  WALL: 0.0, // Walls, foundations, stairs - use wall material pattern
+  FLOOR: 0.33, // Interior floors - use wood plank pattern
+  ROOF: 0.67, // Roofs (flat or sloped) - use shingle pattern, exterior lighting
+  CEILING: 1.0, // Interior ceilings - use floor pattern but facing down
+};
+
+/**
+ * Apply UV2 attribute for material ID and surface type encoding.
+ * - UV2.x = material ID (0.0=brick, 0.2=stone, 0.4=timber, 0.6=stucco, 0.8=wood)
+ * - UV2.y = surface type (0.0=wall, 0.33=floor, 0.67=roof, 1.0=ceiling)
  *
  * CRITICAL: This MUST be called on ALL building geometries to ensure consistent
  * attributes when merging. mergeGeometries requires all input geometries to have
@@ -330,10 +371,12 @@ export interface GeometryAttributeConfig {
  *
  * @param geometry - BufferGeometry to modify
  * @param materialId - Material ID value (0.0-1.0), defaults to 0.0 (brick)
+ * @param surfaceType - Surface type ID from SURFACE_TYPE_IDS, defaults to WALL
  */
 function applyMaterialIdUV2(
   geometry: THREE.BufferGeometry,
   materialId: number = 0.0,
+  surfaceType: number = SURFACE_TYPE_IDS.WALL,
 ): void {
   const positionAttr = geometry.getAttribute("position");
   if (!positionAttr) return;
@@ -341,10 +384,10 @@ function applyMaterialIdUV2(
   const vertexCount = positionAttr.count;
   const uv2 = new Float32Array(vertexCount * 2);
 
-  // Store materialId in U, 0 in V
+  // Store materialId in U, surfaceType in V
   for (let i = 0; i < vertexCount; i++) {
     uv2[i * 2] = materialId;
-    uv2[i * 2 + 1] = 0.0;
+    uv2[i * 2 + 1] = surfaceType;
   }
 
   geometry.setAttribute("uv2", new THREE.BufferAttribute(uv2, 2));
@@ -480,10 +523,18 @@ export function applyGeometryAttributes(
     }
   }
 
-  // CRITICAL: ALWAYS apply UV2 for material ID encoding
+  // CRITICAL: ALWAYS apply UV2 for material ID and surface type encoding
   // mergeGeometries requires all geometries to have consistent attributes
-  // Default to 0.0 (brick) for non-wall surfaces like floors, roofs, foundations
-  applyMaterialIdUV2(geometry, materialId ?? 0.0);
+  // Determine surface type from the surfaceType parameter
+  let surfaceTypeId: number = SURFACE_TYPE_IDS.WALL;
+  if (surfaceType === "floor") {
+    surfaceTypeId = SURFACE_TYPE_IDS.FLOOR;
+  } else if (surfaceType === "ceiling") {
+    surfaceTypeId = SURFACE_TYPE_IDS.CEILING;
+  } else if (surfaceType === "roof") {
+    surfaceTypeId = SURFACE_TYPE_IDS.ROOF;
+  }
+  applyMaterialIdUV2(geometry, materialId ?? 0.0, surfaceTypeId);
 }
 
 /**
@@ -566,14 +617,10 @@ export function removeInternalFaces(
   const color = nonIndexed.attributes.color;
   const uv = nonIndexed.attributes.uv;
   const uv2 = nonIndexed.attributes.uv2; // CRITICAL: Preserve UV2 for material ID
-  const originalNormal = nonIndexed.attributes.normal; // CRITICAL: Preserve original normals!
   const posArray = position.array as Float32Array;
   const colorArray = color ? (color.array as Float32Array) : null;
   const uvArray = uv ? (uv.array as Float32Array) : null;
   const uv2Array = uv2 ? (uv2.array as Float32Array) : null;
-  const originalNormalArray = originalNormal
-    ? (originalNormal.array as Float32Array)
-    : null;
   const triCount = position.count / 3;
 
   const precision = 1000; // Snap to 1mm precision
@@ -697,9 +744,7 @@ export function removeInternalFaces(
   }
 
   // Step 4: Build cleaned geometry with only external faces
-  // CRITICAL: Preserve original normals from BoxGeometry - they are correct!
   const newPos = new Float32Array(keptCount * 9);
-  const newNormal = new Float32Array(keptCount * 9); // Preserve original normals
   const newColor = colorArray ? new Float32Array(keptCount * 9) : null;
   const newUV = uvArray ? new Float32Array(keptCount * 6) : null; // 2 components per vertex, 3 vertices per tri = 6
   const newUV2 = uv2Array ? new Float32Array(keptCount * 6) : null; // CRITICAL: Preserve UV2 for material ID
@@ -714,10 +759,6 @@ export function removeInternalFaces(
       newPos[dst + i] = posArray[src + i];
       if (newColor && colorArray) {
         newColor[dst + i] = colorArray[src + i];
-      }
-      // Preserve original normals from the input geometry
-      if (originalNormalArray) {
-        newNormal[dst + i] = originalNormalArray[src + i];
       }
     }
     if (newUV && uvArray) {
@@ -749,15 +790,11 @@ export function removeInternalFaces(
     cleaned.setAttribute("uv2", new THREE.BufferAttribute(newUV2, 2));
   }
 
-  // Step 5: Set normals - prefer original normals from BoxGeometry (they are correct!)
-  // Only compute from scratch if original normals were not available
-  if (originalNormalArray) {
-    // Use preserved original normals - these are correct from BoxGeometry
-    cleaned.setAttribute("normal", new THREE.BufferAttribute(newNormal, 3));
-  } else {
-    // Fallback: compute flat normals from vertex positions
-    computeFlatNormals(cleaned);
-  }
+  // Step 5: Always compute flat normals for architectural geometry
+  // BoxGeometry uses smooth normals (averaged at vertices), but we need flat normals
+  // for hard edges and correct lighting. Flat normals ensure each face has its own
+  // independent normal pointing outward, which is critical for proper PBR lighting.
+  computeFlatNormals(cleaned);
 
   // Step 6: Smart vertex merging - only merge vertices with SAME position, color, AND normal
   // This preserves:
@@ -1759,7 +1796,9 @@ export function mergeBufferGeometries(
 
     let normalAttr = geo.attributes.normal;
     if (!normalAttr) {
-      geo.computeVertexNormals();
+      // Compute flat normals for architectural geometry (hard edges)
+      // Smooth normals would cause incorrect lighting on box geometry
+      computeFlatNormals(geo);
       normalAttr = geo.attributes.normal;
     }
     if (normalAttr) {

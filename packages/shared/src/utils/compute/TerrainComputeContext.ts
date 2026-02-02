@@ -261,6 +261,52 @@ export class TerrainComputeContext {
     return result;
   }
 
+  /**
+   * Generate a road influence texture for GPU grass masking.
+   * Uses the same road influence calculation as terrain vertices.
+   *
+   * @param roads - Array of road segments in world coordinates
+   * @param textureSize - Size of output texture (power of 2 recommended)
+   * @param worldSize - Size of world in meters
+   * @param blendWidth - Blend width beyond road edge
+   * @returns Float32Array of road influence values (textureSize x textureSize)
+   */
+  async computeRoadInfluenceTexture(
+    roads: GPURoadSegment[],
+    textureSize: number,
+    worldSize: number,
+    blendWidth: number = 3,
+  ): Promise<Float32Array> {
+    if (!this.initialized || !this.roadInfluencePipeline) {
+      throw new Error("TerrainComputeContext not initialized");
+    }
+
+    const pixelCount = textureSize * textureSize;
+    const halfWorld = worldSize / 2;
+    const metersPerPixel = worldSize / textureSize;
+
+    // Generate texture pixel coordinates as "vertices"
+    // Each pixel maps to a world coordinate
+    const vertices = new Float32Array(pixelCount * 2);
+    for (let y = 0; y < textureSize; y++) {
+      for (let x = 0; x < textureSize; x++) {
+        const idx = (y * textureSize + x) * 2;
+        // Convert texel to world coordinates (centered at 0,0)
+        vertices[idx + 0] = (x / textureSize) * worldSize - halfWorld;
+        vertices[idx + 1] = (y / textureSize) * worldSize - halfWorld;
+      }
+    }
+
+    // Use existing road influence compute with offset of (0,0)
+    // Roads are already in world coordinates
+    const result = await this.computeRoadInfluence(vertices, roads, {
+      x: 0,
+      z: 0,
+    });
+
+    return result;
+  }
+
   // ==========================================================================
   // TERRAIN VERTEX COLORS
   // ==========================================================================

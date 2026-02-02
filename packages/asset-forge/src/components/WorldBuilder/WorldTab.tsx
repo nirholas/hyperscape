@@ -621,8 +621,8 @@ const WorldTabContent: React.FC<WorldTabContentProps> = ({
         })),
     );
 
-    // Generate road network connecting all towns
-    const roads = generateRoadNetwork(towns, terrainGenerator, {
+    // Generate road network connecting all towns (inter-town roads)
+    const interTownRoads = generateRoadNetwork(towns, terrainGenerator, {
       roadWidth: config.roads.roadWidth,
       extraConnectionsRatio: config.roads.extraConnectionsRatio,
       waterThreshold: config.terrain.waterThreshold,
@@ -630,8 +630,58 @@ const WorldTabContent: React.FC<WorldTabContentProps> = ({
       smoothingIterations: config.roads.smoothingIterations,
     });
 
-    // Update town entry points with connected road IDs
-    for (const road of roads) {
+    // Also include town internal roads in the roads array for terrain road influence
+    // This ensures roads through/within towns are properly rendered on terrain
+    const townInternalRoads: GeneratedRoad[] = [];
+    for (const town of townResult.towns) {
+      const internalRoads = town.internalRoads ?? [];
+      for (let i = 0; i < internalRoads.length; i++) {
+        const road = internalRoads[i];
+        // Convert internal road segment to GeneratedRoad format
+        // Sample terrain height at start and end
+        const startY = terrainGenerator.getHeightAt(road.start.x, road.start.z);
+        const endY = terrainGenerator.getHeightAt(road.end.x, road.end.z);
+
+        townInternalRoads.push({
+          id: `${town.id}_internal_${i}`,
+          path: [
+            { x: road.start.x, y: startY + 0.1, z: road.start.z },
+            { x: road.end.x, y: endY + 0.1, z: road.end.z },
+          ],
+          width: road.isMain ? 8 : 6, // Main streets are wider
+          connectedTowns: [town.id, town.id], // Internal to same town
+          isMainRoad: road.isMain,
+        });
+      }
+
+      // Also add paths to buildings as narrow walkways
+      const paths = town.paths ?? [];
+      for (let i = 0; i < paths.length; i++) {
+        const path = paths[i];
+        const startY = terrainGenerator.getHeightAt(path.start.x, path.start.z);
+        const endY = terrainGenerator.getHeightAt(path.end.x, path.end.z);
+
+        townInternalRoads.push({
+          id: `${town.id}_path_${i}`,
+          path: [
+            { x: path.start.x, y: startY + 0.1, z: path.start.z },
+            { x: path.end.x, y: endY + 0.1, z: path.end.z },
+          ],
+          width: path.width || 3, // Narrower paths
+          connectedTowns: [town.id, town.id],
+          isMainRoad: false,
+        });
+      }
+    }
+
+    // Combine inter-town and town internal roads
+    const roads = [...interTownRoads, ...townInternalRoads];
+    console.log(
+      `[WorldTab] Generated ${interTownRoads.length} inter-town roads + ${townInternalRoads.length} town internal roads/paths = ${roads.length} total`,
+    );
+
+    // Update town entry points with connected road IDs (only inter-town roads)
+    for (const road of interTownRoads) {
       const [townId1, townId2] = road.connectedTowns;
       const town1 = towns.find((t) => t.id === townId1);
       const town2 = towns.find((t) => t.id === townId2);

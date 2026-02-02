@@ -1,7 +1,5 @@
 /**
- * ProceduralFlowers.ts - GPU Flower System (Revo Realms Parity)
- *
- * Complete port from Revo Realms Flowers implementation.
+ * ProceduralFlowers.ts - GPU Flower System
  *
  * Architecture:
  * - SpriteNodeMaterial for billboard flowers
@@ -9,14 +7,6 @@
  * - Uses grass heightmap and exclusion textures for terrain integration
  * - WindManager integration for sway animation
  * - Updates every frame for stable world-space positioning
- *
- * **PERFORMANCE OPTIMIZATIONS:**
- * - Compute shaders pre-initialized during load (no first-frame spike)
- * - All heavy work done before gameplay starts
- *
- * **RELATED MODULES:**
- * - For standalone flower generation (Asset Forge, viewers), see @hyperscape/procgen FlowerGen module
- * - FlowerGen provides simpler flower geometry/materials without SSBO compute integration
  *
  * @module ProceduralFlowers
  */
@@ -92,7 +82,7 @@ function yieldToMain(): Promise<void> {
 }
 
 // ============================================================================
-// CONFIGURATION - Matches Revo Realms
+// CONFIGURATION
 // ============================================================================
 
 const getConfig = () => {

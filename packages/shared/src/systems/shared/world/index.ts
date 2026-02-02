@@ -13,6 +13,7 @@ export * from "./VegetationSsboUtils";
 export * from "./VegetationSystem";
 export * from "./ProceduralGrass";
 export * from "./ProceduralFlowers";
+export * from "./ProceduralDocks";
 export * from "./TownSystem";
 export * from "./POISystem";
 export * from "./RoadNetworkSystem";

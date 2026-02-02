@@ -539,11 +539,27 @@ export class TileMovementManager {
     }
 
     // Set player floor and building ID for floor-aware pathfinding with layer separation
+    // CRITICAL: Must sync building state with actual position BEFORE getting it!
+    // Otherwise a new player's state could be stale (defaults to outside)
     const towns = this.townSystem;
     if (towns) {
-      const playerState = towns
-        .getCollisionService()
-        .getPlayerBuildingState(playerId as EntityID);
+      const collisionService = towns.getCollisionService();
+
+      // SYNC player building state with their current tile position
+      // This fixes desync where getPlayerBuildingState returns stale/default state
+      const entity = this.world.entities.get(playerId);
+      const worldY = entity?.position?.y ?? 0;
+      collisionService.updatePlayerBuildingState(
+        playerId as EntityID,
+        state.currentTile.x,
+        state.currentTile.z,
+        worldY,
+      );
+
+      // NOW get the synced player state
+      const playerState = collisionService.getPlayerBuildingState(
+        playerId as EntityID,
+      );
       this.currentPlayerFloor = playerState.currentFloor;
       this.currentPlayerBuildingId = playerState.insideBuildingId;
     }
@@ -2121,11 +2137,25 @@ export class TileMovementManager {
     }
 
     // Set player floor and building ID for floor-aware pathfinding with layer separation
+    // CRITICAL: Must sync building state with actual position BEFORE getting it!
     const townsForPath = this.townSystem;
     if (townsForPath) {
-      const playerState = townsForPath
-        .getCollisionService()
-        .getPlayerBuildingState(playerId as EntityID);
+      const collisionService = townsForPath.getCollisionService();
+
+      // SYNC player building state with their current tile position
+      const entity = this.world.entities.get(playerId);
+      const worldY = entity?.position?.y ?? 0;
+      collisionService.updatePlayerBuildingState(
+        playerId as EntityID,
+        state.currentTile.x,
+        state.currentTile.z,
+        worldY,
+      );
+
+      // NOW get the synced player state
+      const playerState = collisionService.getPlayerBuildingState(
+        playerId as EntityID,
+      );
       this.currentPlayerFloor = playerState.currentFloor;
       this.currentPlayerBuildingId = playerState.insideBuildingId;
     }

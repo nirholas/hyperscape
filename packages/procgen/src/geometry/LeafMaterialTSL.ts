@@ -114,7 +114,7 @@ export function createInstancedLeafMaterialTSL(
   // Create material - use MeshStandardNodeMaterial to respond to scene lights
   const material = new MeshStandardNodeMaterial();
   material.side = side;
-  material.transparent = false; // Use alpha test, not blending
+  material.transparent = true; // Required for opacity node to create leaf shape
   material.roughness = 0.75; // Matte leaf surface
   material.metalness = 0.0; // Non-metallic
   material.envMapIntensity = 0.2; // Reduce environment reflections

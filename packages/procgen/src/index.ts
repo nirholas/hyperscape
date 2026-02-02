@@ -171,6 +171,7 @@ export * as TerrainGen from "./terrain/index.js";
 export * as VegetationGen from "./vegetation/index.js";
 export * as GrassGen from "./grass/index.js";
 export * as FlowerGen from "./flowers/index.js";
+export * as ItemsGen from "./items/index.js";
 
 // Standalone context for Asset Forge and viewers
 export * as Standalone from "./standalone/index.js";

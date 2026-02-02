@@ -7,7 +7,7 @@ import type { WorldConfigManifest } from "../../../../types/world/world-types";
 import { loadRoadConfig, getDirections } from "../RoadNetworkSystem";
 
 const DEFAULTS = {
-  roadWidth: 4,
+  roadWidth: 6, // Updated from 4 to match RoadNetworkSystem default
   pathStepSize: 20,
   maxPathIterations: 10000,
   extraConnectionsRatio: 0.25,

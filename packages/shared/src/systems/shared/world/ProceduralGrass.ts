@@ -1,18 +1,13 @@
 // @ts-nocheck - TSL functions use dynamic array destructuring that TypeScript doesn't support
 /**
- * ProceduralGrass.ts - GPU Grass System (Revo Realms Parity)
+ * ProceduralGrass.ts - GPU Grass System
  *
- * EXACT port from Revo Realms GrassField.ts with heightmap integration.
- *
- * Key architecture (matching Revo Realms):
+ * Key architecture:
  * - SpriteNodeMaterial for billboard grass
  * - Two-buffer SSBO (vec4 + float) with bit-packed data
  * - Visibility NOT used for opacity/scale (only for offscreen culling)
  * - Wind stored as vec2 displacement
- *
- * Hyperscape additions:
- * - Heightmap Y offset (Revo uses flat Y=0 terrain)
- * - Integration with terrain system
+ * - Heightmap Y offset integration with terrain system
  *
  * **PERFORMANCE OPTIMIZATIONS:**
  * - Heightmap generation uses chunked async processing (no main thread blocking)
@@ -107,10 +102,10 @@ function shouldYield(startTime: number, budgetMs = 8): boolean {
 }
 
 // ============================================================================
-// CONFIGURATION - Matches Revo Realms exactly
+// CONFIGURATION
 // ============================================================================
 
-// LOD0: Individual grass blades (near player) - Extended range like Revo
+// LOD0: Individual grass blades (near player)
 const getConfig = () => {
   const BLADE_WIDTH = 0.04;
   const BLADE_HEIGHT = 0.5;
@@ -160,7 +155,7 @@ const config = getConfig();
 const lod1Config = getLOD1Config();
 
 // ============================================================================
-// UNIFORMS - Matches Revo Realms exactly
+// UNIFORMS
 // ============================================================================
 
 const uniforms = {
@@ -178,7 +173,7 @@ const uniforms = {
   uTrailRadius: uniform(0.4), // Trail radius around player
   uTrailRadiusSquared: uniform(0.4 * 0.4),
   uKDown: uniform(0.6), // Crushing speed (higher = instant flatten)
-  // Wind - noise-based natural movement (matches Revo)
+  // Wind - noise-based natural movement
   uWindStrength: uniform(0.3), // Increased for visible wind effect
   uWindSpeed: uniform(0.4), // Increased for more dynamic motion
   uvWindScale: uniform(1.75),
@@ -274,7 +269,7 @@ const HEIGHTMAP_CONFIG = {
 } as const;
 
 // ============================================================================
-// GRASS SSBO - Three-buffer structure (Revo Realms + Heightmap)
+// GRASS SSBO - Three-buffer structure
 // ============================================================================
 // Buffer1 (vec4):
 //   x -> offsetX (local to player)
@@ -617,7 +612,7 @@ class GrassSsbo {
     return this.buffer3;
   }
 
-  // Unpacking functions (Revo Realms exact)
+  // Unpacking functions
   getWind: any = Fn(
     // @ts-expect-error TSL array destructuring
     ([data = vec4(0)]) => {
@@ -659,7 +654,7 @@ class GrassSsbo {
     return tslUtils.unpackUnit(data, 0, 4);
   });
 
-  // Packing functions (Revo Realms exact)
+  // Packing functions
   private setWind: any = Fn(([data = vec4(0), value = vec2(0)]) => {
     data.z = tslUtils.packUnits(data.z, 0, 12, value.x, -2, 2);
     data.z = tslUtils.packUnits(data.z, 12, 12, value.y, -2, 2);
@@ -704,7 +699,7 @@ class GrassSsbo {
     return tslUtils.packUnit(data, 0, 4, value);
   });
 
-  // Compute Init - Revo Realms + heightmap sampling
+  // Compute Init
   private createComputeInit() {
     return Fn(() => {
       const data1 = this.buffer1.element(instanceIndex);
@@ -759,7 +754,7 @@ class GrassSsbo {
     })().compute(config.COUNT, [config.WORKGROUP_SIZE]);
   }
 
-  // Compute Wind - Revo Realms exact
+  // Compute Wind
   private computeWind: any = Fn(
     ([prevWindXZ = vec2(0), worldPos = vec3(0), positionNoise = float(0)]) => {
       const intensity = smoothstep(0.2, 0.5, windManager.uIntensity);
@@ -1134,17 +1129,21 @@ class GrassSsbo {
           );
           const gridExclusionValue = gridExclusionTextureNode.sample(gridUV).r;
 
-          // Soft edge dithering at tile boundaries
+          // Soft edge dithering at tile boundaries with nice dissolve effect
           const exclDitherRand = hash(float(instanceIndex).mul(10.34));
+          const exclDitherRand2 = hash(float(instanceIndex).mul(17.89));
           const tileEdgeDist = min(
             min(fract(worldX), float(1).sub(fract(worldX))),
             min(fract(worldZ), float(1).sub(fract(worldZ))),
           );
-          const edgeSoftness = smoothstep(float(0), float(0.15), tileEdgeDist);
+          // Wider soft edge zone (0.4m instead of 0.15m) for smoother fade
+          const edgeSoftness = smoothstep(float(0), float(0.4), tileEdgeDist);
           const baseNotExcluded = float(1).sub(gridExclusionValue);
+          // More aggressive soft edge bonus with dithering for dissolve effect
           const softEdgeBonus = gridExclusionValue
             .mul(float(1).sub(edgeSoftness))
-            .mul(exclDitherRand.lessThan(0.15).select(1, 0));
+            .mul(exclDitherRand.lessThan(0.35).select(1, 0))
+            .mul(exclDitherRand2.mul(0.5).add(0.5));
           gridNotExcluded = baseNotExcluded.add(softEdgeBonus).clamp(0, 1);
         }
 
@@ -1302,7 +1301,7 @@ class GrassSsbo {
 }
 
 // ============================================================================
-// GRASS MATERIAL - SpriteNodeMaterial (Revo Realms exact + heightmap)
+// GRASS MATERIAL - SpriteNodeMaterial
 // ============================================================================
 
 class GrassMaterial extends SpriteNodeMaterial {
@@ -1820,7 +1819,7 @@ class GrassCardsSsbo {
       // Exclusion zone culling - HYBRID: grid + legacy
       let _notExcluded: ReturnType<typeof float>;
       {
-        // Grid-based exclusion (CollisionMatrix blocked tiles) - no soft edges for LOD1
+        // Grid-based exclusion (CollisionMatrix blocked tiles) - with dithered soft edges for LOD1
         let gridNotExcluded = float(1.0);
         if (useGridBasedExclusion && gridExclusionTextureNode) {
           const gridHalfWorld = uGridExclusionWorldSize.mul(0.5);
@@ -1837,7 +1836,18 @@ class GrassCardsSsbo {
             gridUvZ.clamp(0.001, 0.999),
           );
           const gridExclusionValue = gridExclusionTextureNode.sample(gridUV).r;
-          gridNotExcluded = float(1).sub(gridExclusionValue);
+          // Add soft edge dithering for smoother LOD1 transitions
+          const exclDitherRand = hash(float(instanceIndex).mul(10.34));
+          const tileEdgeDist = min(
+            min(fract(worldX), float(1).sub(fract(worldX))),
+            min(fract(worldZ), float(1).sub(fract(worldZ))),
+          );
+          const edgeSoftness = smoothstep(float(0), float(0.3), tileEdgeDist);
+          const baseNotExcluded = float(1).sub(gridExclusionValue);
+          const softEdgeBonus = gridExclusionValue
+            .mul(float(1).sub(edgeSoftness))
+            .mul(exclDitherRand.lessThan(0.25).select(1, 0));
+          gridNotExcluded = baseNotExcluded.add(softEdgeBonus).clamp(0, 1);
         }
 
         // Legacy texture exclusion (buildings, duel arenas)
@@ -3103,10 +3113,10 @@ export class ProceduralGrassSystem extends System {
       // STEP 2: Create SSBO and meshes
       this.ssbo = new GrassSsbo();
 
-      // Create geometry (Revo Realms exact)
+      // Create geometry
       const geometry = this.createGeometry(config.SEGMENTS);
 
-      // Create material (Revo Realms exact + heightmap)
+      // Create material
       const material = new GrassMaterial(this.ssbo);
 
       // Create instanced mesh
@@ -3156,7 +3166,7 @@ export class ProceduralGrassSystem extends System {
   }
 
   private createGeometry(nSegments: number): THREE.BufferGeometry {
-    // Revo Realms exact geometry
+    // Geometry creation
     const segments = Math.max(1, Math.floor(nSegments));
     const height = config.BLADE_HEIGHT;
     const halfWidthBase = config.BLADE_WIDTH * 0.5;
@@ -3539,102 +3549,6 @@ export class ProceduralGrassSystem extends System {
     const centerX = camera?.position.x ?? 0;
     const centerZ = camera?.position.z ?? 0;
     await this.regenerateExclusionTextureAroundPoint(centerX, centerZ);
-  }
-
-  /** DEBUG: Fill exclusion texture with a test pattern to verify shader is sampling */
-  debugFillExclusionTexture(value: number = 1.0): void {
-    console.log(
-      `[ProceduralGrass] 🧪 DEBUG: Filling exclusion texture with value ${value}`,
-    );
-    const data = new Float32Array(
-      EXCLUSION_TEXTURE_SIZE * EXCLUSION_TEXTURE_SIZE,
-    );
-    data.fill(value);
-    exclusionTexture.image = {
-      data,
-      width: EXCLUSION_TEXTURE_SIZE,
-      height: EXCLUSION_TEXTURE_SIZE,
-    };
-    exclusionTexture.needsUpdate = true;
-    console.log(
-      `[ProceduralGrass] Texture filled: ${EXCLUSION_TEXTURE_SIZE}x${EXCLUSION_TEXTURE_SIZE}, all values = ${value}`,
-    );
-    console.log(
-      `[ProceduralGrass] If grass disappears, shader IS sampling the texture correctly.`,
-    );
-    console.log(
-      `[ProceduralGrass] If grass remains, shader is NOT reading the texture.`,
-    );
-  }
-
-  /** DEBUG: Clear exclusion texture (set all to 0) */
-  debugClearExclusionTexture(): void {
-    console.log(`[ProceduralGrass] 🧪 DEBUG: Clearing exclusion texture`);
-    const data = new Float32Array(
-      EXCLUSION_TEXTURE_SIZE * EXCLUSION_TEXTURE_SIZE,
-    );
-    exclusionTexture.image = {
-      data,
-      width: EXCLUSION_TEXTURE_SIZE,
-      height: EXCLUSION_TEXTURE_SIZE,
-    };
-    exclusionTexture.needsUpdate = true;
-  }
-
-  /** DEBUG: Sample exclusion texture at a world position */
-  debugSampleExclusionAt(worldX: number, worldZ: number): number {
-    const data = exclusionTexture.image.data as Float32Array;
-    const centerX = uExclusionCenterX.value;
-    const centerZ = uExclusionCenterZ.value;
-    const worldSize = uExclusionWorldSize.value;
-    const halfWorld = worldSize / 2;
-
-    // Calculate UV (same formula as shader)
-    const uvX = (worldX - centerX + halfWorld) / worldSize;
-    const uvZ = (worldZ - centerZ + halfWorld) / worldSize;
-
-    // Clamp UV
-    const clampedUvX = Math.max(0.001, Math.min(0.999, uvX));
-    const clampedUvZ = Math.max(0.001, Math.min(0.999, uvZ));
-
-    // Convert to texel
-    const texelX = Math.floor(clampedUvX * EXCLUSION_TEXTURE_SIZE);
-    const texelZ = Math.floor(clampedUvZ * EXCLUSION_TEXTURE_SIZE);
-    const idx = texelZ * EXCLUSION_TEXTURE_SIZE + texelX;
-
-    const value = data[idx] ?? 0;
-
-    console.log(`[ProceduralGrass] 🎯 Sample at world (${worldX}, ${worldZ}):`);
-    console.log(
-      `  UV: (${uvX.toFixed(4)}, ${uvZ.toFixed(4)}) → clamped (${clampedUvX.toFixed(4)}, ${clampedUvZ.toFixed(4)})`,
-    );
-    console.log(`  Texel: (${texelX}, ${texelZ}), index: ${idx}`);
-    console.log(
-      `  Value: ${value.toFixed(4)} ${value > 0.5 ? "🔴 EXCLUDED" : "🟢 NOT excluded"}`,
-    );
-
-    return value;
-  }
-
-  /** DEBUG: Check all building centers */
-  async debugCheckBuildingExclusion(): Promise<void> {
-    const { getGrassExclusionManager } = await import(
-      "./GrassExclusionManager"
-    );
-    const manager = getGrassExclusionManager();
-    const blockers = manager.getRectangularBlockers();
-
-    console.log(
-      `[ProceduralGrass] 🏠 Checking exclusion at ${blockers.length} building centers:`,
-    );
-
-    for (const b of blockers.slice(0, 5)) {
-      console.log(`\n  Building: ${b.id}`);
-      const value = this.debugSampleExclusionAt(b.centerX, b.centerZ);
-      if (value < 0.5) {
-        console.log(`  ⚠️ WARNING: Building center is NOT excluded!`);
-      }
-    }
   }
 
   /** Set night color multiplier (RGB 0-1). Tints grass at night */

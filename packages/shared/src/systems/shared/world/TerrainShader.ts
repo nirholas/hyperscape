@@ -564,12 +564,24 @@ export function createTerrainMaterial(): THREE.Material & {
     ),
   );
 
-  // Road overlay: blend dirt color based on pre-computed influence (0=terrain, 1=road center)
+  // === ROAD OVERLAY ===
+  // Roads are compacted dirt paths - use same dirt colors as terrain for consistency
+  // Apply noise variation so roads don't look flat/artificial
   const roadInfluence = attribute("roadInfluence", "float");
-  const roadColor = vec3(0.45, 0.35, 0.25); // Dark brown dirt
-  const roadEdgeColor = vec3(0.5, 0.4, 0.3); // Lighter at edges
-  const roadTint = mix(roadEdgeColor, roadColor, roadInfluence);
-  const baseWithRoads = mix(variedColor, roadTint, roadInfluence);
+
+  // Use same dirt colors as terrain dirt patches (dirtBrown, dirtDark defined above)
+  // Add noise variation for natural look - compacted dirt has less variation than loose dirt
+  const roadNoiseVar = mul(noiseValue2, float(0.5)); // Less variation than regular dirt
+  const roadDirtColor = mix(dirtBrown, dirtDark, roadNoiseVar);
+
+  // Road edges are slightly lighter (loose dirt kicked up to edges)
+  // Center is darker (compacted, worn surface)
+  const roadCenterDarken = mul(roadInfluence, float(0.15)); // Darken center
+  const compactedRoadColor = sub(roadDirtColor, vec3(roadCenterDarken));
+
+  // Blend road color with terrain based on influence
+  // influence 0 = terrain color, 1 = full road color
+  const baseWithRoads = mix(variedColor, compactedRoadColor, roadInfluence);
 
   // === DISTANCE FOG ===
   // NOTE: distSq already computed above for LOD - reusing it here

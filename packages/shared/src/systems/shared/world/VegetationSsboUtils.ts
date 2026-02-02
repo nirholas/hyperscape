@@ -8,8 +8,6 @@
  * - Heightmap Y offset sampling
  * - Position wrapping for player-following tiles
  *
- * Ported from Revo Realms ssboUtils.ts
- *
  * @module VegetationSsboUtils
  */
 

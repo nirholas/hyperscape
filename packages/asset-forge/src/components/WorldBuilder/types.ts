@@ -1069,9 +1069,10 @@ export const DEFAULT_TOWN_CONFIG: TownGenerationConfig = {
 
 /**
  * Default road generation configuration
+ * Road width of 6m provides good visibility on terrain while still being realistic
  */
 export const DEFAULT_ROAD_CONFIG: RoadGenerationConfig = {
-  roadWidth: 4,
+  roadWidth: 6,
   pathStepSize: 10,
   smoothingIterations: 3,
   extraConnectionsRatio: 0.3,

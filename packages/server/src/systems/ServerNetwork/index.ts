@@ -1033,6 +1033,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
     this.world.on(EventType.PLAYER_LEFT, (event: { playerId: string }) => {
       this.tileMovementManager.cleanup(event.playerId);
       this.actionQueue.cleanup(event.playerId);
+
+      // Clean up building collision state (prevents playerFloorStates memory leak)
+      const towns = this.world.getSystem("towns") as TownSystem | null;
+      if (towns) {
+        towns
+          .getCollisionService()
+          .removePlayerState(
+            event.playerId as import("@hyperscape/shared").EntityID,
+          );
+      }
     });
 
     // Reset agility progress on death (small penalty - lose accumulated tiles toward next XP grant)
@@ -3158,29 +3168,51 @@ export class ServerNetwork extends System implements NetworkWithSocket {
 
         // Add each staked item to inventory
         for (const stake of stakes) {
-          const freeSlot = findFreeSlot();
-          if (freeSlot === -1) {
-            console.warn(
-              `[Duel] No free slot for stake item ${stake.itemId} x${stake.quantity} for ${playerId}`,
-            );
-            // TODO: Drop item on ground or send to bank
-            continue;
-          }
-
           // Check if item is stackable and already exists in inventory
-          const existingItem = currentInventory.find(
+          const existingItemForStack = currentInventory.find(
             (item) => item.itemId === stake.itemId,
           );
-          const itemData = getItem(stake.itemId);
-          const isStackable = itemData?.stackable ?? false;
+          const itemDataForStack = getItem(stake.itemId);
+          const isStackableForSlotCheck = itemDataForStack?.stackable ?? false;
 
-          if (isStackable && existingItem) {
+          // If stackable and already in inventory, we don't need a free slot
+          const needsFreeSlot = !(
+            isStackableForSlotCheck && existingItemForStack
+          );
+
+          let freeSlot = -1;
+          if (needsFreeSlot) {
+            freeSlot = findFreeSlot();
+            if (freeSlot === -1) {
+              // Inventory full - drop item on ground at player's position
+              const playerEntity = this.world.entities.get(playerId);
+              if (playerEntity) {
+                console.warn(
+                  `[Duel] Inventory full for ${playerId} - dropping ${stake.itemId} x${stake.quantity} on ground`,
+                );
+                // Emit ITEM_DROP event which the item system will handle
+                // Drop item at player's position (item already removed from inventory conceptually)
+                this.world.emit(EventType.ITEM_DROP, {
+                  playerId,
+                  itemId: stake.itemId,
+                  quantity: stake.quantity,
+                });
+              } else {
+                console.error(
+                  `[Duel] Cannot drop item - player entity not found for ${playerId}`,
+                );
+              }
+              continue;
+            }
+          }
+
+          if (isStackableForSlotCheck && existingItemForStack) {
             // Update existing stack
             await db.pool.query(
               `UPDATE inventory
                SET quantity = quantity + $1
                WHERE "playerId" = $2 AND "slotIndex" = $3`,
-              [stake.quantity, playerId, existingItem.slotIndex],
+              [stake.quantity, playerId, existingItemForStack.slotIndex],
             );
             console.log(
               `[Duel] Added ${stake.quantity} ${stake.itemId} to existing stack for ${playerId} (${reason})`,

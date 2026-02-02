@@ -87,6 +87,22 @@ export interface TownLandmark {
   rotation: number;
   /** Size in meters */
   size: { width: number; depth: number; height: number };
+  /** Optional metadata for specific landmark types */
+  metadata?: TownLandmarkMetadata;
+}
+
+/**
+ * Metadata for specific landmark types
+ */
+export interface TownLandmarkMetadata {
+  /** For signposts: destination town name */
+  destination?: string;
+  /** For signposts: destination town ID */
+  destinationId?: string;
+  /** For fence posts: which building lot this belongs to */
+  lotBuildingId?: string;
+  /** For fence posts: corner index (0-3 for rectangular lots) */
+  cornerIndex?: number;
 }
 
 /**
@@ -102,7 +118,9 @@ export type TownLandmarkType =
   | "crate" // Cargo decoration
   | "lamppost" // Street lighting
   | "tree" // Decorative tree
-  | "planter"; // Flower planter
+  | "planter" // Flower planter
+  | "fence_post" // Fence post at lot boundaries
+  | "fence_gate"; // Gate in fence (at building entrances)
 
 /**
  * Central plaza/public square
@@ -201,6 +219,26 @@ export interface BuildingConfig {
 }
 
 /**
+ * Landmark generation configuration
+ */
+export interface LandmarkConfig {
+  /** Enable fences around building lots (villages and towns) */
+  fencesEnabled: boolean;
+  /** Probability of fence post at each valid corner (0-1) */
+  fenceDensity: number;
+  /** Fence post height in meters */
+  fencePostHeight: number;
+  /** Enable lampposts for villages (always enabled for towns) */
+  lamppostsInVillages: boolean;
+  /** Spacing between lampposts in meters */
+  lamppostSpacing: number;
+  /** Enable market stalls in town plazas */
+  marketStallsEnabled: boolean;
+  /** Enable decorative elements (barrels, crates, planters) */
+  decorationsEnabled: boolean;
+}
+
+/**
  * Town generator configuration
  */
 export interface TownGeneratorConfig {
@@ -226,6 +264,8 @@ export interface TownGeneratorConfig {
   biomeSuitability: Record<string, number>;
   /** Building type configurations */
   buildingTypes: Record<TownBuildingType, BuildingConfig>;
+  /** Landmark generation configuration */
+  landmarks: LandmarkConfig;
 }
 
 // ============================================================

@@ -1462,6 +1462,14 @@ export class TownSystem extends System {
     // This uses BFS flood fill to verify ALL tiles are actually reachable from doors
     this.validateBuildingReachability(allBuildings);
 
+    // === CRITICAL: Exhaustive perimeter navigation test ===
+    // Tests EVERY tile around EVERY building can reach center through door
+    this.validatePerimeterNavigation(allBuildings);
+
+    // === MOST CRITICAL: Validate NO path enters footprint except through doors ===
+    // This catches any bug where ground players can clip into buildings
+    this.validateNoFootprintEntryExceptDoor(allBuildings);
+
     // Summary stats using helper methods
     const totalWalkableTiles = allBuildings.reduce((sum, b) => {
       const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
@@ -1875,19 +1883,491 @@ export class TownSystem extends System {
     }
 
     if (totalUnreachable > 0) {
+      // Calculate total walkable tiles for severity assessment
+      const totalWalkableTiles = allBuildings.reduce((sum, b) => {
+        const floor0 = BuildingCollisionService.getGroundFloorFromData(b);
+        return sum + (floor0?.walkableTiles.size ?? 0);
+      }, 0);
+      const unreachablePercent = (totalUnreachable / totalWalkableTiles) * 100;
+
       Logger.systemError(
         "TownSystem",
-        `REACHABILITY VALIDATION: ${totalUnreachable} tiles unreachable across ${failedBuildings.length} buildings`,
+        `REACHABILITY VALIDATION: ${totalUnreachable}/${totalWalkableTiles} (${unreachablePercent.toFixed(1)}%) tiles unreachable across ${failedBuildings.length} buildings`,
       );
       for (const building of failedBuildings.slice(0, 5)) {
         Logger.systemError("TownSystem", `  - ${building}`);
       }
-      // Don't throw - this is a warning, not a fatal error
-      // Buildings may have intentionally inaccessible areas
+
+      // CRITICAL: If more than 25% of tiles are unreachable, this is a serious bug
+      // Small percentages (< 25%) may be intentional design (secret rooms, etc.)
+      if (unreachablePercent > 25) {
+        throw new Error(
+          `[TownSystem] CRITICAL: ${unreachablePercent.toFixed(1)}% of building tiles are unreachable! ` +
+            `This indicates a serious navigation bug. Server startup ABORTED.`,
+        );
+      }
     } else {
       Logger.system(
         "TownSystem",
         `✓ Reachability validation PASSED: All tiles in ${allBuildings.length} buildings are reachable`,
+      );
+    }
+  }
+
+  /**
+   * EXHAUSTIVE PERIMETER NAVIGATION TEST
+   *
+   * Tests that EVERY tile around EVERY building can navigate to the building's center
+   * through the door using proper two-stage navigation.
+   *
+   * This catches edge cases where specific approach angles might bypass walls.
+   */
+  private validatePerimeterNavigation(
+    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+  ): void {
+    const pathfinder = new BFSPathfinder();
+
+    let totalBuildingsTested = 0;
+    let totalTilesTested = 0;
+    let totalFailures = 0;
+    const failedPaths: string[] = [];
+
+    // Limit detailed logging to avoid spam
+    const MAX_FAILURES_LOGGED = 10;
+
+    for (const building of allBuildings) {
+      const groundFloor =
+        BuildingCollisionService.getGroundFloorFromData(building);
+      if (!groundFloor || groundFloor.walkableTiles.size === 0) continue;
+
+      const bbox = building.boundingBox;
+
+      // Find closest door for this building (used as waypoint)
+      const centerX = Math.floor((bbox.minTileX + bbox.maxTileX) / 2);
+      const centerZ = Math.floor((bbox.minTileZ + bbox.maxTileZ) / 2);
+      const closestDoor = this.collisionService.findClosestDoorTile(
+        building.buildingId,
+        centerX,
+        centerZ,
+      );
+
+      if (!closestDoor) {
+        Logger.systemWarn(
+          "TownSystem",
+          `[PerimeterNav] ${building.buildingId}: No door found, skipping`,
+        );
+        continue;
+      }
+
+      const doorExterior = { x: closestDoor.tileX, z: closestDoor.tileZ };
+      const doorInterior = {
+        x: closestDoor.interiorTileX,
+        z: closestDoor.interiorTileZ,
+      };
+      const buildingCenter = { x: centerX, z: centerZ };
+
+      // Ground player walkability (layer separation)
+      const groundWalkable = (
+        tile: { x: number; z: number },
+        fromTile?: { x: number; z: number },
+      ): boolean => {
+        const check = this.collisionService.checkBuildingMovement(
+          fromTile ?? null,
+          tile,
+          0,
+          null, // ground player
+        );
+        return check.buildingAllowsMovement;
+      };
+
+      // Building player walkability (inside building)
+      const buildingWalkable = (
+        tile: { x: number; z: number },
+        fromTile?: { x: number; z: number },
+      ): boolean => {
+        const check = this.collisionService.checkBuildingMovement(
+          fromTile ?? null,
+          tile,
+          0,
+          building.buildingId,
+        );
+        return check.buildingAllowsMovement;
+      };
+
+      // Generate perimeter tiles (ring around building, 2 tiles out)
+      const perimeterDistance = 3;
+      const perimeterTiles: Array<{ x: number; z: number }> = [];
+
+      for (
+        let x = bbox.minTileX - perimeterDistance;
+        x <= bbox.maxTileX + perimeterDistance;
+        x++
+      ) {
+        for (
+          let z = bbox.minTileZ - perimeterDistance;
+          z <= bbox.maxTileZ + perimeterDistance;
+          z++
+        ) {
+          // Only include tiles ON the perimeter (not inside)
+          const isOnPerimeter =
+            x === bbox.minTileX - perimeterDistance ||
+            x === bbox.maxTileX + perimeterDistance ||
+            z === bbox.minTileZ - perimeterDistance ||
+            z === bbox.maxTileZ + perimeterDistance;
+
+          // Skip tiles inside building
+          const inFootprint =
+            this.collisionService.isTileInBuildingFootprint(x, z) !== null;
+
+          if (isOnPerimeter && !inFootprint) {
+            perimeterTiles.push({ x, z });
+          }
+        }
+      }
+
+      // Test each perimeter tile
+      let buildingFailures = 0;
+
+      for (const startTile of perimeterTiles) {
+        totalTilesTested++;
+
+        // STAGE 1: Path from perimeter to door exterior (ground player)
+        const pathToDoor = pathfinder.findPath(
+          startTile,
+          doorExterior,
+          groundWalkable,
+        );
+
+        if (pathToDoor.length === 0) {
+          buildingFailures++;
+          totalFailures++;
+          if (failedPaths.length < MAX_FAILURES_LOGGED) {
+            failedPaths.push(
+              `${building.buildingId}: (${startTile.x},${startTile.z}) → door: NO PATH`,
+            );
+          }
+          continue;
+        }
+
+        // Verify path doesn't go through walls
+        let wallViolation = false;
+        for (let i = 0; i < pathToDoor.length - 1; i++) {
+          const from = pathToDoor[i];
+          const to = pathToDoor[i + 1];
+          const wallBlocked = this.collisionService.isWallBlocked(
+            from.x,
+            from.z,
+            to.x,
+            to.z,
+            0,
+          );
+          if (wallBlocked) {
+            wallViolation = true;
+            buildingFailures++;
+            totalFailures++;
+            if (failedPaths.length < MAX_FAILURES_LOGGED) {
+              failedPaths.push(
+                `${building.buildingId}: (${startTile.x},${startTile.z}) → door WALL VIOLATION at step ${i}`,
+              );
+            }
+            break;
+          }
+        }
+
+        if (wallViolation) continue;
+
+        // DOOR TRANSITION: Verify step from exterior to interior
+        const canEnter = this.collisionService.checkBuildingMovement(
+          doorExterior,
+          doorInterior,
+          0,
+          null, // ground player entering
+        );
+        if (!canEnter.buildingAllowsMovement) {
+          buildingFailures++;
+          totalFailures++;
+          if (failedPaths.length < MAX_FAILURES_LOGGED) {
+            failedPaths.push(
+              `${building.buildingId}: (${startTile.x},${startTile.z}) DOOR BLOCKED: ${canEnter.blockReason}`,
+            );
+          }
+          continue;
+        }
+
+        // STAGE 2: Path from door interior to center (building player)
+        const pathToCenter = pathfinder.findPath(
+          doorInterior,
+          buildingCenter,
+          buildingWalkable,
+        );
+
+        if (pathToCenter.length === 0) {
+          buildingFailures++;
+          totalFailures++;
+          if (failedPaths.length < MAX_FAILURES_LOGGED) {
+            failedPaths.push(
+              `${building.buildingId}: (${startTile.x},${startTile.z}) → center: NO INTERIOR PATH`,
+            );
+          }
+          continue;
+        }
+
+        // Verify interior path doesn't go through walls
+        for (let i = 0; i < pathToCenter.length - 1; i++) {
+          const from = pathToCenter[i];
+          const to = pathToCenter[i + 1];
+          const wallBlocked = this.collisionService.isWallBlocked(
+            from.x,
+            from.z,
+            to.x,
+            to.z,
+            0,
+          );
+          if (wallBlocked) {
+            buildingFailures++;
+            totalFailures++;
+            if (failedPaths.length < MAX_FAILURES_LOGGED) {
+              failedPaths.push(
+                `${building.buildingId}: interior WALL VIOLATION at step ${i}`,
+              );
+            }
+            break;
+          }
+        }
+      }
+
+      totalBuildingsTested++;
+
+      if (buildingFailures > 0) {
+        Logger.systemWarn(
+          "TownSystem",
+          `[PerimeterNav] ${building.buildingId}: ${buildingFailures}/${perimeterTiles.length} perimeter tiles FAILED`,
+        );
+      }
+    }
+
+    // Report results
+    if (totalFailures > 0) {
+      Logger.systemError(
+        "TownSystem",
+        `PERIMETER NAVIGATION VALIDATION: ${totalFailures}/${totalTilesTested} paths FAILED!`,
+      );
+      for (const failure of failedPaths) {
+        Logger.systemError("TownSystem", `  ❌ ${failure}`);
+      }
+      if (failedPaths.length >= MAX_FAILURES_LOGGED) {
+        Logger.systemError(
+          "TownSystem",
+          `  ... and ${totalFailures - MAX_FAILURES_LOGGED} more failures`,
+        );
+      }
+
+      // This is critical - throw if too many failures
+      const failureRate = totalFailures / totalTilesTested;
+      if (failureRate > 0.1) {
+        // More than 10% failure rate
+        throw new Error(
+          `[TownSystem] CRITICAL: ${(failureRate * 100).toFixed(1)}% of perimeter paths failed! ` +
+            `Navigation is severely broken.`,
+        );
+      }
+    } else {
+      Logger.system(
+        "TownSystem",
+        `✓ Perimeter navigation PASSED: All ${totalTilesTested} paths across ${totalBuildingsTested} buildings work`,
+      );
+    }
+  }
+
+  /**
+   * CRITICAL: Validate that NO single step from exterior to footprint is allowed
+   * except through actual door tiles.
+   *
+   * This is the MOST rigorous test - it checks EVERY possible entry step, not paths.
+   * If this passes but paths still fail, the bug is in BFS pathfinding.
+   * If this fails, the bug is in checkBuildingMovement.
+   *
+   * THROWS IMMEDIATELY if any violation found - this is a critical security issue.
+   */
+  private validateNoFootprintEntryExceptDoor(
+    allBuildings: import("../../../types/world/building-collision-types").BuildingCollisionData[],
+  ): void {
+    let totalStepsTested = 0;
+    let violations = 0;
+    const violationDetails: string[] = [];
+
+    for (const building of allBuildings) {
+      const groundFloor =
+        BuildingCollisionService.getGroundFloorFromData(building);
+      if (!groundFloor) continue;
+
+      // Get all door tiles for this building
+      const doorTileSet = new Set<string>();
+      const doorWalls = groundFloor.wallSegments.filter(
+        (w) =>
+          w.hasOpening &&
+          (w.openingType === "door" || w.openingType === "arch"),
+      );
+      for (const door of doorWalls) {
+        doorTileSet.add(`${door.tileX},${door.tileZ}`);
+      }
+
+      // Test EVERY footprint tile
+      for (const key of groundFloor.walkableTiles) {
+        const [tx, tz] = key.split(",").map(Number);
+        const footprintTile: { x: number; z: number } = { x: tx, z: tz };
+        const isDoorTile = doorTileSet.has(key);
+
+        // Check ALL 8 adjacent tiles (cardinal + diagonal)
+        const adjacents = [
+          { dx: 0, dz: -1, name: "N" },
+          { dx: 0, dz: 1, name: "S" },
+          { dx: 1, dz: 0, name: "E" },
+          { dx: -1, dz: 0, name: "W" },
+          { dx: 1, dz: -1, name: "NE" },
+          { dx: -1, dz: -1, name: "NW" },
+          { dx: 1, dz: 1, name: "SE" },
+          { dx: -1, dz: 1, name: "SW" },
+        ];
+
+        for (const adj of adjacents) {
+          const fromTile = {
+            x: footprintTile.x + adj.dx,
+            z: footprintTile.z + adj.dz,
+          };
+
+          // Only test entry FROM OUTSIDE to footprint
+          const fromInFootprint =
+            this.collisionService.isTileInBuildingFootprint(
+              fromTile.x,
+              fromTile.z,
+            ) !== null;
+          if (fromInFootprint) continue; // Skip interior-to-interior moves
+
+          totalStepsTested++;
+
+          // Test ground player entry
+          const check = this.collisionService.checkBuildingMovement(
+            fromTile,
+            footprintTile,
+            0, // floor
+            null, // ground player
+          );
+
+          if (check.buildingAllowsMovement) {
+            // Entry was ALLOWED - this is only valid for door tiles with correct direction
+            if (!isDoorTile) {
+              // VIOLATION: Entry to non-door tile allowed!
+              violations++;
+              if (violationDetails.length < 20) {
+                violationDetails.push(
+                  `${building.buildingId}: (${fromTile.x},${fromTile.z})→(${footprintTile.x},${footprintTile.z}) [${adj.name}] ` +
+                    `ENTRY ALLOWED to NON-DOOR tile! doors=[${Array.from(doorTileSet).slice(0, 3).join(";")}...]`,
+                );
+              }
+            } else {
+              // Entry to door tile - verify direction is correct
+              // The door should face the direction we're coming from
+              const doorWall = doorWalls.find(
+                (d) =>
+                  d.tileX === footprintTile.x && d.tileZ === footprintTile.z,
+              );
+              if (doorWall) {
+                // Calculate expected approach direction for this door
+                let expectedApproachDx = 0,
+                  expectedApproachDz = 0;
+                switch (doorWall.side) {
+                  case "north":
+                    expectedApproachDz = -1;
+                    break; // Door faces north, approach from north (dz < 0)
+                  case "south":
+                    expectedApproachDz = 1;
+                    break;
+                  case "east":
+                    expectedApproachDx = 1;
+                    break;
+                  case "west":
+                    expectedApproachDx = -1;
+                    break;
+                }
+
+                // For diagonal entry, one component must match
+                const isCardinal = adj.dx === 0 || adj.dz === 0;
+                let directionValid = false;
+
+                if (isCardinal) {
+                  // Cardinal: must match exactly
+                  directionValid =
+                    adj.dx === expectedApproachDx &&
+                    adj.dz === expectedApproachDz;
+                } else {
+                  // Diagonal: at least one component must be coming from door direction
+                  directionValid =
+                    (expectedApproachDx !== 0 &&
+                      adj.dx === expectedApproachDx) ||
+                    (expectedApproachDz !== 0 && adj.dz === expectedApproachDz);
+                }
+
+                if (!directionValid) {
+                  violations++;
+                  if (violationDetails.length < 20) {
+                    violationDetails.push(
+                      `${building.buildingId}: (${fromTile.x},${fromTile.z})→(${footprintTile.x},${footprintTile.z}) [${adj.name}] ` +
+                        `ENTRY ALLOWED from WRONG DIRECTION! door faces ${doorWall.side}`,
+                    );
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    // Report results
+    Logger.system(
+      "TownSystem",
+      `Entry validation: tested ${totalStepsTested} exterior→footprint steps`,
+    );
+
+    if (violations > 0) {
+      Logger.systemError(
+        "TownSystem",
+        `\n╔══════════════════════════════════════════════════════════════╗`,
+      );
+      Logger.systemError(
+        "TownSystem",
+        `║  CRITICAL: ${violations} INVALID BUILDING ENTRIES DETECTED!           ║`,
+      );
+      Logger.systemError(
+        "TownSystem",
+        `╠══════════════════════════════════════════════════════════════╣`,
+      );
+
+      for (const violation of violationDetails) {
+        Logger.systemError("TownSystem", `║  ❌ ${violation}`);
+      }
+
+      if (violationDetails.length < violations) {
+        Logger.systemError(
+          "TownSystem",
+          `║  ... and ${violations - violationDetails.length} more violations`,
+        );
+      }
+
+      Logger.systemError(
+        "TownSystem",
+        `╚══════════════════════════════════════════════════════════════╝\n`,
+      );
+
+      throw new Error(
+        `[TownSystem] CRITICAL NAVIGATION BUG: ${violations} ways to enter buildings without using doors! ` +
+          `Players can clip through walls. Server startup ABORTED.`,
+      );
+    } else {
+      Logger.system(
+        "TownSystem",
+        `✓ Entry validation PASSED: All ${totalStepsTested} exterior→footprint steps require doors`,
       );
     }
   }

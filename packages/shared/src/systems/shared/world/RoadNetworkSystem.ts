@@ -12,6 +12,7 @@
  * - Future: Could pre-compute passability grid and move BFS to worker
  */
 
+import * as THREE from "three";
 import { System } from "../infrastructure/System";
 import type { World } from "../../../core/World";
 import type {
@@ -39,7 +40,7 @@ import { TERRAIN_CONSTANTS } from "../../../constants/GameConstants";
 
 // Default configuration values
 const DEFAULTS = {
-  roadWidth: 4,
+  roadWidth: 6, // 6m wide roads for better visibility
   pathStepSize: 20,
   maxPathIterations: 10000,
   extraConnectionsRatio: 0.25,
@@ -174,6 +175,10 @@ export class RoadNetworkSystem extends System {
   private boundaryExits: RoadBoundaryExit[] = [];
   /** World boundary (half the world size) */
   private worldHalfSize: number = 5000;
+  /** Pre-computed passability grid for fast BFS pathfinding */
+  private passabilityGrid: Set<string> | null = null;
+  /** Whether passability grid is currently being built */
+  private passabilityGridBuilding = false;
 
   constructor(world: World) {
     super(world);
@@ -236,6 +241,10 @@ export class RoadNetworkSystem extends System {
 
     // Generate roads - uses worker for path smoothing when available
     const startTime = performance.now();
+
+    // Pre-compute passability grid for fast BFS pathfinding
+    // This samples terrain height at all grid points once, avoiding repeated lookups
+    await this.buildPassabilityGridAsync();
 
     // Phase 1: Generate town-to-town roads (MST + extra connections)
     // Only if we have 2+ towns
@@ -479,8 +488,7 @@ export class RoadNetworkSystem extends System {
     const toEntry = this.findBestEntryPoint(toTown, fromTown.position);
 
     // BFS pathfinding - async with yielding to prevent main thread blocking
-    // Still on main thread due to terrain height dependency
-    // TODO: Could pre-compute passability grid and move to worker entirely
+    // Uses pre-computed passability grid for O(1) water checks (built at start())
     const rawPath = await this.findPathAsync(
       fromEntry.x,
       fromEntry.z,
@@ -1594,9 +1602,87 @@ export class RoadNetworkSystem extends System {
   }
 
   /**
-   * Check if a tile is passable (not underwater)
+   * Build passability grid for the entire world.
+   * Pre-computes terrain height at all grid points to avoid repeated lookups during BFS.
+   * Grid covers world bounds with spacing equal to pathStepSize.
+   *
+   * Performance: For a 2000m world with 20m step size:
+   * - Grid points: 100 x 100 = 10,000 points
+   * - Memory: ~800KB for Set<string> keys
+   * - Build time: ~50-100ms (one-time cost)
+   * - Savings: Eliminates ~50-200 getHeightAt() calls per road (BFS iterations)
+   */
+  private async buildPassabilityGridAsync(): Promise<void> {
+    if (this.passabilityGrid || this.passabilityGridBuilding) {
+      return; // Already built or building
+    }
+
+    this.passabilityGridBuilding = true;
+    const startTime = performance.now();
+    const { pathStepSize } = this.config;
+    const grid = new Set<string>();
+
+    // Grid bounds: -worldHalfSize to +worldHalfSize
+    const minCoord = -this.worldHalfSize;
+    const maxCoord = this.worldHalfSize;
+
+    // Snap bounds to grid
+    const gridMin = Math.floor(minCoord / pathStepSize) * pathStepSize;
+    const gridMax = Math.ceil(maxCoord / pathStepSize) * pathStepSize;
+
+    // Yield interval to prevent main thread blocking
+    const YIELD_INTERVAL = 1000; // Yield every 1000 grid points
+    let pointsProcessed = 0;
+
+    for (let x = gridMin; x <= gridMax; x += pathStepSize) {
+      for (let z = gridMin; z <= gridMax; z += pathStepSize) {
+        // Check if passable (above water threshold)
+        const height = this.terrainSystem?.getHeightAt(x, z) ?? WATER_THRESHOLD;
+        if (height >= WATER_THRESHOLD) {
+          grid.add(`${x},${z}`);
+        }
+
+        pointsProcessed++;
+        if (pointsProcessed % YIELD_INTERVAL === 0) {
+          // Yield to main thread
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+        }
+      }
+    }
+
+    this.passabilityGrid = grid;
+    this.passabilityGridBuilding = false;
+
+    const elapsed = performance.now() - startTime;
+    const gridSize = ((gridMax - gridMin) / pathStepSize + 1) ** 2;
+    const passableCount = grid.size;
+    const waterPercent = (
+      ((gridSize - passableCount) / gridSize) *
+      100
+    ).toFixed(1);
+
+    Logger.system(
+      "RoadNetworkSystem",
+      `Passability grid built: ${passableCount.toLocaleString()}/${gridSize.toLocaleString()} passable (${waterPercent}% water) in ${elapsed.toFixed(0)}ms`,
+    );
+  }
+
+  /**
+   * Check if a grid position is passable (not underwater).
+   * Uses pre-computed passability grid when available for O(1) lookup.
+   * Falls back to terrain query if grid not yet built.
    */
   private isPassable(x: number, z: number): boolean {
+    // Use pre-computed grid if available (O(1) lookup)
+    if (this.passabilityGrid) {
+      // Snap to grid coordinates
+      const { pathStepSize } = this.config;
+      const gridX = Math.round(x / pathStepSize) * pathStepSize;
+      const gridZ = Math.round(z / pathStepSize) * pathStepSize;
+      return this.passabilityGrid.has(`${gridX},${gridZ}`);
+    }
+
+    // Fallback to terrain query (expensive)
     if (!this.terrainSystem) return true;
     const height = this.terrainSystem.getHeightAt(x, z);
     return height >= WATER_THRESHOLD;
@@ -2454,6 +2540,43 @@ export class RoadNetworkSystem extends System {
   }
 
   /**
+   * Get all road segments in GPU-compatible format.
+   * Used by TerrainComputeContext for GPU-accelerated road influence.
+   */
+  getRoadSegmentsForGPU(): Array<{
+    startX: number;
+    startZ: number;
+    endX: number;
+    endZ: number;
+    width: number;
+  }> {
+    const segments: Array<{
+      startX: number;
+      startZ: number;
+      endX: number;
+      endZ: number;
+      width: number;
+    }> = [];
+
+    for (const road of this.roads) {
+      const width = road.width || this.config.roadWidth;
+      for (let i = 0; i < road.path.length - 1; i++) {
+        const p1 = road.path[i];
+        const p2 = road.path[i + 1];
+        segments.push({
+          startX: p1.x,
+          startZ: p1.z,
+          endX: p2.x,
+          endZ: p2.z,
+          width,
+        });
+      }
+    }
+
+    return segments;
+  }
+
+  /**
    * Generate a road influence texture for GPU grass masking.
    * The texture covers the world and stores road influence in the red channel.
    *
@@ -2509,7 +2632,7 @@ export class RoadNetworkSystem extends System {
 
     Logger.system(
       "RoadNetworkSystem",
-      `Generated road influence texture: ${textureSize}x${textureSize}, ${metersPerPixel.toFixed(1)}m/pixel`,
+      `Generated road influence texture (CPU): ${textureSize}x${textureSize}, ${metersPerPixel.toFixed(1)}m/pixel`,
     );
 
     return {
@@ -2520,7 +2643,180 @@ export class RoadNetworkSystem extends System {
     };
   }
 
+  // ============================================================================
+  // DEBUG VISUALIZATION
+  // ============================================================================
+
+  private debugGroup: THREE.Group | null = null;
+  private debugEnabled = false;
+  private static readonly DEBUG_HEIGHT = 5; // Meters above ground
+
+  /**
+   * Toggle debug road visualization on/off.
+   * When enabled, draws elevated lines showing road paths.
+   */
+  setDebugEnabled(enabled: boolean): void {
+    this.debugEnabled = enabled;
+    if (this.debugGroup) {
+      this.debugGroup.visible = enabled;
+    }
+    Logger.system(
+      "RoadNetworkSystem",
+      `Debug visualization ${enabled ? "enabled" : "disabled"}`,
+    );
+  }
+
+  isDebugEnabled(): boolean {
+    return this.debugEnabled;
+  }
+
+  /**
+   * Create debug visualization meshes for all roads.
+   * Call this after roads are generated to visualize road paths.
+   * @param scene - The THREE.Scene to add debug meshes to
+   * @param terrainSystem - Optional terrain system for height sampling
+   */
+  createDebugVisualization(
+    scene: THREE.Scene,
+    terrainSystem?: { getHeightAt(x: number, z: number): number },
+  ): THREE.Group {
+    // Clean up existing debug group
+    if (this.debugGroup) {
+      scene.remove(this.debugGroup);
+      this.debugGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+          obj.geometry?.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            obj.material?.dispose();
+          }
+        }
+      });
+    }
+
+    this.debugGroup = new THREE.Group();
+    this.debugGroup.name = "RoadDebugVisualization";
+    this.debugGroup.visible = this.debugEnabled;
+
+    if (this.roads.length === 0) {
+      scene.add(this.debugGroup);
+      return this.debugGroup;
+    }
+
+    // Materials for debug visualization
+    const roadLineMaterial = new THREE.LineBasicMaterial({
+      color: 0xff00ff, // Magenta for regular roads
+      linewidth: 2,
+    });
+    const mainRoadLineMaterial = new THREE.LineBasicMaterial({
+      color: 0x00ffff, // Cyan for main roads
+      linewidth: 3,
+    });
+    const vertexMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff00, // Yellow spheres at vertices
+    });
+    const groundRingMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffff00,
+      side: THREE.DoubleSide,
+    });
+
+    // Shared geometries
+    const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
+    const ringGeometry = new THREE.RingGeometry(1.5, 2, 16);
+    ringGeometry.rotateX(-Math.PI / 2); // Lay flat
+
+    let ringCount = 0;
+
+    for (const road of this.roads) {
+      if (road.path.length < 2) continue;
+
+      // Determine if this is a main road (town-to-town connections)
+      const isMainRoad =
+        road.fromType === "town" &&
+        road.toType === "town" &&
+        road.fromTownId &&
+        road.toTownId;
+
+      // Create elevated line showing road path
+      const linePoints: THREE.Vector3[] = road.path.map((point) => {
+        const groundY = terrainSystem?.getHeightAt(point.x, point.z) ?? 0;
+        return new THREE.Vector3(
+          point.x,
+          groundY + RoadNetworkSystem.DEBUG_HEIGHT,
+          point.z,
+        );
+      });
+
+      const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
+      const lineMaterial = isMainRoad ? mainRoadLineMaterial : roadLineMaterial;
+      const line = new THREE.Line(lineGeometry, lineMaterial);
+      line.name = `debug-road-line-${road.id}`;
+      this.debugGroup.add(line);
+
+      // Add spheres at path vertices
+      for (const point of linePoints) {
+        const sphere = new THREE.Mesh(sphereGeometry, vertexMaterial);
+        sphere.position.copy(point);
+        sphere.scale.setScalar(0.5);
+        this.debugGroup.add(sphere);
+      }
+
+      // Add ground-level rings every ~20m
+      for (let i = 0; i < road.path.length - 1; i++) {
+        const p1 = road.path[i];
+        const p2 = road.path[i + 1];
+        const dx = p2.x - p1.x;
+        const dz = p2.z - p1.z;
+        const segmentLength = Math.sqrt(dx * dx + dz * dz);
+        const steps = Math.max(1, Math.floor(segmentLength / 20));
+
+        for (let s = 0; s <= steps; s++) {
+          const t = s / steps;
+          const x = p1.x + dx * t;
+          const z = p1.z + dz * t;
+          const groundY = terrainSystem?.getHeightAt(x, z) ?? 0;
+
+          const ring = new THREE.Mesh(ringGeometry, groundRingMaterial);
+          ring.position.set(x, groundY + 0.2, z);
+          this.debugGroup.add(ring);
+          ringCount++;
+        }
+      }
+    }
+
+    scene.add(this.debugGroup);
+
+    Logger.system(
+      "RoadNetworkSystem",
+      `Created debug visualization: ${this.roads.length} roads, ${ringCount} ground markers`,
+    );
+
+    return this.debugGroup;
+  }
+
+  /**
+   * Remove debug visualization from scene.
+   */
+  removeDebugVisualization(): void {
+    if (this.debugGroup?.parent) {
+      this.debugGroup.parent.remove(this.debugGroup);
+      this.debugGroup.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.Line) {
+          obj.geometry?.dispose();
+          if (Array.isArray(obj.material)) {
+            obj.material.forEach((m) => m.dispose());
+          } else {
+            obj.material?.dispose();
+          }
+        }
+      });
+      this.debugGroup = null;
+    }
+  }
+
   destroy(): void {
+    this.removeDebugVisualization();
     this.roads = [];
     this.tileRoadCache.clear();
     this.entryStubCache.clear();

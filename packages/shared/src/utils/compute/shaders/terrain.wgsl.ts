@@ -24,6 +24,8 @@
  */
 export const ROAD_INFLUENCE_SHADER = /* wgsl */ `
 const EPS: f32 = 0.001;
+// Road blend width for smooth transition at edges (matches CPU ROAD_BLEND_WIDTH)
+const ROAD_BLEND_WIDTH: f32 = 2.0;
 
 struct Road {
   startX: f32,
@@ -75,6 +77,12 @@ fn distanceToLineSegment(px: f32, pz: f32, ax: f32, az: f32, bx: f32, bz: f32) -
   return sqrt(dx * dx + dz * dz);
 }
 
+// Smoothstep function for natural blending at road edges
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+  let t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
+  return t * t * (3.0 - 2.0 * t);
+}
+
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
   let vi = global_id.x;
@@ -82,32 +90,46 @@ fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
     return;
   }
   
-  // Get vertex position (local coordinates)
+  // Get vertex position in LOCAL tile coordinates
+  // IMPORTANT: Roads are already in local tile coordinates (0 to TILE_SIZE)
+  // so vertices must also be in local coordinates for correct distance calculation
   let base = vi * 2u;
   let localX = vertices[base];
   let localZ = vertices[base + 1u];
   
-  // World position
-  let worldX = localX + uniforms.tileOffsetX;
-  let worldZ = localZ + uniforms.tileOffsetZ;
-  
   var maxInfluence = 0.0;
   
-  // Check distance to each road segment
+  // Check distance to each road segment (both in LOCAL tile coordinates)
   for (var ri = 0u; ri < uniforms.roadCount; ri = ri + 1u) {
     let road = roads[ri];
     
+    // Compare LOCAL vertex coords against LOCAL road coords
     let dist = distanceToLineSegment(
-      worldX, worldZ,
+      localX, localZ,
       road.startX, road.startZ,
       road.endX, road.endZ
     );
     
     let halfWidth = road.width * 0.5;
-    if (dist <= halfWidth) {
-      let influence = 1.0 - dist / halfWidth;
-      maxInfluence = max(maxInfluence, influence);
+    let totalInfluenceWidth = halfWidth + ROAD_BLEND_WIDTH;
+    
+    // Skip if beyond influence range
+    if (dist >= totalInfluenceWidth) {
+      continue;
     }
+    
+    // Calculate influence with smoothstep blending (matches CPU behavior)
+    var influence: f32;
+    if (dist <= halfWidth) {
+      // Full influence at road center
+      influence = 1.0;
+    } else {
+      // Smoothstep blending at edges
+      let t = 1.0 - (dist - halfWidth) / ROAD_BLEND_WIDTH;
+      influence = t * t * (3.0 - 2.0 * t); // smoothstep
+    }
+    
+    maxInfluence = max(maxInfluence, influence);
   }
   
   influences[vi] = maxInfluence;

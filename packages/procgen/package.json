@@ -42,6 +42,14 @@
     "./vegetation": {
       "types": "./dist/vegetation/index.d.ts",
       "import": "./dist/vegetation/index.js"
+    },
+    "./items": {
+      "types": "./dist/items/index.d.ts",
+      "import": "./dist/items/index.js"
+    },
+    "./items/dock": {
+      "types": "./dist/items/dock/index.d.ts",
+      "import": "./dist/items/dock/index.js"
     }
   },
   "files": [

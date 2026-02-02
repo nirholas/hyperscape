@@ -376,55 +376,97 @@ export default defineConfig(({ mode }) => {
     },
 
     resolve: {
-      alias: {
-        "@": path.resolve(__dirname, "src"),
+      // IMPORTANT: Use array format for aliases to ensure correct matching order
+      // More specific paths (e.g., @hyperscape/procgen/items/dock) must be listed
+      // BEFORE less specific ones (e.g., @hyperscape/procgen) to prevent incorrect resolution
+      alias: [
+        { find: "@", replacement: path.resolve(__dirname, "src") },
         // Use client-only build of shared package to avoid Node.js module leakage
-        "@hyperscape/shared": path.resolve(
-          __dirname,
-          "../shared/build/framework.client.js",
-        ),
+        {
+          find: "@hyperscape/shared",
+          replacement: path.resolve(
+            __dirname,
+            "../shared/build/framework.client.js",
+          ),
+        },
         // Workspace package aliases (these are kept external in shared's build)
-        "@hyperscape/decimation": path.resolve(
-          __dirname,
-          "../decimation/dist/index.js",
-        ),
-        "@hyperscape/impostor": path.resolve(
-          __dirname,
-          "../impostors/dist/index.js",
-        ),
-        // Procgen package aliases for terrain, vegetation, etc.
-        "@hyperscape/procgen/terrain": path.resolve(
-          __dirname,
-          "../procgen/dist/terrain/index.js",
-        ),
-        "@hyperscape/procgen/vegetation": path.resolve(
-          __dirname,
-          "../procgen/dist/vegetation/index.js",
-        ),
-        "@hyperscape/procgen/building/town": path.resolve(
-          __dirname,
-          "../procgen/dist/building/town/index.js",
-        ),
-        "@hyperscape/procgen/building": path.resolve(
-          __dirname,
-          "../procgen/dist/building/index.js",
-        ),
-        "@hyperscape/procgen/rock": path.resolve(
-          __dirname,
-          "../procgen/dist/rock/index.js",
-        ),
-        "@hyperscape/procgen/plant": path.resolve(
-          __dirname,
-          "../procgen/dist/plant/index.js",
-        ),
-        "@hyperscape/procgen": path.resolve(
-          __dirname,
-          "../procgen/dist/index.js",
-        ),
+        {
+          find: "@hyperscape/decimation",
+          replacement: path.resolve(__dirname, "../decimation/dist/index.js"),
+        },
+        {
+          find: "@hyperscape/impostor",
+          replacement: path.resolve(__dirname, "../impostors/dist/index.js"),
+        },
+        // Procgen package aliases - MOST SPECIFIC PATHS FIRST
+        {
+          find: "@hyperscape/procgen/building/town",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/building/town/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/building",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/building/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/items/dock",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/items/dock/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/items",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/items/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/terrain",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/terrain/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/vegetation",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/vegetation/index.js",
+          ),
+        },
+        {
+          find: "@hyperscape/procgen/rock",
+          replacement: path.resolve(__dirname, "../procgen/dist/rock/index.js"),
+        },
+        {
+          find: "@hyperscape/procgen/plant",
+          replacement: path.resolve(
+            __dirname,
+            "../procgen/dist/plant/index.js",
+          ),
+        },
+        // Base procgen alias LAST
+        {
+          find: "@hyperscape/procgen",
+          replacement: path.resolve(__dirname, "../procgen/dist/index.js"),
+        },
         // Ensure buffer polyfill is used consistently - point to actual npm package
         // This prevents Vite from externalizing it as a Node built-in
-        buffer: path.resolve(__dirname, "../../node_modules/buffer/index.js"),
-      },
+        {
+          find: "buffer",
+          replacement: path.resolve(
+            __dirname,
+            "../../node_modules/buffer/index.js",
+          ),
+        },
+      ],
       dedupe: ["three", "buffer"],
     },
 

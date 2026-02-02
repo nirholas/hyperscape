@@ -585,11 +585,14 @@ function createTerrainMaterial(): THREE.Material & {
 }
 
 // Road influence calculation constants
-const ROAD_INFLUENCE_BLEND_WIDTH = 2; // meters of blending beyond road edge
+// Make roads more visible with wider influence zone
+const ROAD_INFLUENCE_BLEND_WIDTH = 3; // meters of blending beyond road edge (matches game engine)
+const ROAD_INFLUENCE_MINIMUM_WIDTH = 6; // minimum road width for visibility (wider than config default)
 
 // Debug: track which roads we've logged (by their ID to detect changes)
 let lastRoadDebugId: string | null = null;
 let loggedFirstInfluenceVertex = false;
+let debugVertexCount = 0;
 
 /**
  * Calculate road influence at a point based on distance to nearest road segment.
@@ -607,10 +610,31 @@ function calculateRoadInfluenceAtPoint(
   const currentRoadId = roads[0]?.id ?? null;
   if (currentRoadId !== lastRoadDebugId && roads.length > 0) {
     lastRoadDebugId = currentRoadId;
-    loggedFirstInfluenceVertex = false; // Reset so we log first influence vertex for new roads
+    loggedFirstInfluenceVertex = false;
+    debugVertexCount = 0;
     console.log("[RoadInfluence] ===== ROADS DATA =====");
     console.log("[RoadInfluence] Total roads:", roads.length);
     console.log("[RoadInfluence] World center offset:", worldCenterOffset);
+
+    // Calculate road coordinate bounds
+    let minRoadX = Infinity,
+      maxRoadX = -Infinity;
+    let minRoadZ = Infinity,
+      maxRoadZ = -Infinity;
+
+    for (const road of roads) {
+      for (const point of road.path) {
+        minRoadX = Math.min(minRoadX, point.x);
+        maxRoadX = Math.max(maxRoadX, point.x);
+        minRoadZ = Math.min(minRoadZ, point.z);
+        maxRoadZ = Math.max(maxRoadZ, point.z);
+      }
+    }
+
+    console.log("[RoadInfluence] Road coordinate bounds:", {
+      x: `${minRoadX.toFixed(0)} to ${maxRoadX.toFixed(0)}`,
+      z: `${minRoadZ.toFixed(0)} to ${maxRoadZ.toFixed(0)}`,
+    });
 
     // Log first road details
     const firstRoad = roads[0];
@@ -626,7 +650,7 @@ function calculateRoadInfluenceAtPoint(
     });
 
     // Log sample vertex position for comparison
-    console.log("[RoadInfluence] Sample vertex worldX/worldZ:", {
+    console.log("[RoadInfluence] First vertex worldX/worldZ:", {
       worldX: worldX.toFixed(1),
       worldZ: worldZ.toFixed(1),
     });
@@ -634,18 +658,24 @@ function calculateRoadInfluenceAtPoint(
   }
 
   let minDistance = Infinity;
-  let closestRoadWidth = 4; // default road width
+  let closestRoadWidth = ROAD_INFLUENCE_MINIMUM_WIDTH; // Use minimum width for visibility
 
   for (const road of roads) {
     if (road.path.length < 2) continue;
+
+    // Ensure road width is at least the minimum for visibility
+    const effectiveWidth = Math.max(
+      road.width || 4,
+      ROAD_INFLUENCE_MINIMUM_WIDTH,
+    );
 
     // Check each segment of the road
     for (let i = 0; i < road.path.length - 1; i++) {
       const p1 = road.path[i];
       const p2 = road.path[i + 1];
 
-      // Road paths are stored with world-center offset applied in rendering
-      // but the raw path is in terrain generator coordinates
+      // Road paths are in terrain generator coordinates (centered at 0,0)
+      // This matches the worldX/worldZ we receive (also in terrain generator coords)
       const x1 = p1.x;
       const z1 = p1.z;
       const x2 = p2.x;
@@ -655,12 +685,13 @@ function calculateRoadInfluenceAtPoint(
       const distance = distanceToLineSegment(worldX, worldZ, x1, z1, x2, z2);
       if (distance < minDistance) {
         minDistance = distance;
-        closestRoadWidth = road.width || 4;
+        closestRoadWidth = effectiveWidth;
       }
     }
   }
 
   // Calculate influence based on distance
+  // Use effective width to make roads more visible on terrain
   const halfWidth = closestRoadWidth / 2;
   const totalInfluenceWidth = halfWidth + ROAD_INFLUENCE_BLEND_WIDTH;
 
@@ -775,13 +806,20 @@ function generateTileGeometry(
     lakes: 7,
   };
 
+  // PlaneGeometry is centered at origin, so vertices range from -tileSize/2 to +tileSize/2
+  // We need to offset by half a tile to align with the tile grid system where:
+  // - Tile (0,0) covers world coords (0, 0) to (tileSize, tileSize)
+  // - In terrain generator coords: (-worldCenterOffset, -worldCenterOffset) to (-worldCenterOffset + tileSize, ...)
+  const halfTileSize = tileSize / 2;
+
   for (let i = 0; i < positions.count; i++) {
     const localX = positions.getX(i);
     const localZ = positions.getZ(i);
 
-    // World coordinates - offset so island center is at the middle of our tile grid
-    const worldX = localX + tileX * tileSize - worldCenterOffset;
-    const worldZ = localZ + tileZ * tileSize - worldCenterOffset;
+    // World coordinates in terrain generator space (centered at 0,0)
+    // Add halfTileSize to convert from centered geometry coords to tile-corner coords
+    const worldX = localX + halfTileSize + tileX * tileSize - worldCenterOffset;
+    const worldZ = localZ + halfTileSize + tileZ * tileSize - worldCenterOffset;
 
     // Query terrain
     const query = generator.queryPoint(worldX, worldZ);
@@ -849,7 +887,7 @@ function generateTileGeometry(
   const shouldLog =
     nonZeroCount > 0 || (tileX >= 0 && tileX <= 2 && tileZ >= 0 && tileZ <= 2);
   if (shouldLog) {
-    // Calculate the world coordinate range for this tile
+    // Calculate the world coordinate range for this tile (in terrain generator coords)
     const tileWorldMinX = tileX * tileSize - worldCenterOffset;
     const tileWorldMaxX = (tileX + 1) * tileSize - worldCenterOffset;
     const tileWorldMinZ = tileZ * tileSize - worldCenterOffset;
@@ -887,15 +925,6 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
   onFlyModeChange,
   roads: providedRoads,
 }) => {
-  // Debug: log when roads prop changes
-  const prevRoadsLengthRef = useRef<number | undefined>(undefined);
-  if (providedRoads?.length !== prevRoadsLengthRef.current) {
-    console.log(
-      `[TileBasedTerrain] Roads prop changed: ${prevRoadsLengthRef.current ?? "undefined"} -> ${providedRoads?.length ?? "undefined"}`,
-    );
-    prevRoadsLengthRef.current = providedRoads?.length;
-  }
-
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<AssetForgeRenderer | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -1054,8 +1083,17 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
 
       // Create terrain mesh
+      // NOTE: PlaneGeometry is centered at origin with vertices from -halfTileSize to +halfTileSize.
+      // To align the mesh properly with the tile grid, we offset the position by halfTileSize.
+      // This ensures that the terrain vertex at local (0,0) aligns with the tile center,
+      // which is where centered coordinates map to render coordinates.
       const mesh = new THREE.Mesh(geometry, terrainMaterial);
-      mesh.position.set(tileX * tileSize, 0, tileZ * tileSize);
+      const halfTileSizeOffset = tileSize / 2;
+      mesh.position.set(
+        tileX * tileSize + halfTileSizeOffset,
+        0,
+        tileZ * tileSize + halfTileSizeOffset,
+      );
       mesh.receiveShadow = true;
       mesh.castShadow = false;
       // Add tile metadata for raycasting
@@ -1842,7 +1880,8 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
             roadPoints,
           );
           const roadLineMat = new TownLineMat();
-          roadLineMat.color = new THREE.Color(0x8b7355);
+          // Match terrain dirt color for town internal roads
+          roadLineMat.color = new THREE.Color(0.45, 0.32, 0.18); // dirtBrown
           roadLineMat.linewidth = 2;
           const roadLine = new THREE.Line(roadGeometry, roadLineMat);
           townMarkers.add(roadLine);
@@ -1975,13 +2014,38 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
     // Generate roads using actual road network data
     if (providedRoads && providedRoads.length > 0) {
+      // DEBUG: Log road coordinate transformation details
+      console.log("[TileBasedTerrain] ===== ROAD COORDINATE DEBUG =====");
+      console.log(`[TileBasedTerrain] worldCenterOffset: ${worldCenterOffset}`);
+      console.log(`[TileBasedTerrain] worldSize: ${worldSize}`);
+
+      // Log first road's first few points in both coordinate systems
+      const firstRoad = providedRoads[0];
+      if (firstRoad && firstRoad.path.length > 0) {
+        console.log(
+          `[TileBasedTerrain] First road (${firstRoad.id}) sample points:`,
+        );
+        const sampleCount = Math.min(3, firstRoad.path.length);
+        for (let i = 0; i < sampleCount; i++) {
+          const p = firstRoad.path[i];
+          const renderX = p.x + worldCenterOffset;
+          const renderZ = p.z + worldCenterOffset;
+          const terrainY = generator.getHeightAt(p.x, p.z);
+          console.log(
+            `  Point ${i}: terrain-gen coords (${p.x.toFixed(1)}, ${p.z.toFixed(1)}) -> render coords (${renderX.toFixed(1)}, ${renderZ.toFixed(1)}), height: ${terrainY.toFixed(1)}`,
+          );
+        }
+      }
+      console.log("[TileBasedTerrain] ================================");
+
       // Use pre-generated road network with actual pathfinding data
+      // Road colors match terrain dirt colors: dirtBrown (0.45, 0.32, 0.18), dirtDark (0.32, 0.22, 0.12)
       const roadMaterial = new MeshBasicNodeMaterial();
-      roadMaterial.color = new THREE.Color(0x6b5344);
+      roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
       roadMaterial.side = THREE.DoubleSide;
 
       const mainRoadMaterial = new MeshBasicNodeMaterial();
-      mainRoadMaterial.color = new THREE.Color(0x5a4536); // Slightly darker for main roads
+      mainRoadMaterial.color = new THREE.Color(0.32, 0.22, 0.12); // Matches dirtDark - compacted main roads
       mainRoadMaterial.side = THREE.DoubleSide;
 
       for (const road of providedRoads) {
@@ -2035,6 +2099,100 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
       );
       setRoadCount(providedRoads.length);
 
+      // DEBUG: Create elevated road visualization 5m above ground
+      // This helps verify road coordinates align with terrain road influence
+      const DEBUG_ROAD_HEIGHT = 5;
+      const debugRoadMaterial = new THREE.LineBasicMaterial({
+        color: 0xff00ff, // Bright magenta for visibility
+        linewidth: 2,
+      });
+      const debugMainRoadMaterial = new THREE.LineBasicMaterial({
+        color: 0x00ffff, // Bright cyan for main roads
+        linewidth: 3,
+      });
+
+      for (const road of providedRoads) {
+        if (road.path.length < 2) continue;
+
+        // Create line geometry for debug visualization
+        const debugPoints: THREE.Vector3[] = road.path.map((point) => {
+          const terrainY = generator.getHeightAt(point.x, point.z);
+          return new THREE.Vector3(
+            point.x + worldCenterOffset,
+            terrainY + DEBUG_ROAD_HEIGHT,
+            point.z + worldCenterOffset,
+          );
+        });
+
+        const debugGeometry = new THREE.BufferGeometry().setFromPoints(
+          debugPoints,
+        );
+        const debugMaterial = road.isMainRoad
+          ? debugMainRoadMaterial
+          : debugRoadMaterial;
+        const debugLine = new THREE.Line(debugGeometry, debugMaterial);
+        debugLine.name = `debug-road-${road.id}`;
+        townMarkers.add(debugLine);
+
+        // Also add small spheres at road path vertices for point visibility
+        const sphereGeometry = new THREE.SphereGeometry(1, 8, 8);
+        const sphereMaterial = new THREE.MeshBasicMaterial({
+          color: road.isMainRoad ? 0x00ffff : 0xff00ff,
+        });
+        for (const point of debugPoints) {
+          const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+          sphere.position.copy(point);
+          townMarkers.add(sphere);
+        }
+      }
+
+      // Also add ground-level ring markers every 20m along road paths
+      // These show where road influence SHOULD be affecting terrain color
+      const ringGeometry = new THREE.RingGeometry(1.5, 2, 16);
+      ringGeometry.rotateX(-Math.PI / 2); // Lay flat on ground
+      const ringMaterial = new THREE.MeshBasicMaterial({
+        color: 0xffff00, // Yellow rings
+        side: THREE.DoubleSide,
+      });
+
+      let ringCount = 0;
+      for (const road of providedRoads) {
+        if (road.path.length < 2) continue;
+
+        // Sample points every ~20m along the path
+        for (let i = 0; i < road.path.length - 1; i++) {
+          const p1 = road.path[i];
+          const p2 = road.path[i + 1];
+          const dx = p2.x - p1.x;
+          const dz = p2.z - p1.z;
+          const segmentLength = Math.sqrt(dx * dx + dz * dz);
+          const steps = Math.max(1, Math.floor(segmentLength / 20));
+
+          for (let s = 0; s <= steps; s++) {
+            const t = s / steps;
+            const x = p1.x + dx * t;
+            const z = p1.z + dz * t;
+            const terrainY = generator.getHeightAt(x, z);
+
+            const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+            ring.position.set(
+              x + worldCenterOffset,
+              terrainY + 0.2, // Slightly above ground to avoid z-fighting
+              z + worldCenterOffset,
+            );
+            townMarkers.add(ring);
+            ringCount++;
+          }
+        }
+      }
+
+      console.log(
+        `[TileBasedTerrain] DEBUG: Created elevated road visualization (${DEBUG_ROAD_HEIGHT}m above ground) for ${providedRoads.length} roads`,
+      );
+      console.log(
+        `[TileBasedTerrain] DEBUG: Created ${ringCount} ground-level road markers (yellow rings)`,
+      );
+
       // Populate minimap roads data from actual road paths
       const minimapRoadData: Array<{ path: Array<{ x: number; z: number }> }> =
         providedRoads.map((road) => ({
@@ -2050,8 +2208,9 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
         "[TileBasedTerrain] No road network data provided, using simplified preview roads",
       );
 
+      // Match terrain dirt colors for roads
       const roadMaterial = new MeshBasicNodeMaterial();
-      roadMaterial.color = new THREE.Color(0x6b5344);
+      roadMaterial.color = new THREE.Color(0.42, 0.3, 0.16); // Matches dirtBrown
       roadMaterial.side = THREE.DoubleSide;
 
       // Create simple road connections between nearby towns
@@ -2257,6 +2416,19 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
 
           // Skip water areas
           if (height < waterThreshold) continue;
+
+          // Skip roads - check road influence at this point
+          // Roads should have no vegetation (trees, rocks)
+          if (providedRoads && providedRoads.length > 0) {
+            const roadInfluence = calculateRoadInfluenceAtPoint(
+              wx,
+              wz,
+              providedRoads,
+              worldCenterOffset,
+            );
+            // Skip placement if on road (influence > 0.1 threshold)
+            if (roadInfluence > 0.1) continue;
+          }
 
           // Get vegetation density for this biome
           const vegDensity =
@@ -2555,20 +2727,30 @@ export const TileBasedTerrain: React.FC<TileBasedTerrainProps> = ({
     }
   }, [terrainConfig, tileSize, tileResolution, unloadTile]);
 
-  // Regenerate tiles when roads change (for debugging road influence)
-  // This ensures road colors update when road network is regenerated
-  const prevRoadsRef = useRef<GeneratedRoad[] | undefined>(undefined);
+  // Regenerate tiles when roads change to update road influence on terrain
+  // This ensures road colors appear when roads are generated asynchronously
+  const prevRoadsLengthRef = useRef<number | undefined>(undefined);
+  const initialMountRef = useRef(true);
   useEffect(() => {
-    // Skip initial mount and when roads haven't actually changed
-    if (prevRoadsRef.current === providedRoads) return;
+    const currentRoadsLength = providedRoads?.length ?? 0;
+    const prevRoadsLength = prevRoadsLengthRef.current;
 
-    // Only regenerate if we had previous roads (not initial load)
-    const hadPreviousRoads = prevRoadsRef.current !== undefined;
-    prevRoadsRef.current = providedRoads;
+    // Skip on initial mount (tiles aren't loaded yet anyway)
+    if (initialMountRef.current) {
+      initialMountRef.current = false;
+      prevRoadsLengthRef.current = currentRoadsLength;
+      return;
+    }
 
-    if (hadPreviousRoads && tilesRef.current.size > 0) {
+    // Check if roads actually changed (by length - simple heuristic)
+    if (prevRoadsLength === currentRoadsLength) return;
+
+    prevRoadsLengthRef.current = currentRoadsLength;
+
+    // Regenerate tiles if any are loaded (to include road influence)
+    if (tilesRef.current.size > 0) {
       console.log(
-        `[TileBasedTerrain] Roads changed (${providedRoads?.length ?? 0} roads), regenerating tiles for road influence update`,
+        `[TileBasedTerrain] Roads changed: ${prevRoadsLength ?? 0} -> ${currentRoadsLength} roads, regenerating ${tilesRef.current.size} tiles for road influence update`,
       );
 
       // Clear existing tiles to force regeneration with new road data

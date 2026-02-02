@@ -168,11 +168,11 @@ export class ZoneVisualsSystem extends SystemBase {
   ): THREE.Group {
     const group = new THREE.Group();
 
-    // Create vertical wall strips around the perimeter
+    // Create vertical wall strips around the perimeter (very transparent to not block grass)
     const wallMaterial = new MeshBasicNodeMaterial();
     wallMaterial.color = new THREE.Color(color);
     wallMaterial.transparent = true;
-    wallMaterial.opacity = 0.6;
+    wallMaterial.opacity = 0.15;
     wallMaterial.side = THREE.DoubleSide;
     wallMaterial.depthWrite = false;
 

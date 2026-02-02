@@ -47,7 +47,7 @@ export function createGameGrassUniforms() {
     // Scale
     uBladeMinScale: uniform(0.3),
     uBladeMaxScale: uniform(0.8),
-    // Wind - noise-based natural movement (matches Revo Realms)
+    // Wind - noise-based natural movement
     uWindStrength: uniform(0.05),
     uWindSpeed: uniform(0.25),
     uWindScale: uniform(1.75),

@@ -74,6 +74,7 @@ import { RoadNetworkSystem } from "../systems/shared";
 import { VegetationSystem } from "../systems/shared";
 import { ProceduralGrassSystem } from "../systems/shared";
 import { ProceduralFlowerSystem } from "../systems/shared";
+import { ProceduralDocks } from "../systems/shared";
 import { BuildingRenderingSystem } from "../systems/shared";
 import { Physics } from "../systems/shared";
 
@@ -264,9 +265,16 @@ export function createClientWorld() {
   // ============================================================================
   // FLOWER SYSTEM
   // ============================================================================
-  // GPU Procedural flowers using SpriteNodeMaterial (from Revo Realms)
+  // GPU Procedural flowers using SpriteNodeMaterial
 
   world.register("flowers", ProceduralFlowerSystem);
+
+  // ============================================================================
+  // DOCK SYSTEM
+  // ============================================================================
+  // Procedural docks for ponds and lakes
+
+  world.register("docks", ProceduralDocks);
 
   // ============================================================================
   // THREE.JS SETUP

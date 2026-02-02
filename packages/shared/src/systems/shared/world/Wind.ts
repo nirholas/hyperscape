@@ -3,7 +3,6 @@
  * Used by: ProceduralGrassSystem, WaterSystem
  *
  * Exposes both traditional uniforms and TSL uniforms for GPU compute shaders.
- * The TSL uniforms (uDirection, uIntensity) match Revo Realms WindManager.
  */
 
 import THREE, { uniform } from "../../../extras/three/three";
@@ -17,7 +16,7 @@ export interface WindUniforms {
 }
 
 /**
- * TSL uniforms for GPU shaders - matches Revo Realms WindManager interface
+ * TSL uniforms for GPU shaders
  * These can be imported and used directly in TSL shader code
  */
 const tslUniforms = {

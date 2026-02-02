@@ -4,8 +4,6 @@
  * Provides bit-packing utilities for efficient GPU data storage
  * and common shader math operations.
  *
- * Ported from Revo Realms implementation.
- *
  * @module TSLUtils
  */
 

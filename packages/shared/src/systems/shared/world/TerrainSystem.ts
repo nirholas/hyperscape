@@ -1257,7 +1257,7 @@ export class TerrainSystem extends System {
     SLOPE_CHECK_DISTANCE: TERRAIN_CONSTANTS.SLOPE_CHECK_DISTANCE, // Distance to check for slope calculation
 
     // Features
-    ROAD_WIDTH: 4, // 4m wide roads
+    ROAD_WIDTH: 6, // 6m wide roads for better visibility
     RESOURCE_DENSITY: 0.15, // 15% chance per area for resources (increased for more resources)
     TREE_DENSITY: 0.25, // 25% chance for trees in forest biomes (increased for visibility)
     TOWN_RADIUS: 25, // Safe radius around towns
