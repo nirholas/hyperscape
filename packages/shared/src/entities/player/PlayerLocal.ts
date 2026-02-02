@@ -2078,14 +2078,10 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // Issue #322: Clear stored combat rotation when player starts moving
     // This ensures they face movement direction, not old combat direction
     if (isMoving) {
-      if (this._lastCombatRotation) {
-        this._lastCombatRotation = null;
-      }
+      this._lastCombatRotation = null;
       // Also clear server face target so player doesn't snap back to
       // facing old attacker when they stop moving
-      if (this._serverFaceTargetId) {
-        this._serverFaceTargetId = null;
-      }
+      this._serverFaceTargetId = null;
     }
 
     if (combatTarget && !isMoving) {
