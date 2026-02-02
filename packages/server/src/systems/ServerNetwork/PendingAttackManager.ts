@@ -224,6 +224,11 @@ export class PendingAttackManager {
             );
 
       if (inRange) {
+        // Stop remaining walk path — player has arrived at combat position.
+        // Without this, onTick() may process leftover path tiles and send
+        // a tileMovementEnd/idle before combat takes over.
+        this.tileMovementManager.stopPlayer(playerId);
+
         // In range! Start combat (use correct targetType for PvP/PvE)
         this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
           playerId,
@@ -315,6 +320,11 @@ export class PendingAttackManager {
           );
 
     if (inRange) {
+      // Stop remaining walk path — player has arrived at combat position.
+      // Without this, onTick() may process leftover path tiles and send
+      // a tileMovementEnd/idle before combat takes over.
+      this.tileMovementManager.stopPlayer(playerId);
+
       // In range! Start combat (use correct targetType for PvP/PvE)
       this.world.emit(EventType.COMBAT_ATTACK_REQUEST, {
         playerId,

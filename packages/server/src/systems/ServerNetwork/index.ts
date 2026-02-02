@@ -2006,11 +2006,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const targetId = payload.mobId || payload.targetId;
       if (!targetId) return;
 
-      // Cancel any existing combat and pending attacks when switching targets
+      // Cancel any existing combat, pending attacks, and queued actions when switching targets
+      // CRITICAL: Clear ActionQueue to prevent stale ground-click movement from overriding
+      // the attack path on the next tick (race condition when ground click + mob click
+      // arrive in the same 600ms tick window)
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get mob entity directly from world entities
       const mobEntity = this.world.entities.get(targetId) as {
@@ -2063,11 +2068,16 @@ export class ServerNetwork extends System implements NetworkWithSocket {
       const targetPlayerId = payload.targetPlayerId;
       if (!targetPlayerId) return;
 
-      // Cancel any existing combat and pending attacks when switching targets
+      // Cancel any existing combat, pending attacks, and queued actions when switching targets
+      // CRITICAL: Clear ActionQueue to prevent stale ground-click movement from overriding
+      // the attack path on the next tick (race condition when ground click + mob click
+      // arrive in the same 600ms tick window)
       this.world.emit(EventType.COMBAT_STOP_ATTACK, {
         attackerId: playerEntity.id,
       });
       this.pendingAttackManager.cancelPendingAttack(playerEntity.id);
+      this.actionQueue.cancelActions(playerEntity.id);
+      this.followManager.stopFollowing(playerEntity.id);
 
       // Get target player entity
       const targetPlayer = this.world.entities?.players?.get(
