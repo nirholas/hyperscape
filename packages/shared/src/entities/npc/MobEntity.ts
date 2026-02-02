@@ -151,6 +151,14 @@ if (typeof ProgressEvent === "undefined") {
   ).ProgressEvent = ProgressEventPolyfill;
 }
 
+/** Valid melee attack styles for XP validation (avoids granting wrong XP type) */
+const MELEE_STYLES = new Set([
+  "accurate",
+  "aggressive",
+  "defensive",
+  "controlled",
+]);
+
 export class MobEntity extends CombatantEntity {
   protected config: MobEntityConfig;
 
@@ -2421,14 +2429,6 @@ export class MobEntity extends CombatantEntity {
       const weapon = equipment?.weapon?.item;
       let attackStyle = "aggressive"; // Default
 
-      // Debug logging for XP assignment
-      console.log(
-        `[MobEntity] XP Debug - attacker: ${lastAttackerId}, weapon:`,
-        weapon
-          ? { weaponType: weapon.weaponType, attackType: weapon.attackType }
-          : "none",
-      );
-
       // Check if player has a spell selected (needed for magic detection)
       const playerEntity = this.world.getPlayer?.(lastAttackerId);
       const selectedSpell = (playerEntity?.data as { selectedSpell?: string })
@@ -2460,17 +2460,11 @@ export class MobEntity extends CombatantEntity {
           // Melee attack (or staff/wand without a spell) - use player's selected attack style
           // but only if it's a valid melee style; non-melee styles (longrange, autocast, rapid)
           // would grant wrong XP type
-          const meleeStyles = new Set([
-            "accurate",
-            "aggressive",
-            "defensive",
-            "controlled",
-          ]);
           const attackStyleData =
             playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
           const playerStyle = attackStyleData?.id;
           attackStyle =
-            playerStyle && meleeStyles.has(playerStyle)
+            playerStyle && MELEE_STYLES.has(playerStyle)
               ? playerStyle
               : "aggressive";
         }
@@ -2482,25 +2476,15 @@ export class MobEntity extends CombatantEntity {
           attackStyle = "magic";
         } else {
           // No spell, no weapon - use player's melee attack style
-          const meleeStyles = new Set([
-            "accurate",
-            "aggressive",
-            "defensive",
-            "controlled",
-          ]);
           const attackStyleData =
             playerSystem?.getPlayerAttackStyle?.(lastAttackerId);
           const playerStyle = attackStyleData?.id;
           attackStyle =
-            playerStyle && meleeStyles.has(playerStyle)
+            playerStyle && MELEE_STYLES.has(playerStyle)
               ? playerStyle
               : "aggressive";
         }
       }
-
-      console.log(
-        `[MobEntity] XP Debug - determined attackStyle: ${attackStyle}`,
-      );
 
       this.world.emit(EventType.COMBAT_KILL, {
         attackerId: lastAttackerId,
