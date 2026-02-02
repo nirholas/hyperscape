@@ -114,6 +114,13 @@ export default [
         NodeJS: "readonly",
         React: "readonly",
         SVGCircleElement: "readonly",
+        // requestIdleCallback API
+        requestIdleCallback: "readonly",
+        cancelIdleCallback: "readonly",
+        IdleDeadline: "readonly",
+        // WebGPU types
+        GPUBindGroup: "readonly",
+        GPUBindGroupEntry: "readonly",
 
         // Browser globals
         window: "readonly",
