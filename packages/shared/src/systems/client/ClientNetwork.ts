@@ -3768,6 +3768,11 @@ export class ClientNetwork extends SystemBase {
     this.world.emit(EventType.COMBAT_FACE_TARGET, data);
   };
 
+  onCombatClearFaceTarget = (data: { playerId: string }) => {
+    // Forward to local event system so PlayerLocal stops rotating toward target
+    this.world.emit(EventType.COMBAT_CLEAR_FACE_TARGET, data);
+  };
+
   onXpDrop = (data: {
     skill: string;
     xpGained: number;

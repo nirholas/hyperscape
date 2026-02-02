@@ -909,6 +909,11 @@ export class PlayerLocal extends Entity implements HotReloadable {
     // Handle combat target (using abbreviated key 'ct' for combatTarget)
     if ("ct" in data) {
       this.combat.combatTarget = data.ct as string | null;
+      // When combat target is cleared, also clear stored rotation so player
+      // doesn't keep facing the old combat direction or tracking the target
+      if (!data.ct) {
+        this._lastCombatRotation = null;
+      }
     }
 
     if ("e" in data && data.e !== undefined) {
@@ -2072,8 +2077,15 @@ export class PlayerLocal extends Entity implements HotReloadable {
 
     // Issue #322: Clear stored combat rotation when player starts moving
     // This ensures they face movement direction, not old combat direction
-    if (isMoving && this._lastCombatRotation) {
-      this._lastCombatRotation = null;
+    if (isMoving) {
+      if (this._lastCombatRotation) {
+        this._lastCombatRotation = null;
+      }
+      // Also clear server face target so player doesn't snap back to
+      // facing old attacker when they stop moving
+      if (this._serverFaceTargetId) {
+        this._serverFaceTargetId = null;
+      }
     }
 
     if (combatTarget && !isMoving) {
@@ -2412,6 +2424,8 @@ export class PlayerLocal extends Entity implements HotReloadable {
     if (event.playerId !== this.data.id) return;
 
     this._serverFaceTargetId = null;
+    this.combat.combatTarget = null;
+    this._lastCombatRotation = null;
   }
 
   /**

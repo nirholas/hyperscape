@@ -702,6 +702,16 @@ export class EventBridge {
         // Send to specific player only — they need to rotate their local character
         this.broadcast.sendToPlayer(data.playerId, "combatFaceTarget", data);
       });
+
+      // Forward combat clear face target so clients stop rotating toward dead/disengaged targets
+      this.world.on(EventType.COMBAT_CLEAR_FACE_TARGET, (payload: unknown) => {
+        const data = payload as { playerId: string };
+        this.broadcast.sendToPlayer(
+          data.playerId,
+          "combatClearFaceTarget",
+          data,
+        );
+      });
     } catch (_err) {
       console.error("[EventBridge] Error setting up combat events:", _err);
     }
