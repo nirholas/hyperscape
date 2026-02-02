@@ -2922,6 +2922,13 @@ export class MobEntity extends CombatantEntity {
             // Reset death terrain snap flag for next death (Issue #244)
             this._deathPositionTerrainSnapped = false;
 
+            // CRITICAL: Clear stale 'death' emote — without this,
+            // onEntityModified thinks mob is still dead on subsequent packets
+            // (it checks entity.data.e for 'death' in isDeadMob calculation)
+            // (also cleared in ClientNetwork.onEntityModified respawn path as defense in depth)
+            (this.data as Record<string, unknown>).e = undefined;
+            (this.data as Record<string, unknown>).emote = undefined;
+
             // CRITICAL: Snap position immediately to server's new spawn point
             // This prevents interpolation from starting at death location
             if ("p" in data && Array.isArray(data.p) && data.p.length === 3) {

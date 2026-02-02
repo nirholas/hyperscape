@@ -461,6 +461,9 @@ export class MobNPCSpawnerSystem extends SystemBase {
     tileZ: number;
     biome: string;
   }): void {
+    // Only spawn mobs on server - clients receive mobs via network sync
+    if (!this.world.isServer) return;
+
     const TILE_SIZE = this.terrainSystem.getTileSize();
     const tileBounds = {
       minX: tileData.tileX * TILE_SIZE,

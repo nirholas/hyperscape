@@ -1100,27 +1100,42 @@ export class TileInterpolator {
    * @param quaternion - Combat rotation from server [x, y, z, w]
    * @returns true if rotation was applied, false if entity has no state
    */
-  setCombatRotation(entityId: string, quaternion: number[]): boolean {
+  setCombatRotation(
+    entityId: string,
+    quaternion: number[],
+    entityPosition?: { x: number; y: number; z: number },
+  ): boolean {
     let state = this.entityStates.get(entityId);
 
     // Create minimal state if it doesn't exist (fixes first-attack rotation issue)
+    // CRITICAL: Use entity's current position to initialize visualPosition.
+    // Previously defaulted to (0,0,0) which caused mobs to teleport to world origin
+    // when the first entityModified packet with rotation arrived before any tile movement.
     if (!state) {
-      console.log(
-        `[TileInterpolator] Creating state for ${entityId} on first combat rotation`,
-      );
+      const initPos = entityPosition
+        ? new THREE.Vector3(
+            entityPosition.x,
+            entityPosition.y,
+            entityPosition.z,
+          )
+        : new THREE.Vector3();
+      const initTile = entityPosition
+        ? worldToTile(entityPosition.x, entityPosition.z)
+        : { x: 0, z: 0 };
+
       state = {
         fullPath: [],
         targetTileIndex: 0,
         destinationTile: null,
-        visualPosition: new THREE.Vector3(),
-        targetWorldPos: new THREE.Vector3(),
+        visualPosition: initPos,
+        targetWorldPos: initPos.clone(),
         quaternion: new THREE.Quaternion(),
         targetQuaternion: new THREE.Quaternion(),
         isRunning: false,
         isMoving: false,
         emote: "idle",
         inCombatRotation: false,
-        serverConfirmedTile: { x: 0, z: 0 },
+        serverConfirmedTile: initTile,
         lastServerTick: 0,
         catchUpMultiplier: 1.0,
         targetCatchUpMultiplier: 1.0,

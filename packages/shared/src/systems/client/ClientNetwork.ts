@@ -1217,6 +1217,51 @@ export class ClientNetwork extends SystemBase {
       // This ensures when mob respawns (changes.aiState='idle'), it's treated as alive
       // and position updates are applied correctly
       const newState = changes.aiState || entityData.aiState;
+
+      // Detect mob respawn: entity's current aiState is 'dead' but incoming state is NOT 'dead'.
+      // This needs special handling because entity.data.e may still be 'death' (stale emote
+      // from the death animation). Without this check, isDeadMob stays true after respawn,
+      // causing tile state to be cleared every packet and position updates to malfunction.
+      const currentAiState =
+        (entity.data as { aiState?: string })?.aiState ?? entityData.aiState;
+      const isMobRespawning =
+        currentAiState === "dead" &&
+        typeof changes.aiState === "string" &&
+        changes.aiState !== "dead";
+
+      if (isMobRespawning) {
+        // Clean slate: clear ALL movement/interpolation state for this entity
+        this.interpolationStates.delete(id);
+        if (this.tileInterpolator.hasState(id)) {
+          this.tileInterpolator.removeEntity(id);
+        }
+
+        // Clear stale 'death' emote so subsequent packets don't think mob is still dead
+        // (also cleared in MobEntity.modify() respawn block as defense in depth)
+        (entity.data as Record<string, unknown>).e = undefined;
+        (entity.data as Record<string, unknown>).emote = undefined;
+
+        // Apply ALL changes including position (p) — mob must snap to new spawn point
+        entity.modify(changes);
+
+        // Set up tile state at new spawn position for subsequent tile-based movement
+        const changesObj = changes as Record<string, unknown>;
+        if (hasP && hasQ) {
+          const pArr = changesObj.p as number[];
+          this.tileInterpolator.setCombatRotation(
+            id,
+            changesObj.q as number[],
+            { x: pArr[0], y: pArr[1], z: pArr[2] },
+          );
+        }
+
+        // Sync emote if present
+        if (typeof changes.e === "string") {
+          entity.data.emote = changes.e;
+        }
+        return;
+      }
+
       const newEmote =
         (changes as { e?: string }).e || (entityData as { e?: string }).e;
 
@@ -1279,9 +1324,11 @@ export class ClientNetwork extends SystemBase {
 
         // Route combat rotation to TileInterpolator (single source of truth)
         if (q && Array.isArray(q) && q.length === 4) {
+          // Pass entity position so state creation uses correct position (not origin)
           const applied = this.tileInterpolator.setCombatRotation(
             id,
             q as number[],
+            entity.position,
           );
           // If TileInterpolator didn't apply it (entity moving), that's intentional
           // Movement direction wins over combat rotation while moving
@@ -1303,8 +1350,26 @@ export class ClientNetwork extends SystemBase {
           Array.isArray(changesObj.q) &&
           (changesObj.q as number[]).length === 4
         ) {
-          this.tileInterpolator.setCombatRotation(id, changesObj.q as number[]);
-          const { p, q, ...restChanges } = changesObj;
+          // Pass position to setCombatRotation so new state uses correct position (not origin).
+          // Prefer server position from packet, fall back to entity's current position.
+          const pArr = changesObj.p as number[] | undefined;
+          const posForState =
+            pArr && pArr.length === 3
+              ? { x: pArr[0], y: pArr[1], z: pArr[2] }
+              : {
+                  x: entity.position.x,
+                  y: entity.position.y,
+                  z: entity.position.z,
+                };
+          this.tileInterpolator.setCombatRotation(
+            id,
+            changesObj.q as number[],
+            posForState,
+          );
+          // Strip q (TileInterpolator handles rotation) but KEEP p in modify.
+          // MobEntity.modify() needs p to snap position on respawn (death→idle transition).
+          // Base Entity.modify() just Object.assign's data — p doesn't auto-set position.
+          const { q, ...restChanges } = changesObj;
           entity.modify(restChanges);
         } else {
           entity.modify(changes);
