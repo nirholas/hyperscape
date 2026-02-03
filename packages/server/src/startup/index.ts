@@ -20,3 +20,9 @@ export { createHttpServer } from "./http-server.js";
 export { registerApiRoutes } from "./api-routes.js";
 export { registerWebSocket } from "./websocket.js";
 export { registerShutdownHandlers } from "./shutdown.js";
+export {
+  initializeServerSystems,
+  shutdownServerSystems,
+  getGlobalPriceFeed,
+  type ServerSystemsContext,
+} from "./systems.js";

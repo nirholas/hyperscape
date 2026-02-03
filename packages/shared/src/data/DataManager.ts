@@ -700,12 +700,9 @@ export class DataManager {
     const equipSlot = item.equipSlot ?? null;
     const attackType = item.attackType ?? null;
 
-    // Validate: weapons with equipSlot "weapon" should have equippedModelPath
-    if (equipSlot === "weapon" && !item.equippedModelPath) {
-      console.warn(
-        `[DataManager] Weapon "${item.id}" missing equippedModelPath - will use convention fallback`,
-      );
-    }
+    // Note: weapons without equippedModelPath will use convention fallback
+    // This is expected for items that don't have 3D models yet - no warning needed
+    // The EquipmentRenderer handles this gracefully
 
     // Derive requirements from tier if not explicitly set
     // This implements the tier-based requirements system

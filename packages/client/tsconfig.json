@@ -10,7 +10,9 @@
     "downlevelIteration": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@hyperscape/shared": ["../shared/src/index.ts"],
+      "@hyperscape/shared/*": ["../shared/src/*"]
     },
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,

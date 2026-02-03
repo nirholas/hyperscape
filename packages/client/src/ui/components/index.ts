@@ -173,3 +173,17 @@ export {
 export { NotificationContainer } from "./NotificationContainer";
 
 // Note: Animation utilities are exported from ../theme, not here to avoid duplicate exports
+
+// Web3 Components
+export {
+  WalletConnect,
+  type WalletConnectProps,
+  WalletBalance,
+  type WalletBalanceProps,
+  PaymentModal,
+  type PaymentModalProps,
+  TransactionHistory,
+  type TransactionHistoryProps,
+  NetworkSelector,
+  type NetworkSelectorProps,
+} from "./web3";

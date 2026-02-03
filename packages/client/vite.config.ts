@@ -368,27 +368,31 @@ export default defineConfig(({ mode }) => {
         );
       },
       fs: {
-        // Allow serving files from the shared package
-        allow: [".."],
+        // Allow serving files from the shared package and monorepo
+        allow: ["..", "../../packages/shared", "../../node_modules"],
       },
     },
 
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "src"),
-        // Use client-only build of shared package to avoid Node.js module leakage
+        // Use shared package client entry for development, built file for production
+        // In dev mode, reference client-only source to avoid server-only imports
         "@hyperscape/shared": path.resolve(
           __dirname,
-          "../shared/build/framework.client.js",
+          mode === "production"
+            ? "../shared/build/framework.client.js"
+            : "../shared/src/index.client.ts",
         ),
-        // Ensure buffer polyfill is used consistently
-        buffer: "buffer",
+        // Buffer polyfill for browser compatibility (required by Privy and crypto libs)
+        // Use the npm 'buffer' package which provides a browser-compatible Buffer
+        buffer: "buffer/",
       },
       dedupe: ["three", "buffer"],
     },
 
     optimizeDeps: {
-      include: ["three", "react", "react-dom", "buffer"],
+      include: ["three", "react", "react-dom", "buffer/"],
       exclude: [
         "@hyperscape/shared", // CRITICAL: Exclude from dep optimization so changes are detected
         "@playwright/test", // Exclude Playwright from optimization

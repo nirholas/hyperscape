@@ -104,6 +104,7 @@ export * from "./game/interaction-types";
 export * from "./game/animation-dialogue-types";
 export * from "./game/spawning-types";
 export * from "./systems/system-types";
+export * from "./market";
 
 // Re-export other types (using specific exports to avoid circular dependencies)
 export * from "./network/database";

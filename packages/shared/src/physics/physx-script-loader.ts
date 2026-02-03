@@ -33,7 +33,8 @@ export async function loadPhysXScript(
     const cdnUrl = windowWithCdn.__CDN_URL || "http://localhost:8080";
     // Use static version for cache key - only change this when PhysX binary is updated
     // This allows browser caching between page loads while still allowing forced refresh when needed
-    const scriptUrl = `${cdnUrl}/web/physx-js-webidl.js?v=1.0.0`;
+    // Note: In production CDN uses /web/, but game server serves from root /
+    const scriptUrl = `${cdnUrl}/physx-js-webidl.js?v=1.0.0`;
 
     script.src = scriptUrl;
     script.async = true;

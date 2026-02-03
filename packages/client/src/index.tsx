@@ -42,7 +42,8 @@ import type {
 
 // Buffer polyfill for Privy (required for crypto operations in browser)
 // Must be imported and assigned BEFORE any other imports that might use it
-import { Buffer } from "buffer";
+// Use 'buffer/' (with trailing slash) to explicitly reference the npm package
+import { Buffer } from "buffer/";
 (globalThis as typeof globalThis & { Buffer: typeof Buffer }).Buffer = Buffer;
 // Also ensure window.Buffer is available for libraries that check there
 if (typeof window !== "undefined") {

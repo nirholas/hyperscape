@@ -654,3 +654,51 @@ export { CircularSpawnArea } from "./utils/physics/CircularSpawnArea";
 
 // Export terrain system
 export { TerrainSystem } from "./systems/shared";
+
+// ============================================================================
+// Web3 / Blockchain Integration (Client-Safe)
+// ============================================================================
+
+// Export x402 payment protocol types and utilities
+export * from "./web3/x402";
+
+// Export Solana wallet and SPL token utilities
+export * from "./web3/solana";
+
+// Export BNB Chain (BSC) as namespace to avoid conflicts
+export * as bnb from "./web3/bnb";
+
+// Export unified wallet manager
+export { WalletManager, createWalletManager } from "./web3/WalletManager";
+
+// Export web3 types
+export {
+  type ChainType,
+  type NetworkId,
+  type NetworkMetadata,
+  type UnifiedWallet,
+  type UnifiedBalance,
+  type UnifiedTransaction,
+  type WalletManagerConfig,
+  type TokenBalance,
+  type TransactionType,
+  type TransactionStatus,
+  type SendTransactionParams,
+  type FeeEstimate,
+  type WalletEvent,
+  type WalletEventType,
+  type WalletEventListener,
+  NETWORK_METADATA,
+  NETWORK_CHAIN_TYPE,
+  WalletError,
+  WalletErrorCode,
+  isEvmNetwork,
+  isSolanaNetwork,
+  isTestnet,
+  getExplorerTxUrl,
+  getExplorerAddressUrl,
+  truncateAddress,
+  formatUsd,
+  formatTokenAmount,
+  generateWalletId,
+} from "./web3/types";

@@ -55,3 +55,8 @@ export { useDebounce, useDebouncedValue } from "./useDebounce";
 export { useEventListener, useKeyboardShortcut } from "./useEventListener";
 export { useSolanaWallet, isAndroid, isSolanaSaga } from "./useSolanaWallet";
 export { useThreeCleanup, useThreeMemoryMonitor } from "./useThreeCleanup";
+
+// Multi-chain wallet hooks
+export { useWallet, type UseWalletResult } from "./useWallet";
+export { useBalance, type UseBalanceResult } from "./useBalance";
+export { usePayment, type UsePaymentResult } from "./usePayment";

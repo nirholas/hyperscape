@@ -29,6 +29,8 @@ import { goalProvider } from "./providers/goalProvider.js";
 import { possibilitiesProvider } from "./providers/possibilitiesProvider.js";
 import { goalTemplatesProvider } from "./providers/goalTemplatesProvider.js";
 import { guardrailsProvider } from "./providers/guardrailsProvider.js";
+import { walletProvider } from "./providers/walletProvider.js";
+import { solanaWalletProvider } from "./providers/solanaWalletProvider.js";
 
 // Actions
 import {
@@ -54,6 +56,19 @@ import {
 } from "./actions/inventory.js";
 import { chatMessageAction } from "./actions/social.js";
 import { bankDepositAction, bankWithdrawAction } from "./actions/banking.js";
+import {
+  checkBalanceAction,
+  sendPaymentAction,
+  checkYieldAction,
+  payForServiceAction,
+} from "./actions/payments.js";
+import {
+  generateSolanaWalletAction,
+  checkSolanaBalanceAction,
+  sendSolAction,
+  generateVanityAddressAction,
+  requestSolanaAirdropAction,
+} from "./actions/solana.js";
 import {
   exploreAction,
   fleeAction,
@@ -181,6 +196,8 @@ export const hyperscapePlugin: Plugin = {
     possibilitiesProvider, // What actions are currently possible (LLM context)
     goalTemplatesProvider, // Structured goal templates for beginners
     guardrailsProvider, // Safety constraints and warnings
+    walletProvider, // x402 wallet address, balances, and yield info
+    solanaWalletProvider, // Solana wallet address, SOL balance, SPL tokens
   ],
 
   // Evaluators assess game state for autonomous decision making
@@ -243,6 +260,19 @@ export const hyperscapePlugin: Plugin = {
     // Banking
     bankDepositAction,
     bankWithdrawAction,
+
+    // x402 Payments
+    checkBalanceAction,
+    sendPaymentAction,
+    checkYieldAction,
+    payForServiceAction,
+
+    // Solana
+    generateSolanaWalletAction,
+    checkSolanaBalanceAction,
+    sendSolAction,
+    generateVanityAddressAction,
+    requestSolanaAirdropAction,
   ],
 
   // Event handlers for storing game events as memories

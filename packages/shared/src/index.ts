@@ -62,6 +62,47 @@ export * from "./runtime";
 // Export core classes
 export * from "./core";
 
+// Export x402 payment protocol types and utilities
+export * from "./web3/x402";
+
+// Export Solana wallet and SPL token utilities
+export * from "./web3/solana";
+
+// Export BNB Chain (BSC) as namespace to avoid conflicts
+export * as bnb from "./web3/bnb";
+
+// Export unified wallet manager
+export { WalletManager, createWalletManager } from "./web3/WalletManager";
+
+// Export web3 types (avoiding conflicts by using explicit exports)
+export {
+  type ChainType,
+  type NetworkId,
+  type NetworkMetadata,
+  type UnifiedWallet,
+  type UnifiedBalance,
+  type UnifiedTransaction,
+  type WalletManagerConfig,
+  type SendTransactionParams,
+  type FeeEstimate,
+  type WalletEvent,
+  type WalletEventType,
+  type WalletEventListener,
+  NETWORK_METADATA,
+  NETWORK_CHAIN_TYPE,
+  WalletError,
+  WalletErrorCode,
+  isEvmNetwork,
+  isSolanaNetwork,
+  isTestnet,
+  getExplorerTxUrl as getWalletExplorerTxUrl,
+  getExplorerAddressUrl as getWalletExplorerAddressUrl,
+  truncateAddress,
+  formatUsd,
+  formatTokenAmount,
+  generateWalletId,
+} from "./web3/types";
+
 // Export entity classes
 export { PlayerEntity } from "./entities/player/PlayerEntity";
 export { PlayerLocal } from "./entities/player/PlayerLocal";

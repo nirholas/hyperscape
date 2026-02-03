@@ -92,6 +92,7 @@ export async function createHttpServer(
     /^https:\/\/.+\.warpcast\.com$/,
     /^https:\/\/.+\.privy\.io$/,
     /^https:\/\/.+\.up\.railway\.app$/,
+    /^https:\/\/.+\.app\.github\.dev$/, // GitHub Codespaces forwarded ports
   ];
 
   // Add custom domain from env if set
@@ -354,6 +355,72 @@ async function registerStaticFiles(
       },
     });
     console.log(`[HTTP] ✅ Registered /icons/ → ${config.iconsDir}`);
+  }
+
+  // Register /web/ route for PhysX WASM files
+  // The compiled physx-js-webidl.js expects to find the WASM at /web/physx-js-webidl.wasm
+  const publicDir = path.join(config.__dirname, "public");
+  if (await fs.pathExists(publicDir)) {
+    await fastify.register(statics, {
+      root: publicDir,
+      prefix: "/web/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        // WASM files need special handling
+        if (filePath.endsWith(".wasm")) {
+          res.setHeader("Content-Type", "application/wasm");
+        }
+        res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        res.setHeader("Access-Control-Allow-Origin", "*");
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /web/ → ${publicDir} (for PhysX WASM)`);
+  }
+
+  // Register /world/ route for environment assets (sky textures, base environment model)
+  const worldAssetsDir = path.join(config.__dirname, "world/assets/world");
+  if (await fs.pathExists(worldAssetsDir)) {
+    await fastify.register(statics, {
+      root: worldAssetsDir,
+      prefix: "/world/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(
+      `[HTTP] ✅ Registered /world/ → ${worldAssetsDir} (environment assets)`,
+    );
+  }
+
+  // Register /trees/ route for vegetation models
+  const treesDir = path.join(config.__dirname, "world/assets/trees");
+  if (await fs.pathExists(treesDir)) {
+    await fastify.register(statics, {
+      root: treesDir,
+      prefix: "/trees/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(
+      `[HTTP] ✅ Registered /trees/ → ${treesDir} (vegetation models)`,
+    );
+  }
+
+  // Register /audio/ route for music and sound effects
+  const audioDir = path.join(config.__dirname, "world/assets/audio");
+  if (await fs.pathExists(audioDir)) {
+    await fastify.register(statics, {
+      root: audioDir,
+      prefix: "/audio/",
+      decorateReply: false,
+      setHeaders: (res, filePath) => {
+        setAssetHeaders(res, filePath);
+      },
+    });
+    console.log(`[HTTP] ✅ Registered /audio/ → ${audioDir} (music and SFX)`);
   }
 
   // Log available assets
