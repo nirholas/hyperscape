@@ -34,6 +34,11 @@
       "outputs": ["dist/**", "build/**"],
       "cache": true
     },
+    "plugin-hyperscape#build": {
+      "dependsOn": ["^build", "shared#build"],
+      "outputs": ["dist/**"],
+      "cache": true
+    },
     "app#build": {
       "dependsOn": ["client#build"],
       "outputs": ["src-tauri/target/release/**"],

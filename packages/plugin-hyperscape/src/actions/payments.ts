@@ -492,7 +492,10 @@ async function getWalletBalance(
       chainId: chain.id,
     };
   } catch (error) {
-    logger.error("[x402] Failed to fetch balance:", error);
+    logger.error(
+      "[x402] Failed to fetch balance:",
+      error instanceof Error ? error.message : String(error),
+    );
     throw new Error(
       `Failed to fetch wallet balance: ${error instanceof Error ? error.message : "Unknown error"}`,
     );
@@ -564,6 +567,8 @@ async function executePayment(
       );
 
       txHash = await walletClient.writeContract({
+        chain: walletClient.chain,
+        account,
         address: tokenAddress,
         abi: ERC20_ABI,
         functionName: "transfer",
@@ -576,6 +581,8 @@ async function executePayment(
       );
 
       txHash = await walletClient.sendTransaction({
+        chain: walletClient.chain,
+        account,
         to: request.recipient as Address,
         value: amountWei,
       });
@@ -607,7 +614,10 @@ async function executePayment(
       gasUsed: receipt.gasUsed,
     };
   } catch (error) {
-    logger.error("[x402] Payment failed:", error);
+    logger.error(
+      "[x402] Payment failed:",
+      error instanceof Error ? error.message : String(error),
+    );
     return {
       success: false,
       error:
@@ -666,7 +676,7 @@ function parsePaymentParams(
   // Extract recipient (0x address)
   const addressMatch = content.match(/0x[a-fA-F0-9]{40}/);
   if (addressMatch) {
-    params.recipient = addressMatch[0];
+    params.recipient = addressMatch[0] as `0x${string}`;
   }
 
   // Extract memo (text after "memo:", "note:", or "for:")
@@ -766,7 +776,7 @@ export const checkBalanceAction: Action = {
       return {
         success: true,
         text,
-        data: balance,
+        data: { ...balance } as Record<string, unknown>,
       };
     } catch (error) {
       const errorMessage =
@@ -891,7 +901,7 @@ export const sendPaymentAction: Action = {
       return {
         success: true,
         text,
-        data: result,
+        data: { ...result } as Record<string, unknown>,
       };
     } catch (error) {
       const errorMessage =
@@ -1142,7 +1152,7 @@ Service access granted. You can now use the requested feature.`;
       return {
         success: true,
         text,
-        data: result,
+        data: { ...result } as Record<string, unknown>,
       };
     } catch (error) {
       const errorMessage =

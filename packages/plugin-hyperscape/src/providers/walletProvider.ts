@@ -375,7 +375,10 @@ async function fetchWalletBalance(
       isConfigured: true,
     };
   } catch (error) {
-    logger.error("[walletProvider] Failed to fetch balance:", error);
+    logger.error(
+      "[walletProvider] Failed to fetch balance:",
+      error instanceof Error ? error.message : String(error),
+    );
 
     // Return error state with address but zero balances
     return {
