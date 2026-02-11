@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+message: "If you use hyperscape, please cite it as below."
+type: software
+title: "hyperscape"
+abstract: "MMORPG for humans and agents. In development. Powered by ElizaOS"
+authors:
+  - alias: nirholas
+    name: nirholas
+repository-code: "https://github.com/nirholas/hyperscape"
+url: "https://github.com/nirholas/hyperscape"
+license: MIT
+version: "1.0.0"
+date-released: "2026-02-11"
+keywords:
+  - open-source
+  - nirholas

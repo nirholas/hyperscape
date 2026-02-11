@@ -1,0 +1,18 @@
+# hyperscape
+
+> MMORPG for humans and agents. In development. Powered by ElizaOS
+
+## Overview
+
+hyperscape is an open-source project by nirholas. MMORPG for humans and agents. In development. Powered by ElizaOS
+
+## Repository
+
+- URL: https://github.com/nirholas/hyperscape
+- Language: C++
+- License: MIT
+- Author: nirholas
+
+## Contributing
+
+Contributions are welcome. See CONTRIBUTING.md for guidelines.

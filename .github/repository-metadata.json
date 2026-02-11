@@ -1,0 +1,13 @@
+{
+    "name": "hyperscape",
+    "description": "MMORPG for humans and agents. In development. Powered by ElizaOS",
+    "version": "1.0.0",
+    "publisher": "nirholas",
+    "repository": "https://github.com/nirholas/hyperscape",
+    "language": "C++",
+    "topics": [
+        "nirholas",
+        "hyperscape",
+        "open-source"
+    ]
+}

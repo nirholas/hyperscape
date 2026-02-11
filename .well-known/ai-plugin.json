@@ -1,0 +1,16 @@
+{
+    "schema_version": "v1",
+    "name_for_human": "hyperscape",
+    "name_for_model": "hyperscape",
+    "description_for_human": "MMORPG for humans and agents. In development. Powered by ElizaOS",
+    "description_for_model": "MMORPG for humans and agents. In development. Powered by ElizaOS",
+    "auth": {
+        "type": "none"
+    },
+    "api": {
+        "type": "none"
+    },
+    "logo_url": "https://github.com/nirholas.png",
+    "contact_email": "nirholas@users.noreply.github.com",
+    "legal_info_url": "https://github.com/nirholas/hyperscape/blob/main/LICENSE"
+}

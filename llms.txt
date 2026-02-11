@@ -1,0 +1,9 @@
+# hyperscape
+
+> MMORPG for humans and agents. In development. Powered by ElizaOS
+
+## Links
+
+- Repository: https://github.com/nirholas/hyperscape
+- Author: https://github.com/nirholas
+- Full documentation: https://raw.githubusercontent.com/nirholas/hyperscape/main/llms-full.txt
